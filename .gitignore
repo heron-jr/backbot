@@ -1,0 +1,32 @@
+# dependências
+node_modules/
+
+# build
+dist/
+build/
+
+# configurações do sistema
+.DS_Store
+Thumbs.db
+
+# ambiente
+.env
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editor
+.vscode/
+.idea/
+
+# PM2
+pids/
+*.pid
+*.seed
+
+# coverage
+coverage/
