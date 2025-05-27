@@ -1,0 +1,26 @@
+{
+  "name": "backbot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon app.js",
+    "prod": "node app.js"
+  },
+  "keywords": [],
+  "author": "@heron_jr",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "axios": "^1.8.4",
+    "bs58": "^6.0.0",
+    "cron": "^4.3.0",
+    "dotenv": "^16.5.0",
+    "nodemon": "^3.1.9",
+    "sqlite3": "^5.1.7",
+    "technicalindicators": "^3.1.0",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.1"
+  }
+}
