@@ -96,6 +96,7 @@ class Order {
   */
 
   async executeOrder(body) {
+
     const timestamp = Date.now();
     const headers = auth({
       instruction: 'orderExecute',
@@ -110,7 +111,7 @@ class Order {
       console.log('✅ executeOrder Success!', data.symbol);
       return data;
     } catch (err) {
-      console.error('❌ executeOrder - Error!',body, err.response?.data || err.message);
+      console.error('❌ executeOrder - Error!', err.response?.data || err.message);
       return null;
     }
   }

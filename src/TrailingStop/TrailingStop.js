@@ -1,223 +1,93 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
-import Order from '../Backpack/Authenticated/Order.js';
 import OrderController from '../Controllers/OrderController.js';
-import AccountController from '../Controllers/AccountController.js';
-import Markets from '../Backpack/Public/Markets.js';
-import Utils from '../utils/Utils.js';
+import Markets from '../Backpack/Public/Markets.js'
+import {analyzeTrade, calculateIndicators} from '../Decision/Indicators.js'
+import Account from '../Backpack/Authenticated/Account.js';
+import AccountController from '../Controllers/AccountController.js'
+import Order from '../Backpack/Authenticated/Order.js';
 
 class TrailingStop {
 
+  calculateStop(data, buffer = 0.1) {
+  const markPrice = parseFloat(data.markPrice);
+  const lowerBands = data.vwap.lowerBands;
 
-  processPosition(position, makerFee) {
-    const entryPrice = parseFloat(position.entryPrice);
-    const markPrice = parseFloat(position.markPrice);
-    const quantity = Math.abs(parseFloat(position.netQuantity));
-    const netCost = Math.abs(parseFloat(position.netCost));
-    const direction = position.netQuantity > 0 ? 1 : -1;
-    const isLong = position.netQuantity > 0;
-
-    const grossProfit = (markPrice - entryPrice) * direction * quantity;
-    const openFee = entryPrice * quantity * makerFee;
-    const closeFee = Math.abs(grossProfit) * makerFee;
-    const fee = openFee + closeFee;
-
-    const netProfit = grossProfit - fee;
-    const netProfitPercent = (netProfit / netCost) * 100;
-
-    return {
-      userId: position.userId,
-      positionId: position.positionId,
-      symbol: position.symbol,
-      profit: netProfit,
-      profitPercentage: netProfitPercent,
-      breakEvenPrice: position.breakEvenPrice,
-      markPrice,
-      inProfit: netProfit > 0,
-      quantity,
-      volume: quantity * markPrice,
-      isLong,
-    };
+  if (!lowerBands || lowerBands.length === 0) {
+    throw new Error("VWAP lower bands not available.");
   }
 
-  async processOrders(isLong, symbol) {
-    const orders = await Order.getOpenOrders(symbol);
-    const sortedOrders = isLong
-      ? orders.sort((a, b) => parseFloat(a.triggerPrice) - parseFloat(b.triggerPrice))
-      : orders.sort((a, b) => parseFloat(b.triggerPrice) - parseFloat(a.triggerPrice));
-    return sortedOrders.map((el) => ({
-      id: el.id,
-      minutes: Utils.minutesAgo(el.createdAt),
-      triggerPrice: parseFloat(el.triggerPrice),
-    }));
+  // Use the last lower band as the stop reference
+  const baseStop = lowerBands[lowerBands.length - 1];
+
+  // Subtract a safety buffer
+  let stop = baseStop - buffer;
+
+  // Ensure the stop is below the mark price
+  if (stop >= markPrice) {
+    stop = markPrice - buffer;
   }
 
- updateStopsAuto(stops, config) {
-  const marketPrice = Number(config.marketPrice);
-  const breakEvenPrice = Number(config.breakEvenPrice ?? marketPrice);
-  const side = config.side;
-  const candles = config.candles;
-
-  const isLong = side === 'long';
-  const format = (value) => Number(value.toFixed(8));
-  const ensureMinPrice = (value) => Math.max(0.00000001, value);
-
-  // === 1. Detectar últimos topo/fundo local ===
-  const highs = candles.map(c => parseFloat(c.high));
-  const lows = candles.map(c => parseFloat(c.low));
-
-  const recentTop = Math.max(...highs.slice(-5));
-  const recentBottom = Math.min(...lows.slice(-5));
-
-  const trailingGap = isLong
-    ? marketPrice - recentBottom
-    : recentTop - marketPrice;
-
-  const tpDistance = trailingGap * 1.5;
-  const step = trailingGap * 0.1;
-
-  const updates = [];
-
-  // === 2. Se não tem stops, cria stop + TP curtos ===
-  if (!stops || stops.length === 0) {
-    const stopPrice = ensureMinPrice(isLong
-      ? Math.max(breakEvenPrice, marketPrice - trailingGap)
-      : Math.min(breakEvenPrice, marketPrice + trailingGap)
-    );
-
-    const tpPrice = ensureMinPrice(isLong
-      ? marketPrice + tpDistance
-      : marketPrice - tpDistance
-    );
-
-    return [
-      { id: 'auto-stop', triggerPrice: format(stopPrice) },
-      { id: 'auto-take-profit', triggerPrice: format(tpPrice) }
-    ];
+  return parseFloat(stop.toFixed(8));
   }
 
-  // === 3. Se tem 1 stop, adiciona o complementar ===
-  if (stops.length === 1) {
-    const only = stops[0];
-    const isStop = isLong
-      ? only.triggerPrice < marketPrice
-      : only.triggerPrice > marketPrice;
-
-    const rawTrigger = isStop
-      ? (isLong ? marketPrice + tpDistance : marketPrice - tpDistance)
-      : (isLong
-        ? Math.max(breakEvenPrice, marketPrice - trailingGap)
-        : Math.min(breakEvenPrice, marketPrice + trailingGap));
-
-    const triggerPrice = ensureMinPrice(rawTrigger);
-    return [{
-      id: isStop ? 'auto-take-profit' : 'auto-stop',
-      triggerPrice: format(triggerPrice)
-    }];
+  async calculateNewStopPrice(position) {
+      const candles = await Markets.getKLines(position.symbol, process.env.TIME, 30)
+      const analyze = calculateIndicators(candles) 
+      analyze.markPrice = position.markPrice
+      return this.calculateStop(analyze, 0.05)
   }
-
-  // === 4. STOP + TP já definidos ===
-  const sorted = [...stops].sort((a, b) => a.triggerPrice - b.triggerPrice);
-  const stop = isLong ? sorted[0] : sorted[1];
-  const tp = isLong ? sorted[1] : sorted[0];
-
-  // Novo stop baseado no mercado
-  let desiredStop = isLong
-    ? Math.max(breakEvenPrice, marketPrice - trailingGap)
-    : Math.min(breakEvenPrice, marketPrice + trailingGap);
-
-  desiredStop = ensureMinPrice(desiredStop);
-
-  const shouldUpdateStop = isLong
-    ? desiredStop > stop.triggerPrice && (desiredStop - stop.triggerPrice) >= step
-    : desiredStop < stop.triggerPrice && (stop.triggerPrice - desiredStop) >= step;
-
-  if (shouldUpdateStop) {
-    updates.push({
-      id: stop.id,
-      triggerPrice: format(desiredStop)
-    });
-  }
-
-  // Novo TP
-  const desiredTP = ensureMinPrice(isLong
-    ? marketPrice + tpDistance
-    : marketPrice - tpDistance);
-
-  const shouldUpdateTP = isLong
-    ? desiredTP > tp.triggerPrice && (desiredTP - tp.triggerPrice) >= step
-    : desiredTP < tp.triggerPrice && (tp.triggerPrice - desiredTP) >= step;
-
-  if (shouldUpdateTP) {
-    updates.push({
-      id: tp.id,
-      triggerPrice: format(desiredTP)
-    });
-  }
-
-  return updates;
-}
-
 
   async stopLoss() {
-    const { minVolumeDollar, fee } = await AccountController.get();
-
     try {
       const positions = await Futures.getOpenPositions();
-
+      const Account = await AccountController.get()
       for (const position of positions) {
-        const row = this.processPosition(position, fee);
-        const orders = await this.processOrders(row.isLong, position.symbol);
 
-        const closeDueToLowVolume = row.volume <= (minVolumeDollar * 0.1);
-        const closeDueToStopBreach = false;
+        const market = Account.markets.find((el) => el.symbol === position.symbol)
+        let fee = Number(position.netCost * Account.fee) > 0 ? Number(position.netCost * Account.fee) : Number(position.netCost * Account.fee) * -1
+        fee = (fee * 2)
 
-        if (closeDueToStopBreach || closeDueToLowVolume) {
-          await OrderController.forceClose(position)
+        const MINIMAL_PNL_STOP = Number(process.env.MINIMAL_PNL_STOP)
+        const pnl = (Number(position.pnlRealized) + Number(position.pnlUnrealized)) - fee
+
+        const isLong = (Number(position.netCost) > 0)
+
+        const orders = await OrderController.getRecentOpenOrders(position.symbol);
+        const ordened = isLong ? orders.sort((a,b) => Number(a.triggerPrice) - Number(b.triggerPrice))
+                                : orders.sort((a,b) => Number(b.triggerPrice) - Number(a.triggerPrice))
+
+        console.log(position.symbol.replace("_USDC_PERP", ""), `${pnl > 0 ? "🗿" :"😞"}`, Number(pnl.toFixed(2)));
+
+        if (ordened.length === 0) {
+            const stop = await this.calculateNewStopPrice(position)
+            await OrderController.createStopTS({symbol:position.symbol, price:stop, isLong, quantity: position.netExposureQuantity})
         } else {
-
-          console.log("row.br eakEvenPrice", row.breakEvenPrice)
-
-          const candles = await Markets.getKLines(position.symbol, "5m", 9)
-
-          const newStops = this.updateStopsAuto(orders, {
-            marketPrice: row.markPrice,
-            breakEvenPrice: row.breakEvenPrice,
-            side: row.isLong ? 'long' : 'short',
-            candles: candles
-          })
-
-          for (const stop of newStops) {
-
-            console.log("stop", stop)
-            if (['auto-stop', 'auto-take-profit'].includes(stop.id)) {
-              await OrderController.createStopTS({
-                symbol: row.symbol,
-                price: stop.triggerPrice,
-                isLong: row.isLong,
-                quantity: row.quantity
-              });
-            } else {
-              const cancelled = await OrderController.cancelStopTS(row.symbol, stop.id);
-              if (cancelled) {
-                await OrderController.createStopTS({
-                symbol: row.symbol,
-                price: stop.triggerPrice,
-                isLong: row.isLong,
-                quantity: row.quantity
-              });
+          const markPrice = Number(position.markPrice) 
+          const stops = ordened.filter((el) => isLong ? el.price < markPrice : el.price > markPrice)
+          if(stops.length === 0) {
+            const stop = await this.calculateNewStopPrice(position)
+            await OrderController.createStopTS({symbol:position.symbol, price:stop, isLong, quantity: position.netExposureQuantity})
+          } else { 
+            if(pnl >= MINIMAL_PNL_STOP){
+              const current = ordened[0]
+              const stop = Number(isLong ? position.markPrice - market.tickSize : position.markPrice + market.tickSize)
+              const updateBetter = isLong ? stop > current.price : stop < current.price
+              if(updateBetter) {
+                console.log("💸 Adding stop loss with profit", stop, "saving ~", MINIMAL_PNL_STOP)
+                const newStop = await OrderController.createStopTS({symbol:position.symbol, price:stop, isLong, quantity: position.netExposureQuantity})
+                if(newStop) {
+                  await Order.cancelOpenOrder(position.symbol, current.id)
+                }
               }
-            }
+            } 
           }
-
-          if(newStops.length > 0){
-            console.log("newStops discored", newStops, row.symbol, "price", row.markPrice)
-          }
-         
         }
+
       }
+
+
     } catch (error) {
-      console.log(error)
-      console.error('stopLoss - Error:', error.response?.data || error.message);
+      console.error('stopLoss - Error:',error);
       return null;
     }
   }

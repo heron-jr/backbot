@@ -18,6 +18,7 @@
     "cron": "^4.3.0",
     "dotenv": "^16.5.0",
     "nodemon": "^3.1.9",
+    "openai": "^5.3.0",
     "sqlite3": "^5.1.7",
     "technicalindicators": "^3.1.0",
     "tweetnacl": "^1.0.3",

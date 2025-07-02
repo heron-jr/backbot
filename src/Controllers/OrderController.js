@@ -25,74 +25,54 @@ class OrderController {
     return await Order.executeOrder(body);
   }
 
- async openOrder({ entry, stop, target, action, market, volume }) {
-  const isLong = action === "LONG";
-  const side = isLong ? "Bid" : "Ask";
+  async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price }) {
+    
+    try {
+    
+    const isLong = action === "long";
+    const side = isLong ? "Bid" : "Ask";
 
-  const Account = await AccountController.get();
-  const find = Account.markets.find((el) => el.symbol === market);
-  const decimal_quantity = find.decimal_quantity;
-  const decimal_price = find.decimal_price;
+    const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+    const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
 
-  const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
-  const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+    const entryPrice = parseFloat(entry);
+    const quantity = formatQuantity(volume / entryPrice);
+    const price = formatPrice(entryPrice);
 
-  const clientId = Math.floor(Math.random() * 1_000_000);
-  const orderType = "Limit";
-  const postOnly = false;
-  const timeInForce = "GTC";
+    const body = {
+      symbol: market,
+      side,
+      orderType: "Limit",
+      postOnly: true,  
+      quantity,
+      price,
+      timeInForce: "GTC",
+      selfTradePrevention: "RejectTaker"
+    };
 
-  const entryPrice = parseFloat(entry);
-  const quantity = formatQuantity(volume / entryPrice);
-  const price = formatPrice(entryPrice);
+    const takeProfitTriggerPrice = (Number(target) + Number(price)) / 2 
+    const stopLossTriggerPrice = (Number(stop) + Number(price)) / 2 
 
-  const offset = 0.001 * entryPrice;
+    if (target !== undefined && !isNaN(parseFloat(target))) {
+      body.takeProfitTriggerBy = "LastPrice";
+      body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
+      body.takeProfitLimitPrice =  formatPrice(target);
+    }
 
-  const triggerPrice = isLong
-    ? formatPrice(entryPrice - offset)
-    : formatPrice(entryPrice + offset);
+    if (stop !== undefined && !isNaN(parseFloat(stop))) {
+      body.stopLossTriggerBy = "LastPrice";
+      body.stopLossTriggerPrice = formatPrice(stopLossTriggerPrice);
+      body.stopLossLimitPrice = formatPrice(stop);
+    }
 
-  const body = {
-    autoLend: true,
-    autoLendRedeem: true,
-    autoBorrow: true,
-    autoBorrowRepay: true,
-    clientId,
-    orderType,
-    postOnly,
-    selfTradePrevention: "RejectTaker",
-    side,
-    symbol: market,
-    timeInForce,
-    price,
-    triggerBy: "MarkPrice",
-    triggerPrice,
-    triggerQuantity: quantity,
-  };
+    
 
-  // Stop loss
-  if (stop !== undefined && stop !== null && !isNaN(parseFloat(stop))) {
-    const stopLoss = parseFloat(stop);
-    body.stopLossTriggerBy = "MarkPrice";
-    body.stopLossTriggerPrice = isLong
-      ? formatPrice(stopLoss + offset)
-      : formatPrice(stopLoss - offset);
-    body.stopLossLimitPrice = formatPrice(stopLoss);
+    return await Order.executeOrder(body);
+
+    } catch (error) {
+      console.log(error)
+    }
   }
-
-  // Take profit
-  if (target !== undefined && target !== null && !isNaN(parseFloat(target))) {
-    const takeProfit = parseFloat(target);
-    body.takeProfitTriggerBy = "LastPrice";
-    body.takeProfitTriggerPrice = isLong
-      ? formatPrice(takeProfit - offset)
-      : formatPrice(takeProfit + offset);
-    body.takeProfitLimitPrice = formatPrice(takeProfit);
-  }
-
-  return await Order.executeOrder(body);
-}
-
 
   async getRecentOpenOrders(market) {
     const orders = await Order.getOpenOrders(market)
@@ -102,6 +82,7 @@ class OrderController {
             id: el.id,
             minutes: Utils.minutesAgo(el.createdAt),
             triggerPrice: parseFloat(el.triggerPrice),
+            price: parseFloat(el.price)
         }
     })
   }
@@ -122,11 +103,8 @@ class OrderController {
     return list.filter((el) => !markets_open.includes(el.symbol)) 
   }
 
-  async cancelStopTS(symbol, id) {
-    return await Order.cancelOpenOrder(symbol, id)
-  }
-
   async createStopTS({ symbol, price, isLong, quantity }) {
+
   const Account = await AccountController.get();
   const find = Account.markets.find(el => el.symbol === symbol);
 
@@ -134,32 +112,31 @@ class OrderController {
 
   const decimal_quantity = find.decimal_quantity;
   const decimal_price = find.decimal_price;
+  const tickSize = find.tickSize * 10
 
   if (price <= 0) throw new Error("Invalid price: must be > 0");
 
-  price = Math.abs(price); // garante positivo
-  const triggerPrice = isLong ? price - 0.01 : price + 0.01;
-
+  price = Math.abs(price); 
+  
+  const triggerPrice = isLong ? price - tickSize : price + tickSize  
   const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
   const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
-
   const body = {
     symbol,
     orderType: 'Limit',
     side: isLong ? 'Ask' : 'Bid',
-    postOnly: true,
     reduceOnly: true,
-    price: formatPrice(price),
-    clientId: Math.floor(Math.random() * 1000000),
+    postOnly: true,  
     timeInForce: 'GTC',
-    triggerPrice: formatPrice(triggerPrice),
+    selfTradePrevention: "RejectTaker",
+    price: formatPrice(price),
     triggerBy: 'LastPrice',
+    triggerPrice: formatPrice(triggerPrice),
     triggerQuantity: formatQuantity(quantity),
   };
 
   return await Order.executeOrder(body);
-}
-
+  }
 
 }
 

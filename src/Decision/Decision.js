@@ -3,75 +3,151 @@ import Order from '../Backpack/Authenticated/Order.js';
 import OrderController from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import Markets from '../Backpack/Public/Markets.js';
+import { calculateIndicators, analyzeTrade } from './Indicators.js';
 class Decision {
 
-    async analyze() {
-        
-        try {
-            
-            const positions = await Futures.getOpenPositions()
-            const Account = await AccountController.get()
-            const markets = Account.markets.map((el) => el.symbol)
-            const symbol_opend = positions.map((el) => el.symbol)
-            const schedule_ordens = await OrderController.getAllOrdersSchedule(symbol_opend)
-            const markets_schedule = schedule_ordens.map((el) => el.symbol)
-            const markets_available = markets.filter(symbol => !symbol_opend.includes(symbol) && !markets_schedule.includes(symbol));
+  async getDataset(Account, closed_markets) {
+    const dataset = []
 
-            for (const schedule_orden of schedule_ordens) {
-              if(schedule_orden.minutes > 5){
-                await Order.cancelOpenOrders(schedule_orden.symbol)
-              }
+    const markets = Account.markets.filter((el) => {
+      return !closed_markets.includes(el.symbol) 
+    })
+
+    try {
+    
+        for (const market of markets) {
+            const getAllMarkPrices = await Markets.getAllMarkPrices(market.symbol)
+            const candles = await Markets.getKLines(market.symbol, process.env.TIME, 30)
+            const analyze = calculateIndicators(candles)
+            const marketPrice = getAllMarkPrices[0].markPrice
+
+            console.log("🔍 Analyzing", String(market.symbol).replace("_USDC_PERP", ""))
+
+            const obj = {
+              candles,
+              market,
+              marketPrice,
+              ...analyze
             }
 
-            const LIMIT_ORDER = parseInt(process.env.LIMIT_ORDER)
-
-            if(positions.length <= LIMIT_ORDER && schedule_ordens.length <= LIMIT_ORDER ){
-              
-              console.log("Markets available: ", markets_available.length)
-              
-              for (const market of markets_available) {
-                  
-                  const candles = await Markets.getKLines(market, "5m", 25)
-                  const getAllMarkPrices = await Markets.getAllMarkPrices(market)
-                  const marketPrice = getAllMarkPrices[0].markPrice
-                  const dataset = this.analyzeMAEMACross(candles, marketPrice)
-                  dataset.volume = Account.minVolumeDollar
-                  dataset.market = market
-
-                  if(dataset.action !== "NEUTRAL"){
-                    
-                  const {stopLoss, takeProfit} = this.findSupportResistance(candles,marketPrice)
-
-                    dataset.stop = stopLoss 
-                    dataset.target = takeProfit
-
-                    const orders = await OrderController.getRecentOpenOrders(market)
-
-                    if(orders.length > 0) {
-                        
-                        if(orders[0].minutes > 10){
-                          await Order.cancelOpenOrders(market)
-                          await OrderController.openOrder(dataset)
-                        } else {
-                          await OrderController.openOrder(dataset)
-                        }
-
-                    } else {
-                        await OrderController.openOrder(dataset)
-                    }
-
-
-                   }
-                
-              }
-            }
-            console.log("done")
-        } catch (error) {
-            console.log("analyze Error", error)
+            dataset.push(obj)
         }
-    } 
 
-     analyzeMAEMACross(candles, marketPrice, period = 21, entryOffset = 0.0005) {
+        } catch (error) {
+          console.log(error)
+    }
+
+    return dataset
+  }
+
+
+ 
+ analyzeTrades(fee, datasets, investmentUSD) {
+  const results = [];
+  for (const data of datasets) {
+    const row = analyzeTrade(fee, data, investmentUSD)
+    console.log("row", row)
+    if(row){
+      results.push(row)
+    }
+  }
+   
+  return results.filter((el) => {
+      return el.pnl > 0 && ((el.breakEven < el.target && el.action === 'long') || (el.breakEven > el.target && el.action === 'short') ) && (Number(el.risk) < Number(el.pnl))  
+  }).sort((a,b) => Number(b.pnl) - Number(a.pnl))
+}
+
+
+  async analyze() {
+
+    try {
+      
+
+    //secure block 
+    const Account = await AccountController.get()
+
+    if(Account.leverage > 10 && process.env.TIME !== "1m"){
+      console.log(`Leverage ${Account.leverage}x and time candle high (${process.env.TIME}) revise or comment this block`)
+      return
+    }
+   
+    const positions = await Futures.getOpenPositions()
+    const closed_markets = positions.map((el) => el.symbol)
+
+    if(positions.length >= Number(Account.maxOpenOrders)){
+      console.log("Maximum number of orders reached", positions.length)
+      return
+    }
+
+    const dataset = await this.getDataset(Account, closed_markets)
+
+    const investmentUSD = parseInt(Account.capitalAvailable / Account.maxOpenOrders)
+    const fee = Account.fee
+
+    const rows = this.analyzeTrades(fee, dataset, investmentUSD)
+
+    for (const row of rows) {
+        const marketInfo = Account.markets.find((el) => el.symbol === row.market);
+
+        row.volume = investmentUSD
+        row.decimal_quantity = marketInfo.decimal_quantity
+        row.decimal_price = marketInfo.decimal_price
+
+        const orders = await OrderController.getRecentOpenOrders(row.market)
+
+        if(orders.length > 0) {
+            
+            if(orders[0].minutes > 1){
+              await Order.cancelOpenOrders(row.market)
+              await OrderController.openOrder(row)
+            } 
+
+        } else {
+           await OrderController.openOrder(row)
+        }
+
+
+    }
+
+     } catch (error) {
+      console.log(error)
+    }
+
+  } 
+
+  analyzeMarket(candles, marketPrice, market) {
+  const parsed = candles.map(c => ({
+    open: parseFloat(c.open),
+    close: parseFloat(c.close),
+    high: parseFloat(c.high),
+    low: parseFloat(c.low),
+    volume: parseFloat(c.volume),
+    quoteVolume: parseFloat(c.quoteVolume),
+    trades: parseInt(c.trades),
+    start: c.start,
+    end: c.end
+  }));
+
+  const valid = parsed.filter(c => c.volume > 0);
+  const volume = valid.reduce((acc, c) => acc + c.volume, 0);
+
+  const last = valid[valid.length - 1] || parsed[parsed.length - 1];
+
+  const entry = last.close;
+
+  const action = marketPrice >= entry ?  'LONG' : 'SHORT'  ;
+
+  return {
+    action: action,
+    entry: entry,
+    marketPrice: marketPrice,
+    volume: volume,
+    market: market
+  };
+  }
+
+  analyzeMAEMACross(candles, marketPrice, period = 25) {
+
   const closes = candles.map(c => parseFloat(c.close));
   const ma = [];
   const ema = [];
@@ -112,13 +188,13 @@ class Decision {
     // MA cruzou EMA de baixo para cima → LONG
     if (prevDiff <= 0 && currDiff > 0) {
       action = 'LONG';
-      entry = parseFloat((parsedMarketPrice - entryOffset).toFixed(6));
+      entry = parseFloat((parsedMarketPrice).toFixed(6));
     }
 
     // MA cruzou EMA de cima para baixo → SHORT
     else if (prevDiff >= 0 && currDiff < 0) {
       action = 'SHORT';
-      entry = parseFloat((parsedMarketPrice + entryOffset).toFixed(6));
+      entry = parseFloat((parsedMarketPrice).toFixed(6));
     }
   }
 
@@ -127,48 +203,7 @@ class Decision {
     entry,
     marketPrice: parsedMarketPrice,
   };
-}
-
-    findSupportResistance(candles, entryPrice) {
-  const supports = [];
-  const resistances = [];
-
-  for (let i = 1; i < candles.length - 1; i++) {
-    const prev = candles[i - 1];
-    const curr = candles[i];
-    const next = candles[i + 1];
-
-    const low = parseFloat(curr.low);
-    const high = parseFloat(curr.high);
-
-    // Suporte: fundo local
-    if (low < parseFloat(prev.low) && low < parseFloat(next.low)) {
-      supports.push(low);
-    }
-
-    // Resistência: topo local
-    if (high > parseFloat(prev.high) && high > parseFloat(next.high)) {
-      resistances.push(high);
-    }
   }
-
-  // Encontrar suporte mais próximo abaixo do preço de entrada
-  const support = supports
-    .filter(level => level < entryPrice)
-    .sort((a, b) => b - a)[0] ?? null;
-
-  // Encontrar resistência mais próxima acima do preço de entrada
-  const resistance = resistances
-    .filter(level => level > entryPrice)
-    .sort((a, b) => a - b)[0] ?? null;
-
-  return {
-    stopLoss: support,
-    takeProfit: resistance
-  };
-}
-
-
 
 }
 
