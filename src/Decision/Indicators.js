@@ -210,8 +210,6 @@ export function analyzeTrade(fee, data, investmentUSD) {
     ? 'short' 
     : 'neutro';
 
-  console.log("action", action,"signal", data.ema?.signal,"rsi", data.rsi.value )
-
   if(action === "neutro") return null
 
   // Combina upperBands e lowerBands em um único array

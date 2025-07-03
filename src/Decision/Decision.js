@@ -46,7 +46,6 @@ class Decision {
   const results = [];
   for (const data of datasets) {
     const row = analyzeTrade(fee, data, investmentUSD)
-    console.log("row", row)
     if(row){
       results.push(row)
     }
