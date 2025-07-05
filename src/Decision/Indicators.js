@@ -198,102 +198,60 @@ export function calculateIndicators(candles) {
   };
 }
 
-
 export function analyzeTrade(fee, data, investmentUSD) {
+  if (!data.vwap?.lowerBands?.length || !data.vwap?.upperBands?.length || data.vwap.vwap == null) return null;
 
-  // Verifica se há bandas VWAP disponíveis
-  if (!data.vwap?.lowerBands?.length || !data.vwap?.upperBands?.length) return null;
+  const isBull = data.ema?.signal === 'bullish' && data.rsi.value > 50;
+  const isBear = data.ema?.signal === 'bearish' && data.rsi.value < 50;
 
-  const action = (data.ema?.signal === 'bullish' && data.rsi.value > 50) 
-  ? 'long' 
-  : (data.ema?.signal === 'bearish' && data.rsi.value < 50) 
-    ? 'short' 
-    : 'neutro';
+  if (!isBull && !isBear) return null;
 
-  if(action === "neutro") return null
+  const action = isBull ? 'long' : 'short';
+  const price = parseFloat(data.marketPrice);
+  const mean = parseFloat(data.vwap.vwap);
 
-  // Combina upperBands e lowerBands em um único array
-  const bands = [...data.vwap.upperBands, ...data.vwap.lowerBands];
+  // Unifica e ordena as bandas
+  const bands = [...data.vwap.lowerBands, ...data.vwap.upperBands].map(Number).sort((a, b) => a - b);
 
-  const entry = action === "long" ? parseFloat(data.marketPrice * 0.999) : parseFloat(data.marketPrice * 1.001) 
+  // Encontra a banda abaixo e acima mais próximas
+  const bandBelow = bands.filter(b => b < price).pop(); // última abaixo
+  const bandAbove = bands.find(b => b > price); // primeira acima
 
-  // Separa bandas acima e abaixo do preço de entrada
-  const bandsAbove = bands.filter(b => b > entry).sort((a, b) => a - b);
-  const bandsBelow = bands.filter(b => b < entry).sort((a, b) => b - a);
+  let entry, stop, target;
 
-  // Seleciona stop e candidatos a target com base na ação (long/short)
-  const stop = action === 'long' ? bandsBelow[0] : bandsAbove[0];
-  const targetCandidates = action === 'long' ? bandsAbove : bandsBelow;
-  if (stop == null || targetCandidates.length === 0) return null;
+  if (action === 'long') {
+    if (!bandBelow || mean <= bandBelow) return null;
+    entry = bandBelow;
+    stop = entry * 0.99;
+    target = mean;
+  } else {
+    if (!bandAbove || mean >= bandAbove) return null;
+    entry = bandAbove;
+    stop = entry * 1.01;
+    target = mean;
+  }
 
-  // Cálculos comuns
+  // Cálculo de PnL e risco
   const units = investmentUSD / entry;
+
+  const grossLoss = ((action === 'long') ? entry - stop : stop - entry ) * units
+  const grossTarget = ((action === 'long') ? target - entry : entry - target) * units
+
   const entryFee = investmentUSD * fee;
+  const exitFeeTarget = grossTarget * fee;
+  const exitFeeLoss = grossLoss * fee;
 
-  // Escolhe o primeiro target que gera PnL positivo
-  let chosenTarget = targetCandidates[0];
-  let pnlNet = 0;
-  for (const target of targetCandidates) {
-    const grossExit = units * target;
-    const exitFee = grossExit * fee;
+  const pnl  = grossTarget - (entryFee + exitFeeTarget)
+  const risk = grossLoss + (entryFee + exitFeeLoss)
 
-    if (action === 'long') {
-      pnlNet = (grossExit - exitFee) - (investmentUSD + entryFee);
-    } else {
-      const entryProceeds = investmentUSD - entryFee;
-      const costToClose = grossExit + exitFee;
-      pnlNet = entryProceeds - costToClose;
-    }
-
-    if (pnlNet > 0) {
-      chosenTarget = target;
-      break;
-    }
-  }
-
-  // Cálculo do risco ao atingir o stop (incluindo taxas)
-  const grossStopExit = units * stop;
-  const stopExitFee = grossStopExit * fee;
-  let risk;
-  if (action === 'long') {
-    risk = (investmentUSD + entryFee) - (grossStopExit - stopExitFee);
-  } else {
-    const entryProceeds = investmentUSD - entryFee;
-    const costToClose = grossStopExit + stopExitFee;
-    risk = costToClose - entryProceeds;
-  }
-
-  // Ajuste de stop e target: 105% da distância para stop, 95% para lucro
-  const profitFactor = 0.9;
-  const stopFactor = 1.05;
-  let adjustedStop, adjustedTarget;
-  if (action === 'long') {
-    // Stop abaixo da entrada, target acima
-    const stopDistance = entry - stop;
-    adjustedStop = entry - stopDistance * stopFactor;
-    const targetDistance = chosenTarget - entry;
-    adjustedTarget = entry + targetDistance * profitFactor;
-  } else {
-    // Stop acima da entrada, target abaixo
-    const stopDistance = stop - entry;
-    adjustedStop = entry + stopDistance * stopFactor;
-    const targetDistance = entry - chosenTarget;
-    adjustedTarget = entry - targetDistance * profitFactor;
-  }
-
-  // Preço de break-even para cobrir taxas
-  const breakEven = entry + (entry * fee * 2);
-
-  // Retorna os resultados formatados
   return {
     market: data.market.symbol,
-    entry: entry.toFixed(data.market.decimal_price),
-    stop: adjustedStop.toFixed(data.market.decimal_price),
-    target: adjustedTarget.toFixed(data.market.decimal_price),
-    breakEven: breakEven.toFixed(data.market.decimal_price),
+    entry: Number(entry.toFixed(data.market.decimal_price)),
+    stop: Number(stop.toFixed(data.market.decimal_price)),
+    target: Number(target.toFixed(data.market.decimal_price)),
     action,
-    pnl: pnlNet,
-    risk
+    pnl: Number(pnl),
+    risk: Number(risk)
   };
 }
 

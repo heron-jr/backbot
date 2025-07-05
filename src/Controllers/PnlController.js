@@ -2,6 +2,9 @@ import History from '../Backpack/Authenticated/History.js';
 
 class PnlController {
   async run(hour = 24) {
+    try {
+      
+   
       const now = Date.now();                                  // timestamp atual em ms
       const oneDayAgo = now - hour * 60 * 60 * 1000;            // 24h atrás em ms
 
@@ -29,8 +32,14 @@ class PnlController {
       );
       const result = this.summarizeTrades(fills)
       console.log(`last ${hour}h:`, result);
+
+       } catch (error) {
+      console.log(error)
+    }
   } 
+  
   summarizeTrades(trades) {
+    try {
     const bySymbol = trades.reduce((acc, { symbol, price, quantity, fee, side }) => {
       const p = parseFloat(price);
       const q = parseFloat(quantity);
@@ -59,6 +68,11 @@ class PnlController {
     const volumeBylFee = (overall.totalVolume / overall.totalFee ) 
 
     return {totalFee: overall.totalFee, totalVolume: overall.totalVolume, volumeBylFee: volumeBylFee };
+
+     } catch (error) {
+      console.log(error)
+    }
   }
+
 }
 export default new PnlController();

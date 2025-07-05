@@ -15,15 +15,19 @@ class AccountController {
 
     const AUTHORIZED_MARKET = JSON.parse(process.env.AUTHORIZED_MARKET || '[]')
 
-
     markets = markets.filter((el) => 
           el.marketType === "PERP" && 
           el.orderBookState === "Open" && 
           (AUTHORIZED_MARKET.length === 0 || AUTHORIZED_MARKET.includes(el.symbol))).map((el) => {
+          
+          const decimal_quantity = String(el.filters.quantity.stepSize).includes(".") ? String(el.filters.quantity.stepSize.split(".")[1]).length : 0
+          const decimal_price = String(el.filters.price.tickSize).includes(".") ? String(el.filters.price.tickSize.split(".")[1]).length : 0
+          
           return {
               symbol: el.symbol,
-              decimal_quantity: String(el.filters.quantity.stepSize.split(".")[1]).length,
-              decimal_price: String(el.filters.price.tickSize.split(".")[1]).length,
+              decimal_quantity: decimal_quantity,
+              decimal_price: decimal_price,
+              stepSize_quantity: Number(el.filters.quantity.stepSize),
               tickSize: Number(el.filters.price.tickSize)
           }
       })

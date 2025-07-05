@@ -50,10 +50,9 @@ class Decision {
       results.push(row)
     }
   }
-   
-  return results.filter((el) => {
-      return el.pnl > 0 && ((el.breakEven < el.target && el.action === 'long') || (el.breakEven > el.target && el.action === 'short') ) && (Number(el.risk) < Number(el.pnl))  
-  }).sort((a,b) => Number(b.pnl) - Number(a.pnl))
+
+  //.filter((el) => el.risk <= el.pnl)
+  return results.sort((a,b) => b.pnl - a.pnl)
 }
 
 
@@ -66,8 +65,7 @@ class Decision {
     const Account = await AccountController.get()
 
     if(Account.leverage > 10 && process.env.TIME !== "1m"){
-      console.log(`Leverage ${Account.leverage}x and time candle high (${process.env.TIME}) revise or comment this block`)
-      return
+      console.log(`Leverage ${Account.leverage}x and time candle high (${process.env.TIME}) HIGH RISK LIQUIDATION`)
     }
    
     const positions = await Futures.getOpenPositions()
@@ -91,12 +89,13 @@ class Decision {
         row.volume = investmentUSD
         row.decimal_quantity = marketInfo.decimal_quantity
         row.decimal_price = marketInfo.decimal_price
+        row.stepSize_quantity = marketInfo.stepSize_quantity
 
         const orders = await OrderController.getRecentOpenOrders(row.market)
 
         if(orders.length > 0) {
             
-            if(orders[0].minutes > 1){
+            if(orders[0].minutes > 5){
               await Order.cancelOpenOrders(row.market)
               await OrderController.openOrder(row)
             } 

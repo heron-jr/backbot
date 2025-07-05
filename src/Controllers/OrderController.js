@@ -25,7 +25,7 @@ class OrderController {
     return await Order.executeOrder(body);
   }
 
-  async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price }) {
+  async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity }) {
     
     try {
     
@@ -36,7 +36,8 @@ class OrderController {
     const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
 
     const entryPrice = parseFloat(entry);
-    const quantity = formatQuantity(volume / entryPrice);
+
+    const quantity = formatQuantity(Math.floor((volume / entryPrice) / stepSize_quantity) * stepSize_quantity);
     const price = formatPrice(entryPrice);
 
     const body = {
@@ -65,9 +66,9 @@ class OrderController {
       body.stopLossLimitPrice = formatPrice(stop);
     }
 
-    
-
-    return await Order.executeOrder(body);
+    if(body.quantity > 0 && body.price > 0){
+      return await Order.executeOrder(body);
+    }
 
     } catch (error) {
       console.log(error)

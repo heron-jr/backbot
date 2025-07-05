@@ -13,10 +13,10 @@ async function startDecision() {
 
 async function startStops() {
   await TrailingStop.stopLoss()
-  setTimeout(startStops, 3000); //3s
+  setTimeout(startStops, 1000); //1s
 }
 
-PnlController.run(1)
+PnlController.run(24)
 
 if(BOT_MODE === "DEFAULT") {
   startDecision()
