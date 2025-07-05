@@ -54,6 +54,28 @@ function calculateVWAPClassicBands(candles) {
   };
 }
 
+function findEMACross(ema9Arr, ema21Arr) {
+  const len = Math.min(ema9Arr.length, ema21Arr.length);
+
+  for (let i = len - 2; i >= 0; i--) {
+    const currEma9 = ema9Arr[i + 1];
+    const prevEma9 = ema9Arr[i];
+    const currEma21 = ema21Arr[i + 1];
+    const prevEma21 = ema21Arr[i];
+
+    // Detecta cruzamentos
+    if (prevEma9 <= prevEma21 && currEma9 > currEma21) {
+      return { index: i, type: 'goldenCross' };
+    }
+    if (prevEma9 >= prevEma21 && currEma9 < currEma21) {
+      return { index: i, type: 'deathCross' };
+    }
+  }
+
+  return null;
+}
+
+
 function  analyzeEMA(ema9Arr, ema21Arr) {
   const len = ema9Arr.length;
   if (len < 2 || ema21Arr.length < 2) return null;
@@ -169,8 +191,16 @@ export function calculateIndicators(candles) {
   const { vwap, stdDev, upperBands, lowerBands } = calculateVWAPClassicBands(candles);
   const volumeAnalyse = analyzeTrends(volumesUSD)
 
+  const emaAnalysis = analyzeEMA(ema9, ema21);
+  const emaCrossInfo = findEMACross(ema9, ema21); 
+
   return {
-    ema : analyzeEMA(ema9, ema21),
+    ema: {
+      ...emaAnalysis,
+      crossIndex: emaCrossInfo?.index ?? null,
+      crossType: emaCrossInfo?.type ?? null,
+      candlesAgo: emaCrossInfo ? (ema9.length - 1 - emaCrossInfo.index) : null
+    },
     rsi: {
       value: rsi.at(-1) ?? null,
       history: rsi
@@ -198,37 +228,52 @@ export function calculateIndicators(candles) {
   };
 }
 
-export function analyzeTrade(fee, data, investmentUSD) {
+export function analyzeTrade(fee, data, investmentUSD, media_rsi) {
+
+  try {
+    
   if (!data.vwap?.lowerBands?.length || !data.vwap?.upperBands?.length || data.vwap.vwap == null) return null;
 
-  const isBull = data.ema?.signal === 'bullish' && data.rsi.value > 50;
-  const isBear = data.ema?.signal === 'bearish' && data.rsi.value < 50;
+  const IsCrossBulligh = data.ema.crossType < 'goldenCross' && data.ema.candlesAgo < 2
+  const IsCrossBearish = data.ema.crossType < 'deathCross' && data.ema.candlesAgo < 2
 
-  if (!isBull && !isBear) return null;
+  const isReversingUp = data.rsi.value > 35 && media_rsi < 30;
+  const isReversingDown = data.rsi.value < 65 && media_rsi > 70;
 
-  const action = isBull ? 'long' : 'short';
+  const isBullish = data.ema.ema9 > data.ema.ema21 && data.ema.diffPct > 0.1;
+  const isBearish = data.ema.ema9 < data.ema.ema21 && data.ema.diffPct < -0.1;
+
+  const isRSIBullish = data.rsi.value > 50 && media_rsi > 40;
+  const isRSIBearish = data.rsi.value < 50 && media_rsi < 60;
+
+  const isLong  = (isBullish && isRSIBullish) || isReversingUp   || IsCrossBulligh;
+  const isShort = (isBearish && isRSIBearish) || isReversingDown || IsCrossBearish;
+
+  if (!isLong && !isShort) return null;
+
+  const action = isLong ? 'long' : 'short';
   const price = parseFloat(data.marketPrice);
-  const mean = parseFloat(data.vwap.vwap);
 
   // Unifica e ordena as bandas
   const bands = [...data.vwap.lowerBands, ...data.vwap.upperBands].map(Number).sort((a, b) => a - b);
 
   // Encontra a banda abaixo e acima mais próximas
-  const bandBelow = bands.filter(b => b < price).pop(); // última abaixo
-  const bandAbove = bands.find(b => b > price); // primeira acima
+  const bandBelow = bands.filter(b => b < price); // última abaixo
+  const bandAbove = bands.filter(b => b > price); // primeira acima
 
-  let entry, stop, target;
+  if(bandAbove.length === 0 || bandBelow.length === 0) return null
 
-  if (action === 'long') {
-    if (!bandBelow || mean <= bandBelow) return null;
-    entry = bandBelow;
-    stop = entry * 0.99;
-    target = mean;
+  const entry = price; // ajuste de slippage otimista
+
+  let stop, target;
+  const percentVwap = 0.95
+
+  if (isLong) {
+    stop = bandBelow[1] 
+    target = entry + ((bandAbove[0] - entry) * percentVwap)
   } else {
-    if (!bandAbove || mean >= bandAbove) return null;
-    entry = bandAbove;
-    stop = entry * 1.01;
-    target = mean;
+    stop = bandAbove[1]
+    target = entry - ((entry - bandBelow[0]) * percentVwap)
   }
 
   // Cálculo de PnL e risco
@@ -253,6 +298,12 @@ export function analyzeTrade(fee, data, investmentUSD) {
     pnl: Number(pnl),
     risk: Number(risk)
   };
+  
+  } catch (error) {
+    return null
+    console.log(error)
+  }
+
 }
 
 

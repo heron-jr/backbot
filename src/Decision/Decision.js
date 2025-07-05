@@ -41,77 +41,16 @@ class Decision {
   }
 
 
- 
- analyzeTrades(fee, datasets, investmentUSD) {
-  const results = [];
-  for (const data of datasets) {
-    const row = analyzeTrade(fee, data, investmentUSD)
-    if(row){
-      results.push(row)
+  analyzeTrades(fee, datasets, investmentUSD, media_rsi) {
+    const results = [];
+    for (const data of datasets) {
+      const row = analyzeTrade(fee, data, investmentUSD, media_rsi)
+      if(row){
+        results.push(row)
+      }
     }
+    return results.sort((a,b) => b.pnl - a.pnl)
   }
-
-  //.filter((el) => el.risk <= el.pnl)
-  return results.sort((a,b) => b.pnl - a.pnl)
-}
-
-
-  async analyze() {
-
-    try {
-      
-
-    //secure block 
-    const Account = await AccountController.get()
-
-    if(Account.leverage > 10 && process.env.TIME !== "1m"){
-      console.log(`Leverage ${Account.leverage}x and time candle high (${process.env.TIME}) HIGH RISK LIQUIDATION`)
-    }
-   
-    const positions = await Futures.getOpenPositions()
-    const closed_markets = positions.map((el) => el.symbol)
-
-    if(positions.length >= Number(Account.maxOpenOrders)){
-      console.log("Maximum number of orders reached", positions.length)
-      return
-    }
-
-    const dataset = await this.getDataset(Account, closed_markets)
-
-    const investmentUSD = parseInt(Account.capitalAvailable / Account.maxOpenOrders)
-    const fee = Account.fee
-
-    const rows = this.analyzeTrades(fee, dataset, investmentUSD)
-
-    for (const row of rows) {
-        const marketInfo = Account.markets.find((el) => el.symbol === row.market);
-
-        row.volume = investmentUSD
-        row.decimal_quantity = marketInfo.decimal_quantity
-        row.decimal_price = marketInfo.decimal_price
-        row.stepSize_quantity = marketInfo.stepSize_quantity
-
-        const orders = await OrderController.getRecentOpenOrders(row.market)
-
-        if(orders.length > 0) {
-            
-            if(orders[0].minutes > 5){
-              await Order.cancelOpenOrders(row.market)
-              await OrderController.openOrder(row)
-            } 
-
-        } else {
-           await OrderController.openOrder(row)
-        }
-
-
-    }
-
-     } catch (error) {
-      console.log(error)
-    }
-
-  } 
 
   analyzeMarket(candles, marketPrice, market) {
   const parsed = candles.map(c => ({
@@ -202,6 +141,79 @@ class Decision {
     marketPrice: parsedMarketPrice,
   };
   }
+
+  async analyze() {
+
+    try {
+      
+
+    const Account = await AccountController.get()
+
+    if(Account.leverage > 10 && process.env.TIME !== "1m"){
+      console.log(`Leverage ${Account.leverage}x and time candle high (${process.env.TIME}) HIGH RISK LIQUIDATION`)
+    }
+   
+    const positions = await Futures.getOpenPositions()
+    const closed_markets = positions.map((el) => el.symbol)
+
+    if(positions.length >= Number(Account.maxOpenOrders)){
+      console.log("Maximum number of orders reached", positions.length)
+      return
+    }
+
+    const dataset = await this.getDataset(Account, closed_markets)
+
+    let media_rsi = 0
+    
+    for (const row of dataset) {
+      media_rsi += row.rsi.value
+    }
+
+    media_rsi = media_rsi / dataset.length
+
+    console.log("Média do RSI", media_rsi)
+
+    const VOLUME_ORDER = Number(process.env.VOLUME_ORDER)
+
+    if(VOLUME_ORDER < Account.capitalAvailable){ 
+
+    const investmentUSD = VOLUME_ORDER
+    const fee = Account.fee
+
+    const rows = this.analyzeTrades(fee, dataset, investmentUSD, media_rsi)
+
+    for (const row of rows) {
+        const marketInfo = Account.markets.find((el) => el.symbol === row.market);
+
+        row.volume = investmentUSD
+        row.decimal_quantity = marketInfo.decimal_quantity
+        row.decimal_price = marketInfo.decimal_price
+        row.stepSize_quantity = marketInfo.stepSize_quantity
+
+        const orders = await OrderController.getRecentOpenOrders(row.market)
+
+        if(orders.length > 0) {
+            
+            if(orders[0].minutes > 3){
+              await Order.cancelOpenOrders(row.market)
+              await OrderController.openOrder(row)
+            } 
+
+        } else {
+          await OrderController.openOrder(row)
+        }
+
+
+    }
+
+    }
+
+
+    } catch (error) {
+      console.log(error)
+    }
+
+  } 
 
 }
 

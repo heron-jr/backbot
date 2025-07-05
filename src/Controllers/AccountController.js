@@ -57,6 +57,29 @@ class AccountController {
 
   }
 
+  async getallMarkets(ignore) {
+    let markets = await Markets.getMarkets(ignore = [])
+
+      markets = markets.filter((el) => 
+          el.marketType === "PERP" && 
+          el.orderBookState === "Open" && 
+          (ignore.length === 0 || !ignore.includes(el.symbol))).map((el) => {
+          
+          const decimal_quantity = String(el.filters.quantity.stepSize).includes(".") ? String(el.filters.quantity.stepSize.split(".")[1]).length : 0
+          const decimal_price = String(el.filters.price.tickSize).includes(".") ? String(el.filters.price.tickSize.split(".")[1]).length : 0
+          
+          return {
+              symbol: el.symbol,
+              decimal_quantity: decimal_quantity,
+              decimal_price: decimal_price,
+              stepSize_quantity: Number(el.filters.quantity.stepSize),
+              tickSize: Number(el.filters.price.tickSize)
+          }
+      })
+    
+    return markets
+  }
+
 }
 
 export default new AccountController();
