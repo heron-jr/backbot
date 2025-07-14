@@ -1,24 +1,37 @@
 import nacl from 'tweetnacl';
 
 export function auth({ instruction, params = {}, timestamp, window = 5000 }) {
-  const privateKeySeed = Buffer.from(process.env.PRIVATE_KEY, 'base64'); 
-  const keyPair = nacl.sign.keyPair.fromSeed(privateKeySeed);
+  try {
+    // Verifica se as chaves estão definidas
+    if (!process.env.PRIVATE_KEY || !process.env.PUBLIC_KEY) {
+      throw new Error('PRIVATE_KEY e PUBLIC_KEY devem estar definidas no .env');
+    }
 
-  const sortedParams = Object.keys(params)
-    .sort()
-    .map(key => `${key}=${params[key]}`)
-    .join('&');
+    // Decodifica a chave privada
+    const privateKeySeed = Buffer.from(process.env.PRIVATE_KEY, 'base64'); 
+    const keyPair = nacl.sign.keyPair.fromSeed(privateKeySeed);
 
-  const baseString = sortedParams ? `${sortedParams}&` : '';
-  const payload = `instruction=${instruction}&${baseString}timestamp=${timestamp}&window=${window}`;
+    // Ordena e constrói os parâmetros
+    const sortedParams = Object.keys(params)
+      .sort()
+      .map(key => `${key}=${params[key]}`)
+      .join('&');
 
-  const signature = nacl.sign.detached(Buffer.from(payload), keyPair.secretKey);
+    const baseString = sortedParams ? `${sortedParams}&` : '';
+    const payload = `instruction=${instruction}&${baseString}timestamp=${timestamp}&window=${window}`;
 
-  return {
-    'X-API-Key': process.env.PUBLIC_KEY, // ainda em base64
-    'X-Signature': Buffer.from(signature).toString('base64'), // assinatura em base64
-    'X-Timestamp': timestamp.toString(),
-    'X-Window': window.toString(),
-    'Content-Type' : 'application/json; charset=utf-8'
-  };
+    // Gera a assinatura
+    const signature = nacl.sign.detached(Buffer.from(payload), keyPair.secretKey);
+
+    return {
+      'X-API-Key': process.env.PUBLIC_KEY,
+      'X-Signature': Buffer.from(signature).toString('base64'),
+      'X-Timestamp': timestamp.toString(),
+      'X-Window': window.toString(),
+      'Content-Type': 'application/json; charset=utf-8'
+    };
+  } catch (error) {
+    console.error('❌ Erro na autenticação:', error.message);
+    throw error;
+  }
 }

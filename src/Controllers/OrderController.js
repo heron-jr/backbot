@@ -1,6 +1,6 @@
 import Order from '../Backpack/Authenticated/Order.js';
 import AccountController from './AccountController.js';
-import Utils from '../Utils/Utils.js';
+import Utils from '../utils/Utils.js';
 
 class OrderController {
 
@@ -36,9 +36,27 @@ class OrderController {
     const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
 
     const entryPrice = parseFloat(entry);
+    
+    // Obtém o tickSize do mercado
+    const marketInfo = await AccountController.get();
+    const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
+    const tickSize = currentMarket?.tickSize || 0.0001;
+
+    // Ajusta o preço para evitar execução imediata
+    let adjustedPrice;
+    if (isLong) {
+      // Para compra: preço ligeiramente abaixo do mercado (mais conservador)
+      adjustedPrice = entryPrice - (tickSize * 5);
+    } else {
+      // Para venda: preço ligeiramente acima do mercado (mais conservador)
+      adjustedPrice = entryPrice + (tickSize * 5);
+    }
 
     const quantity = formatQuantity(Math.floor((volume / entryPrice) / stepSize_quantity) * stepSize_quantity);
-    const price = formatPrice(entryPrice);
+    const price = formatPrice(adjustedPrice);
+
+    // Log do ajuste de preço
+    console.log(`💰 ${market}: Preço original ${entryPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'})`);
 
     const body = {
       symbol: market,
@@ -67,11 +85,27 @@ class OrderController {
     }
 
     if(body.quantity > 0 && body.price > 0){
-      return await Order.executeOrder(body);
+      const result = await Order.executeOrder(body);
+      
+      // Se a ordem falhar por preço muito próximo, tenta com preço mais conservador
+      if (!result && error?.message?.includes('immediately match')) {
+        console.log(`⚠️ Tentando ordem com preço mais conservador para ${market}`);
+        
+        const moreConservativePrice = isLong 
+          ? adjustedPrice - (tickSize * 10)  // Mais abaixo para compra
+          : adjustedPrice + (tickSize * 10);  // Mais acima para venda
+        
+        body.price = formatPrice(moreConservativePrice);
+        console.log(`💰 ${market}: Novo preço ${moreConservativePrice.toFixed(6)}`);
+        
+        return await Order.executeOrder(body);
+      }
+      
+      return result;
     }
 
     } catch (error) {
-      console.log(error)
+      console.error('❌ OrderController.openOrder - Error:', error.message);
     }
   }
 
