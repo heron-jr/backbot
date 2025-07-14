@@ -8,12 +8,17 @@ export class StrategyFactory {
    * @returns {BaseStrategy} - Instância da estratégia
    */
   static createStrategy(strategyType) {
+    console.log(`🔍 StrategyFactory: Tipo recebido: "${strategyType}"`);
+    
     const strategy = strategyType?.toUpperCase() || 'DEFAULT';
+    console.log(`🔍 StrategyFactory: Tipo processado: "${strategy}"`);
     
     switch(strategy) {
       case 'DEFAULT':
+        console.log(`✅ StrategyFactory: Criando estratégia DEFAULT`);
         return new DefaultStrategy();
       case 'LEVEL':
+        console.log(`✅ StrategyFactory: Criando estratégia LEVEL`);
         return new LevelStrategy();
       default:
         console.log(`⚠️ Estratégia "${strategy}" não encontrada, usando DEFAULT`);

@@ -60,7 +60,7 @@ class OrderController {
     return closeResult;
   }
 
-  async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity }) {
+  async openOrder({ entry, stop, target, targets, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity }) {
     
     try {
     
@@ -119,13 +119,26 @@ class OrderController {
       selfTradePrevention: "RejectTaker"
     };
 
-    const takeProfitTriggerPrice = (Number(target) + Number(price)) / 2 
     const stopLossTriggerPrice = (Number(stop) + Number(price)) / 2 
 
-    if (target !== undefined && !isNaN(parseFloat(target))) {
+    // Suporte para múltiplos targets (estratégia LEVEL)
+    if (targets && Array.isArray(targets) && targets.length > 0) {
+      // Usa o primeiro target para a ordem principal (compatibilidade)
+      const firstTarget = targets[0];
+      const takeProfitTriggerPrice = (Number(firstTarget) + Number(price)) / 2;
+      
       body.takeProfitTriggerBy = "LastPrice";
       body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
-      body.takeProfitLimitPrice =  formatPrice(target);
+      body.takeProfitLimitPrice = formatPrice(firstTarget);
+      
+      console.log(`🎯 ${market}: Múltiplos targets configurados (${targets.length} alvos) - Primeiro: ${firstTarget.toFixed(6)}`);
+    } else if (target !== undefined && !isNaN(parseFloat(target))) {
+      // Fallback para target único (estratégia DEFAULT)
+      const takeProfitTriggerPrice = (Number(target) + Number(price)) / 2;
+      
+      body.takeProfitTriggerBy = "LastPrice";
+      body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
+      body.takeProfitLimitPrice = formatPrice(target);
     }
 
     if (stop !== undefined && !isNaN(parseFloat(stop))) {

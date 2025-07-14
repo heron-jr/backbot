@@ -1,8 +1,9 @@
 import dotenv from 'dotenv';
+dotenv.config();
+
 import Decision from './src/Decision/Decision.js';
 import TrailingStop from './src/TrailingStop/TrailingStop.js';
 import PnlController from './src/Controllers/PnlController.js';
-dotenv.config();
 
 const BOT_MODE = process.env.BOT_MODE
 

@@ -10,6 +10,7 @@ A crypto trading bot for Backpack Exchange. It trades perpetual futures automati
 - **Real-time Market Analysis**: Technical indicators including RSI, EMA, MACD, Bollinger Bands, VWAP, ATR, Stochastic, and ADX
 - **Risk Management**: Automatic stop-loss and trailing stop functionality
 - **Modular Architecture**: Easy to add new strategies and indicators
+- **LEVEL Strategy**: Advanced ADX-based strategy with signal quality levels (BRONZE, SILVER, GOLD, DIAMOND)
 
 ## 📋 Requirements
 
@@ -24,9 +25,6 @@ Copy `env.example` to `.env` and configure your settings:
 ```bash
 # Copy example configuration
 cp env.example .env
-
-# Edit with your settings
-nano .env
 ```
 
 ### Key Configuration Options
@@ -34,6 +32,12 @@ nano .env
 #### Trading Strategy
 ```bash
 TRADING_STRATEGY=DEFAULT  # or LEVEL
+
+# LEVEL Strategy Configuration
+IGNORE_BRONZE_SIGNALS=true  # Ignore BRONZE signals (only SILVER, GOLD, DIAMOND)
+ADX_LENGTH=14              # ADX period
+ADX_THRESHOLD=20           # ADX threshold for volume confirmation
+ATR_ZONE_MULTIPLIER=2.0    # ATR multiplier for target zones
 ```
 
 #### Capital Management
@@ -65,6 +69,60 @@ ENABLE_TP_VALIDATION=false      # Enable real-time take profit validation
 **Take Profit Validation**: The bot will only execute trades that meet minimum take profit criteria (percentage and risk/reward ratio).
 
 **Real-time Take Profit Validation**: When enabled (`ENABLE_TP_VALIDATION=true`), the bot will close positions that no longer meet minimum take profit criteria, ensuring only high-quality trades remain open.
+
+## 🎯 LEVEL Strategy (ADX-based)
+
+The LEVEL strategy is based on the ADX indicator with multiple validation layers and signal quality levels.
+
+### Signal Quality Levels
+
+- **BRONZE**: 1 confluence (ADX only)
+- **SILVER**: 2 confluences (ADX + 1 validation)
+- **GOLD**: 3 confluences (ADX + 2 validations)
+- **DIAMOND**: 4 confluences (ADX + 3 validations)
+
+### Validation Indicators
+
+- **RSI**: Reversal confirmation
+- **Stochastic**: Momentum validation
+- **MACD**: Trend confirmation
+
+### Configuration Options
+
+```bash
+# Signal Filtering
+IGNORE_BRONZE_SIGNALS=true  # Only accept SILVER, GOLD, DIAMOND
+
+# ADX Settings
+ADX_LENGTH=14
+ADX_THRESHOLD=20
+ADX_AVERAGE_LENGTH=21
+
+# Validation Settings
+USE_RSI_VALIDATION=true
+USE_STOCH_VALIDATION=true
+USE_MACD_VALIDATION=true
+
+# Target Zones
+MAX_TARGETS_PER_ORDER=20  # Quantidade de alvos calculados e executados
+# ATR_ZONE_MULTIPLIER=2.0 (fixo no código)
+# ATR_PERIOD=14 (fixo no código)
+
+# Stop Loss (fixo no código)
+# SL_ATR_MULTIPLIER=1.5
+
+# Partial Take Profit
+USE_PARTIAL_TP=true
+```
+
+### Timeframe Multipliers
+
+The strategy automatically adjusts target distances based on timeframe:
+
+- **1m, 3m**: Closer targets (0.5x, 0.7x multiplier)
+- **5m**: Base multiplier (1.0x)
+- **15m, 30m**: Medium targets (1.2x, 1.5x multiplier)
+- **1h, 2h, 4h, 1d**: Distant targets (2.0x, 2.5x, 3.0x, 4.0x multiplier)
 
 ## 🏃‍♂️ Quick Start
 

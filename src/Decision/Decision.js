@@ -11,6 +11,9 @@ const STRATEGY_DEFAULT = 'DEFAULT';
 class Decision {
   constructor() {
     const strategyType = process.env.TRADING_STRATEGY || STRATEGY_DEFAULT;
+    console.log(`🔍 Decision: TRADING_STRATEGY do .env: "${process.env.TRADING_STRATEGY}"`);
+    console.log(`🔍 Decision: strategyType final: "${strategyType}"`);
+    
     this.strategy = StrategyFactory.createStrategy(strategyType);
     
     console.log(`🤖 Estratégia carregada: ${strategyType.toUpperCase()}`);
@@ -234,7 +237,10 @@ class Decision {
     // Otimiza o cálculo da média RSI
     const media_rsi = dataset.reduce((sum, row) => sum + row.rsi.value, 0) / dataset.length;
 
-    console.log("Média do RSI", media_rsi)
+    // Só loga a média RSI se não for estratégia LEVEL
+    if (process.env.TRADING_STRATEGY !== 'LEVEL') {
+      console.log("Média do RSI", media_rsi)
+    }
 
     // Calcula volume baseado em porcentagem ou valor fixo
     const VOLUME_ORDER = Number(process.env.VOLUME_ORDER)
@@ -302,6 +308,20 @@ class Decision {
     if (failedOrders.length > 0) {
       console.log(`❌ ${failedOrders.length} ordens falharam`);
     }
+    
+    // Log informativo quando não há operações
+    if (rows.length === 0) {
+      const nextAnalysis = new Date(Date.now() + 60000); // 60 segundos
+      const timeString = nextAnalysis.toLocaleTimeString('pt-BR', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        hour12: false 
+      });
+      console.log(`⏰ Nenhuma operação encontrada. Próxima análise às ${timeString}`);
+    }
+    } else {
+      console.log(`⚠️ Capital insuficiente para operar. Disponível: $${Account.capitalAvailable.toFixed(2)}`);
     }
 
 

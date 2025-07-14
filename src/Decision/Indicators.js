@@ -235,12 +235,17 @@ export function calculateIndicators(candles) {
     },
     rsi: {
       value: rsi.at(-1) ?? null,
+      avg: rsi.length >= 14 ? rsi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : null,
+      prev: rsi.at(-2) ?? null,
+      avgPrev: rsi.length >= 15 ? rsi.slice(-15, -1).reduce((sum, val) => sum + val, 0) / 14 : null,
       history: rsi
     },
     macd: {
       MACD: macd.at(-1)?.MACD ?? null,
       MACD_signal: macd.at(-1)?.signal ?? null,
       MACD_histogram: macd.at(-1)?.histogram ?? null,
+      histogram: macd.at(-1)?.histogram ?? null,
+      histogramPrev: macd.at(-2)?.histogram ?? null,
     },
     bollinger: {
       BOLL_upper: boll.at(-1)?.upper ?? null,
@@ -258,8 +263,16 @@ export function calculateIndicators(candles) {
         lowerBands
     },
     atr: {
+      atr: atr.at(-1) ?? null,
       value: atr.at(-1) ?? null,
       history: atr
+    },
+    stoch: {
+      k: slowStoch.at(-1)?.k ?? null,
+      d: slowStoch.at(-1)?.d ?? null,
+      kPrev: slowStoch.at(-2)?.k ?? null,
+      dPrev: slowStoch.at(-2)?.d ?? null,
+      history: slowStoch
     },
     slowStochastic: {
       k: slowStoch.at(-1)?.k ?? null,
@@ -268,8 +281,10 @@ export function calculateIndicators(candles) {
     },
     adx: {
       adx: adx.at(-1)?.adx ?? null,
-      pdi: adx.at(-1)?.pdi ?? null,
-      mdi: adx.at(-1)?.mdi ?? null,
+      diPlus: adx.at(-1)?.pdi ?? null,
+      diMinus: adx.at(-1)?.mdi ?? null,
+      diPlusPrev: adx.at(-2)?.pdi ?? null,
+      diMinusPrev: adx.at(-2)?.mdi ?? null,
       adxEma: adxEma.at(-1) ?? null,
       history: adx,
       emaHistory: adxEma

@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
-import AccountController from './src/Controllers/AccountController.js';
-
 dotenv.config();
+
+import AccountController from './src/Controllers/AccountController.js';
 
 async function testAuth() {
   console.log('🔐 Testando autenticação com Backpack Exchange...\n');

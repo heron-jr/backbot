@@ -1,6 +1,6 @@
 import nacl from 'tweetnacl';
 
-export function auth({ instruction, params = {}, timestamp, window = 5000 }) {
+export function auth({ instruction, params = {}, timestamp, window = 30000 }) {
   try {
     // Verifica se as chaves estão definidas
     if (!process.env.PRIVATE_KEY || !process.env.PUBLIC_KEY) {
