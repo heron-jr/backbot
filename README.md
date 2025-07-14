@@ -47,7 +47,9 @@ CAPITAL_PERCENTAGE=5  # 5% of available capital
 #### Risk Management
 ```bash
 LIMIT_ORDER=5                    # Max open orders
-MAX_NEGATIVE_PNL_STOP=-5        # Stop loss in USD
+STOP_LOSS_TYPE=USD              # USD or PERCENTAGE
+MAX_NEGATIVE_PNL_STOP=-5        # Stop loss in USD (when STOP_LOSS_TYPE=USD)
+MAX_NEGATIVE_PNL_STOP_PCT=-4    # Stop loss in percentage (when STOP_LOSS_TYPE=PERCENTAGE)
 MINIMAL_VOLUME=50               # Min volume to maintain position
 ```
 

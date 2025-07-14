@@ -20,6 +20,10 @@ class TrailingStop {
         const MAX_NEGATIVE_PNL_STOP = Number(process.env.MAX_NEGATIVE_PNL_STOP || -5);
         const MAX_NEGATIVE_PNL_STOP_PCT = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4);
         const MINIMAL_VOLUME = Number(process.env.MINIMAL_VOLUME || 50);
+        
+        // Configuração do tipo de stop loss (USD ou porcentagem)
+        const STOP_LOSS_TYPE = process.env.STOP_LOSS_TYPE || 'USD'; // 'USD' ou 'PERCENTAGE'
+        const USE_PERCENTAGE = STOP_LOSS_TYPE.toUpperCase() === 'PERCENTAGE';
 
         const volume = Number(position.netExposureNotional);
         if (volume <= MINIMAL_VOLUME) {
@@ -38,9 +42,26 @@ class TrailingStop {
         const marginUsed = Math.abs(position.netCost);
         const pnlPct = marginUsed > 0 ? ((pnl / marginUsed) * 100).toFixed(2) : 0;
 
-        // Verifica stop em USD fixo (eu tinha colocado % mais nao pegava por conta do valor da alavancagem)
-        if (pnl <= -Math.abs(MAX_NEGATIVE_PNL_STOP)) {
-          console.log(`❌ STOP LOSS (USD): ${position.symbol} PnL $${pnl.toFixed(2)} <= limite -$${Math.abs(MAX_NEGATIVE_PNL_STOP)}. Fechando.`);
+        // Verifica stop loss baseado no tipo configurado
+        let shouldClose = false;
+        let stopReason = '';
+
+        if (USE_PERCENTAGE) {
+          // Stop loss em porcentagem
+          if (pnlPct <= MAX_NEGATIVE_PNL_STOP_PCT) {
+            shouldClose = true;
+            stopReason = `PERCENTAGE: ${position.symbol} PnL ${pnlPct}% <= limite ${MAX_NEGATIVE_PNL_STOP_PCT}%`;
+          }
+        } else {
+          // Stop loss em USD (padrão)
+          if (pnl <= MAX_NEGATIVE_PNL_STOP) {
+            shouldClose = true;
+            stopReason = `USD: ${position.symbol} PnL $${pnl.toFixed(2)} <= limite $${MAX_NEGATIVE_PNL_STOP}`;
+          }
+        }
+
+        if (shouldClose) {
+          console.log(`❌ STOP LOSS (${STOP_LOSS_TYPE}): ${stopReason}. Fechando.`);
           await OrderController.forceClose(position);
           continue;
         }
