@@ -42,7 +42,7 @@ class OrderController {
     const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
     const tickSize = currentMarket?.tickSize || 0.0001;
 
-    // Obtém o preço atual do mercado para comparação
+    // Obtém o preço atual do mercado para usar como referência
     const Markets = (await import('../Backpack/Public/Markets.js')).default;
     const markPrices = await Markets.getAllMarkPrices(market);
     const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
@@ -51,28 +51,28 @@ class OrderController {
     const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
     
     // Ajusta o multiplicador baseado na volatilidade
-    let tickMultiplier = 15; // Base
+    let tickMultiplier = 20; // Base mais conservador
     if (priceDiff < 0.001) { // Se muito próximo do mercado
-      tickMultiplier = 25;
+      tickMultiplier = 30;
     } else if (priceDiff < 0.005) { // Se próximo do mercado
-      tickMultiplier = 20;
+      tickMultiplier = 25;
     }
 
-    // Ajusta o preço para evitar execução imediata
+    // Usa o preço de mercado atual como base para evitar rejeições
     let adjustedPrice;
     if (isLong) {
-      // Para compra: preço ligeiramente abaixo do mercado (mais conservador)
-      adjustedPrice = entryPrice - (tickSize * tickMultiplier);
+      // Para compra: preço ligeiramente abaixo do preço atual do mercado
+      adjustedPrice = currentMarketPrice - (tickSize * tickMultiplier);
     } else {
-      // Para venda: preço ligeiramente acima do mercado (mais conservador)
-      adjustedPrice = entryPrice + (tickSize * tickMultiplier);
+      // Para venda: preço ligeiramente acima do preço atual do mercado
+      adjustedPrice = currentMarketPrice + (tickSize * tickMultiplier);
     }
 
-    const quantity = formatQuantity(Math.floor((volume / entryPrice) / stepSize_quantity) * stepSize_quantity);
+    const quantity = formatQuantity(Math.floor((volume / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
     const price = formatPrice(adjustedPrice);
 
     // Log do ajuste de preço
-    console.log(`💰 ${market}: Preço original ${entryPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'}) [Diff: ${(priceDiff * 100).toFixed(3)}%]`);
+    console.log(`💰 ${market}: Preço estratégia ${entryPrice.toFixed(6)} → Preço mercado ${currentMarketPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'}) [Diff: ${(priceDiff * 100).toFixed(3)}%]`);
 
     const body = {
       symbol: market,
@@ -108,8 +108,8 @@ class OrderController {
         console.log(`⚠️ Tentando ordem com preço mais conservador para ${market}`);
         
         const moreConservativePrice = isLong 
-          ? adjustedPrice - (tickSize * 10)  // Mais abaixo para compra
-          : adjustedPrice + (tickSize * 10);  // Mais acima para venda
+          ? currentMarketPrice - (tickSize * (tickMultiplier + 15))  // Mais abaixo para compra
+          : currentMarketPrice + (tickSize * (tickMultiplier + 15));  // Mais acima para venda
         
         body.price = formatPrice(moreConservativePrice);
         console.log(`💰 ${market}: Novo preço ${moreConservativePrice.toFixed(6)}`);
