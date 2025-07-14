@@ -8,15 +8,15 @@ async function testAuth() {
 
   // Verifica se as variáveis de ambiente estão definidas
   console.log('📋 Verificando variáveis de ambiente:');
-  console.log(`PRIVATE_KEY: ${process.env.PRIVATE_KEY ? '✅ Definida' : '❌ Não definida'}`);
-  console.log(`PUBLIC_KEY: ${process.env.PUBLIC_KEY ? '✅ Definida' : '❌ Não definida'}`);
+  console.log(`API_SECRET: ${process.env.API_SECRET ? '✅ Definida' : '❌ Não definida'}`);
+  console.log(`API_KEY: ${process.env.API_KEY ? '✅ Definida' : '❌ Não definida'}`);
   console.log(`API_URL: ${process.env.API_URL ? '✅ Definida' : '❌ Não definida'}\n`);
 
-  if (!process.env.PRIVATE_KEY || !process.env.PUBLIC_KEY) {
-    console.error('❌ PRIVATE_KEY e PUBLIC_KEY devem estar definidas no .env');
+  if (!process.env.API_SECRET || !process.env.API_KEY) {
+    console.error('❌ API_SECRET e API_KEY devem estar definidas no .env');
     console.log('\n📝 Exemplo de configuração no .env:');
-    console.log('PRIVATE_KEY=sua_chave_privada_base64');
-    console.log('PUBLIC_KEY=sua_chave_publica_base64');
+    console.log('API_SECRET=sua_chave_secreta_base64');
+    console.log('API_KEY=sua_chave_api_base64');
     return;
   }
 

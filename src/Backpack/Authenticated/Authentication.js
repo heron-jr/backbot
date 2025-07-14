@@ -3,12 +3,12 @@ import nacl from 'tweetnacl';
 export function auth({ instruction, params = {}, timestamp, window = 30000 }) {
   try {
     // Verifica se as chaves estão definidas
-    if (!process.env.PRIVATE_KEY || !process.env.PUBLIC_KEY) {
-      throw new Error('PRIVATE_KEY e PUBLIC_KEY devem estar definidas no .env');
+    if (!process.env.API_SECRET || !process.env.API_KEY) {
+      throw new Error('API_SECRET e API_KEY devem estar definidas no .env');
     }
 
     // Decodifica a chave privada
-    const privateKeySeed = Buffer.from(process.env.PRIVATE_KEY, 'base64'); 
+    const privateKeySeed = Buffer.from(process.env.API_SECRET, 'base64'); 
     const keyPair = nacl.sign.keyPair.fromSeed(privateKeySeed);
 
     // Ordena e constrói os parâmetros
@@ -24,7 +24,7 @@ export function auth({ instruction, params = {}, timestamp, window = 30000 }) {
     const signature = nacl.sign.detached(Buffer.from(payload), keyPair.secretKey);
 
     return {
-      'X-API-Key': process.env.PUBLIC_KEY,
+      'X-API-Key': process.env.API_KEY,
       'X-Signature': Buffer.from(signature).toString('base64'),
       'X-Timestamp': timestamp.toString(),
       'X-Window': window.toString(),

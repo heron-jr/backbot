@@ -17,8 +17,8 @@
 npm run test-auth
 
 # Verifique seu .env
-PRIVATE_KEY=sua_chave_privada_base64
-PUBLIC_KEY=sua_chave_publica_base64
+API_SECRET=sua_chave_secreta_base64
+API_KEY=sua_chave_api_base64
 ```
 
 ### 2. Erros de Ordem Inválida
