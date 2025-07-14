@@ -12,7 +12,7 @@ async function startDecision() {
 }
 
 async function startStops() {
-  await TrailingStop.stopLoss()
+  await TrailingStop.stopLoss();
   setTimeout(startStops, 1000); //1s
 }
 

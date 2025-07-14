@@ -9,7 +9,7 @@ class TrailingStop {
   constructor() {
     // Inicializa o stop loss baseado na estratégia configurada
     const strategyType = process.env.TRADING_STRATEGY || 'DEFAULT';
-    this.stopLoss = StopLossFactory.createStopLoss(strategyType);
+    this.stopLossStrategy = StopLossFactory.createStopLoss(strategyType);
     
     console.log(`🛡️ Stop Loss carregado para estratégia: ${strategyType.toUpperCase()}`);
   }
@@ -26,7 +26,7 @@ class TrailingStop {
 
       for (const position of positions) {
         // Usa o stop loss específico da estratégia
-        const decision = this.stopLoss.shouldClosePosition(position, Account);
+        const decision = this.stopLossStrategy.shouldClosePosition(position, Account);
         
         if (decision && decision.shouldClose) {
           console.log(`❌ STOP LOSS (${decision.type}): ${decision.reason}. Fechando.`);

@@ -1,6 +1,7 @@
 import Order from '../Backpack/Authenticated/Order.js';
 import AccountController from './AccountController.js';
 import Utils from '../utils/Utils.js';
+import Markets from '../Backpack/Public/Markets.js';
 
 class OrderController {
 
@@ -43,7 +44,6 @@ class OrderController {
     const tickSize = currentMarket?.tickSize || 0.0001;
 
     // Obtém o preço atual do mercado para usar como referência
-    const Markets = (await import('../Backpack/Public/Markets.js')).default;
     const markPrices = await Markets.getAllMarkPrices(market);
     const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
 
