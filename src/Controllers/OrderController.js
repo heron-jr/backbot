@@ -42,21 +42,37 @@ class OrderController {
     const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
     const tickSize = currentMarket?.tickSize || 0.0001;
 
+    // Obtém o preço atual do mercado para comparação
+    const Markets = (await import('../Backpack/Public/Markets.js')).default;
+    const markPrices = await Markets.getAllMarkPrices(market);
+    const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
+
+    // Calcula a diferença percentual entre o preço de entrada e o preço atual
+    const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
+    
+    // Ajusta o multiplicador baseado na volatilidade
+    let tickMultiplier = 15; // Base
+    if (priceDiff < 0.001) { // Se muito próximo do mercado
+      tickMultiplier = 25;
+    } else if (priceDiff < 0.005) { // Se próximo do mercado
+      tickMultiplier = 20;
+    }
+
     // Ajusta o preço para evitar execução imediata
     let adjustedPrice;
     if (isLong) {
       // Para compra: preço ligeiramente abaixo do mercado (mais conservador)
-      adjustedPrice = entryPrice - (tickSize * 15);
+      adjustedPrice = entryPrice - (tickSize * tickMultiplier);
     } else {
       // Para venda: preço ligeiramente acima do mercado (mais conservador)
-      adjustedPrice = entryPrice + (tickSize * 15);
+      adjustedPrice = entryPrice + (tickSize * tickMultiplier);
     }
 
     const quantity = formatQuantity(Math.floor((volume / entryPrice) / stepSize_quantity) * stepSize_quantity);
     const price = formatPrice(adjustedPrice);
 
     // Log do ajuste de preço
-    console.log(`💰 ${market}: Preço original ${entryPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'})`);
+    console.log(`💰 ${market}: Preço original ${entryPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'}) [Diff: ${(priceDiff * 100).toFixed(3)}%]`);
 
     const body = {
       symbol: market,
@@ -87,7 +103,7 @@ class OrderController {
     if(body.quantity > 0 && body.price > 0){
       const result = await Order.executeOrder(body);
       
-      // Se a ordem falhar por preço muito próximo, tenta com preço mais conservador
+      // Se a ordem falhar, tenta com preço ainda mais conservador
       if (!result) {
         console.log(`⚠️ Tentando ordem com preço mais conservador para ${market}`);
         
