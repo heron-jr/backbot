@@ -46,10 +46,10 @@ class OrderController {
     let adjustedPrice;
     if (isLong) {
       // Para compra: preço ligeiramente abaixo do mercado (mais conservador)
-      adjustedPrice = entryPrice - (tickSize * 5);
+      adjustedPrice = entryPrice - (tickSize * 15);
     } else {
       // Para venda: preço ligeiramente acima do mercado (mais conservador)
-      adjustedPrice = entryPrice + (tickSize * 5);
+      adjustedPrice = entryPrice + (tickSize * 15);
     }
 
     const quantity = formatQuantity(Math.floor((volume / entryPrice) / stepSize_quantity) * stepSize_quantity);
@@ -88,7 +88,7 @@ class OrderController {
       const result = await Order.executeOrder(body);
       
       // Se a ordem falhar por preço muito próximo, tenta com preço mais conservador
-      if (!result && error?.message?.includes('immediately match')) {
+      if (!result) {
         console.log(`⚠️ Tentando ordem com preço mais conservador para ${market}`);
         
         const moreConservativePrice = isLong 
