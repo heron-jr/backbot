@@ -33,6 +33,13 @@ class TrailingStop {
           await OrderController.forceClose(position);
           continue;
         }
+
+        // Verifica se deve realizar take profit parcial
+        if (decision && decision.shouldTakePartialProfit) {
+          console.log(`💰 TAKE PROFIT PARCIAL (${decision.type}): ${decision.reason}. Realizando ${decision.partialPercentage}%.`);
+          await OrderController.takePartialProfit(position, decision.partialPercentage);
+          continue;
+        }
       }
 
     } catch (error) {

@@ -1,10 +1,10 @@
 import { DefaultStopLoss } from './DefaultStopLoss.js';
-import { LevelStopLoss } from './LevelStopLoss.js';
+import { ProMaxStopLoss } from './ProMaxStopLoss.js';
 
 export class StopLossFactory {
   /**
    * Cria uma instância do stop loss baseada na estratégia
-   * @param {string} strategyType - Tipo da estratégia ('DEFAULT', 'LEVEL')
+   * @param {string} strategyType - Tipo da estratégia ('DEFAULT', 'PRO_MAX')
    * @returns {BaseStopLoss} - Instância do stop loss
    */
   static createStopLoss(strategyType) {
@@ -13,8 +13,8 @@ export class StopLossFactory {
     switch(strategy) {
       case 'DEFAULT':
         return new DefaultStopLoss();
-      case 'LEVEL':
-        return new LevelStopLoss();
+          case 'PRO_MAX':
+      return new ProMaxStopLoss();
       default:
         console.log(`⚠️ Stop loss para estratégia "${strategy}" não encontrado, usando DEFAULT`);
         return new DefaultStopLoss();
@@ -26,7 +26,7 @@ export class StopLossFactory {
    * @returns {string[]} - Array com nomes dos stop losses
    */
   static getAvailableStopLosses() {
-    return ['DEFAULT', 'LEVEL'];
+    return ['DEFAULT', 'PRO_MAX'];
   }
 
   /**

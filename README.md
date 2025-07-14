@@ -4,13 +4,13 @@ A crypto trading bot for Backpack Exchange. It trades perpetual futures automati
 
 ## 🚀 Features
 
-- **Multiple Trading Strategies**: Support for DEFAULT and LEVEL strategies
+- **Multiple Trading Strategies**: Support for DEFAULT and PRO_MAX strategies
 - **Modular Stop Loss System**: Each strategy can have its own stop loss logic
 - **Flexible Capital Management**: Use fixed amounts or percentage of available capital
 - **Real-time Market Analysis**: Technical indicators including RSI, EMA, MACD, Bollinger Bands, VWAP, ATR, Stochastic, and ADX
 - **Risk Management**: Automatic stop-loss and trailing stop functionality
 - **Modular Architecture**: Easy to add new strategies and indicators
-- **LEVEL Strategy**: Advanced ADX-based strategy with signal quality levels (BRONZE, SILVER, GOLD, DIAMOND)
+- **PRO_MAX Strategy**: Advanced ADX-based strategy with signal quality levels (BRONZE, SILVER, GOLD, DIAMOND)
 
 ## 📋 Requirements
 
@@ -31,9 +31,9 @@ cp env.example .env
 
 #### Trading Strategy
 ```bash
-TRADING_STRATEGY=DEFAULT  # or LEVEL
+TRADING_STRATEGY=DEFAULT  # or PRO_MAX
 
-# LEVEL Strategy Configuration
+# PRO_MAX Strategy Configuration
 IGNORE_BRONZE_SIGNALS=true  # Ignore BRONZE signals (only SILVER, GOLD, DIAMOND)
 ADX_LENGTH=14              # ADX period
 ADX_THRESHOLD=20           # ADX threshold for volume confirmation
@@ -55,31 +55,64 @@ LIMIT_ORDER=5                    # Max open orders
 STOP_LOSS_TYPE=USD              # USD or PERCENTAGE (for DEFAULT strategy)
 MAX_NEGATIVE_PNL_STOP=-5        # Stop loss in USD (when STOP_LOSS_TYPE=USD)
 MAX_NEGATIVE_PNL_STOP_PCT=-4    # Stop loss in percentage (when STOP_LOSS_TYPE=PERCENTAGE)
-MINIMAL_VOLUME=50               # Min volume to maintain position
+MINIMAL_VOLUME=50               # Min volume to maintain position (DEFAULT strategy only)
 
 # Take Profit Minimum Settings
-MIN_TAKE_PROFIT_USD=0.5         # Minimum take profit in USD
 MIN_TAKE_PROFIT_PCT=0.5         # Minimum take profit in percentage
-MIN_RISK_REWARD_RATIO=1.5       # Minimum risk/reward ratio
-ENABLE_TP_VALIDATION=false      # Enable real-time take profit validation
+ENABLE_TP_VALIDATION=false      # Enable real-time take profit monitoring
+TP_PARTIAL_PERCENTAGE=50        # Percentage of position to take partial profit
 ```
 
 **Note**: Stop loss logic is automatically selected based on your trading strategy. Each strategy can implement its own stop loss rules.
 
-**Take Profit Validation**: The bot will only execute trades that meet minimum take profit criteria (percentage and risk/reward ratio).
+**Important**: The `MINIMAL_VOLUME` validation is only applied to the `DEFAULT` strategy. The `PRO_MAX` strategy does not use this validation to avoid premature position closure, as it works with multiple targets and may have smaller initial volumes.
 
-**Real-time Take Profit Validation**: When enabled (`ENABLE_TP_VALIDATION=true`), the bot will close positions that no longer meet minimum take profit criteria, ensuring only high-quality trades remain open.
+**Stop Loss Strategy**: The `PRO_MAX` strategy uses the calculated stop loss (based on ATR) that is sent to the exchange, rather than a dynamic stop loss that adjusts continuously. This ensures consistency with the original strategy calculation.
 
-## 🎯 LEVEL Strategy (ADX-based)
+**Take Profit Management**: The `PRO_MAX` strategy uses a monitoring system that detects when entry orders are executed and then creates the corresponding take profit orders. This ensures that take profits are only created after the position is actually opened, avoiding premature order creation.
 
-The LEVEL strategy is based on the ADX indicator with multiple validation layers and signal quality levels.
+**Fast Monitoring**: The monitoring system runs every 5 seconds to ensure take profits are created immediately after entry orders are executed, providing faster response times compared to the main analysis cycle (1 minute).
+
+**Take Profit Monitoring**: When enabled (`ENABLE_TP_VALIDATION=true`), the bot monitors open positions and automatically takes partial profits when minimum criteria are met:
+
+- **Minimum Take Profit**: Position must reach minimum percentage gain
+- **Partial Profit**: Takes configured percentage of position (default: 50%)
+- **Risk Reduction**: Secures profits while keeping remaining position open
+
+This feature helps secure profits early while allowing positions to continue running for additional gains.
+
+## 🎯 PRO_MAX Strategy (ADX-based)
+
+The PRO_MAX strategy is based on the ADX indicator with multiple validation layers and signal quality levels.
 
 ### Signal Quality Levels
 
-- **BRONZE**: 1 confluence (ADX only)
-- **SILVER**: 2 confluences (ADX + 1 validation)
-- **GOLD**: 3 confluences (ADX + 2 validations)
-- **DIAMOND**: 4 confluences (ADX + 3 validations)
+- **🥉 BRONZE**: 1 confluence (ADX only)
+- **🥈 SILVER**: 2 confluences (ADX + 1 indicator)
+- **🥇 GOLD**: 3 confluences (ADX + 2 indicators)
+- **💎 DIAMOND**: 4 confluences (ADX + all 3 indicators)
+
+### Logs da Estratégia PRO_MAX
+
+O bot agora mostra claramente o nível de cada sinal:
+
+```
+✅ [PRO_MAX] SOL_USDC_PERP (🥉 BRONZE): LONG - Confluências: 1/4 - Targets: 5 - PnL $0.15
+✅ [PRO_MAX] BTC_USDC_PERP (🥈 SILVER): SHORT - Confluências: 2/4 - Targets: 3 - PnL $2.50
+✅ [PRO_MAX] ETH_USDC_PERP (🥇 GOLD): LONG - Confluências: 3/4 - Targets: 4 - PnL $1.20
+✅ [PRO_MAX] ADA_USDC_PERP (💎 DIAMOND): SHORT - Confluências: 4/4 - Targets: 6 - PnL $0.80
+```
+
+**Logs de Sinais Ignorados:**
+```
+⚠️ [PRO_MAX] DOGE_USDC_PERP (🥉 BRONZE): Sinal LONG ignorado - IGNORE_BRONZE_SIGNALS=true
+```
+
+**Logs de Execução:**
+```
+✅ kPEPE_USDC_PERP (🥉 BRONZE): Executada
+❌ BTC_USDC_PERP (🥈 SILVER): Falhou
+```
 
 ### Validation Indicators
 

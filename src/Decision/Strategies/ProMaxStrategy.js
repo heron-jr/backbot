@@ -1,8 +1,8 @@
 import { BaseStrategy } from './BaseStrategy.js';
 
-export class LevelStrategy extends BaseStrategy {
-  /**
-   * Implementação da estratégia LEVEL baseada no script PineScript ADX
+export class ProMaxStrategy extends BaseStrategy {
+      /**
+     * Implementação da estratégia PRO_MAX baseada no script PineScript ADX
    * @param {number} fee - Taxa da exchange
    * @param {object} data - Dados de mercado com indicadores
    * @param {number} investmentUSD - Valor a investir
@@ -16,7 +16,7 @@ export class LevelStrategy extends BaseStrategy {
         return null;
       }
 
-      // Configurações da estratégia LEVEL
+      // Configurações da estratégia PRO_MAX
       const IGNORE_BRONZE = process.env.IGNORE_BRONZE_SIGNALS === 'true';
       const ADX_LENGTH = Number(process.env.ADX_LENGTH || 14);
       const ADX_THRESHOLD = Number(process.env.ADX_THRESHOLD || 20);
@@ -82,6 +82,14 @@ export class LevelStrategy extends BaseStrategy {
       const isValidBullSignal = !IGNORE_BRONZE || bullSignalLevel !== 'BRONZE';
       const isValidBearSignal = !IGNORE_BRONZE || bearSignalLevel !== 'BRONZE';
 
+      // Log de sinais ignorados (BRONZE)
+      if (IGNORE_BRONZE && adxAnalysis.bullishCondition && bullConfluences === 1) {
+        console.log(`⚠️ [PRO_MAX] ${data.market.symbol} (BRONZE): Sinal LONG ignorado - IGNORE_BRONZE_SIGNALS=true`);
+      }
+      if (IGNORE_BRONZE && adxAnalysis.bearishCondition && bearConfluences === 1) {
+        console.log(`⚠️ [PRO_MAX] ${data.market.symbol} (BRONZE): Sinal SHORT ignorado - IGNORE_BRONZE_SIGNALS=true`);
+      }
+
       // Determina ação baseada nas confluências
       let action = null;
       let signalLevel = null;
@@ -109,24 +117,14 @@ export class LevelStrategy extends BaseStrategy {
       const { stop, targets } = stopAndTargets;
       const entry = price;
 
-      // Validação de take profit mínimo (usando o primeiro target)
-      const ENABLE_TP_VALIDATION = process.env.ENABLE_TP_VALIDATION === 'true';
-      
-      if (ENABLE_TP_VALIDATION && targets.length > 0) {
-        const firstTarget = targets[0];
-        const takeProfitValidation = this.validateTakeProfit(action, entry, stop, firstTarget, investmentUSD, fee);
-        
-        if (!takeProfitValidation.isValid) {
-          return null;
-        }
-      }
+
 
       // Calcula PnL usando o primeiro target para validação
       const firstTarget = targets.length > 0 ? targets[0] : entry;
       const { pnl, risk } = this.calculatePnLAndRisk(action, entry, stop, firstTarget, investmentUSD, fee);
 
       // Log apenas quando há operação para ser aberta
-      console.log(`✅ [LEVEL] ${data.market.symbol} (${signalLevel}): ${action.toUpperCase()} - Confluências: ${action === 'long' ? bullConfluences : bearConfluences}/4 - Targets: ${targets.length} - PnL $${pnl.toFixed(2)}`);
+      console.log(`✅ [PRO_MAX] ${data.market.symbol} (${signalLevel}): ${action.toUpperCase()} - Confluências: ${action === 'long' ? bullConfluences : bearConfluences}/4 - Targets: ${targets.length} - PnL $${pnl.toFixed(2)}`);
 
       return {
         market: data.market.symbol,
@@ -142,7 +140,7 @@ export class LevelStrategy extends BaseStrategy {
       };
 
     } catch (error) {
-      console.error('LevelStrategy.analyzeTrade - Error:', error);
+      console.error('ProMaxStrategy.analyzeTrade - Error:', error);
       return null;
     }
   }
@@ -183,7 +181,7 @@ export class LevelStrategy extends BaseStrategy {
         bearishCondition
       };
     } catch (error) {
-      console.error('LevelStrategy.analyzeADX - Error:', error);
+      console.error('ProMaxStrategy.analyzeADX - Error:', error);
       return { isValid: false };
     }
   }
@@ -235,7 +233,7 @@ export class LevelStrategy extends BaseStrategy {
 
       return result;
     } catch (error) {
-      console.error('LevelStrategy.analyzeValidations - Error:', error);
+      console.error('ProMaxStrategy.analyzeValidations - Error:', error);
       return { rsi: { bullish: false, bearish: false }, stoch: { bullish: false, bearish: false }, macd: { bullish: false, bearish: false } };
     }
   }
@@ -306,11 +304,11 @@ export class LevelStrategy extends BaseStrategy {
    * @returns {string} - Nível do sinal (BRONZE, SILVER, GOLD, DIAMOND)
    */
   getSignalLevel(confluences) {
-    if (confluences === 1) return 'BRONZE';
-    if (confluences === 2) return 'SILVER';
-    if (confluences === 3) return 'GOLD';
-    if (confluences === 4) return 'DIAMOND';
-    return 'UNKNOWN';
+    if (confluences === 1) return '🥉 BRONZE';
+    if (confluences === 2) return '🥈 SILVER';
+    if (confluences === 3) return '🥇 GOLD';
+    if (confluences === 4) return '💎 DIAMOND';
+    return '❓ UNKNOWN';
   }
 
   /**
@@ -323,8 +321,8 @@ export class LevelStrategy extends BaseStrategy {
   calculateStopAndMultipleTargets(data, price, action) {
     try {
       // Configurações das zonas de objetivo
-      const ATR_ZONE_MULTIPLIER = 2.0;
-      const SL_ATR_MULTIPLIER = 1.5;
+      const ATR_ZONE_MULTIPLIER = 4.0;
+      const SL_ATR_MULTIPLIER = 3.5;
       const MAX_TARGETS_PER_ORDER = Number(process.env.MAX_TARGETS_PER_ORDER || 20);
       
       // Obtém o timeframe atual
@@ -382,7 +380,7 @@ export class LevelStrategy extends BaseStrategy {
       return { stop, targets };
 
     } catch (error) {
-      console.error('LevelStrategy.calculateStopAndMultipleTargets - Error:', error);
+      console.error('ProMaxStrategy.calculateStopAndMultipleTargets - Error:', error);
       return null;
     }
   }

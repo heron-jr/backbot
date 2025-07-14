@@ -6,6 +6,190 @@ import Markets from '../Backpack/Public/Markets.js';
 
 class OrderController {
 
+  // Armazena ordens de entrada pendentes para monitoramento (apenas estratégia PRO_MAX)
+  static pendingEntryOrders = {};
+
+  /**
+   * Adiciona ordem de entrada para monitoramento (apenas estratégia PRO_MAX)
+   * @param {string} market - Símbolo do mercado
+   * @param {object} orderData - Dados da ordem (stop, isLong, etc.)
+   */
+  static addPendingEntryOrder(market, orderData) {
+    // Remove qualquer campo targets do orderData
+    const { targets, ...cleanOrderData } = orderData;
+    OrderController.pendingEntryOrders[market] = {
+      ...cleanOrderData,
+      addedAt: Date.now()
+    };
+    console.log(`📋 [MONITOR] Ordem adicionada ao monitoramento: ${market} - Total: ${Object.keys(OrderController.pendingEntryOrders).length}`);
+  }
+
+  /**
+   * Remove ordem de entrada do monitoramento
+   * @param {string} market - Símbolo do mercado
+   */
+  static removePendingEntryOrder(market) {
+    delete OrderController.pendingEntryOrders[market];
+  }
+
+  /**
+   * Monitora ordens de entrada pendentes e cria take profits quando executadas
+   */
+  static async monitorPendingEntryOrders() {
+    try {
+      const markets = Object.keys(OrderController.pendingEntryOrders);
+      if (markets.length === 0) return;
+
+      // Tenta obter posições com retry
+      let positions = [];
+      try {
+        positions = await Futures.getOpenPositions() || [];
+      } catch (error) {
+        console.warn('⚠️ [MONITOR] Falha ao obter posições, continuando monitoramento...');
+        positions = [];
+      }
+      
+      for (const market of markets) {
+        const orderData = OrderController.pendingEntryOrders[market];
+        const position = positions.find(p => p.symbol === market && Math.abs(Number(p.netQuantity)) > 0);
+        
+        if (position) {
+          // Posição foi aberta, delega para método dedicado
+          console.log(`🎯 ${market}: Ordem de entrada executada, processando TPs...`);
+          await OrderController.handlePositionOpenedForProMax(market, position, orderData);
+          OrderController.removePendingEntryOrder(market);
+        } else {
+          // Verifica se a ordem ainda existe (não foi cancelada)
+          try {
+            const openOrders = await Order.getOpenOrders(market);
+            const hasEntryOrder = openOrders && openOrders.some(o => 
+              !o.reduceOnly && o.orderType === 'Limit' && o.symbol === market
+            );
+            
+            if (!hasEntryOrder) {
+              // Ordem não existe mais (foi cancelada ou executada sem posição)
+              console.log(`⚠️ ${market}: Ordem de entrada não encontrada, removendo do monitoramento`);
+              OrderController.removePendingEntryOrder(market);
+            }
+          } catch (orderError) {
+            console.warn(`⚠️ [MONITOR] Falha ao verificar ordens de ${market}, mantendo no monitoramento...`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Erro no monitoramento de ordens pendentes:', error.message);
+    }
+  }
+
+  /**
+   * Lógica dedicada para tratar a criação dos Take Profits após execução da ordem PRO_MAX
+   */
+  static async handlePositionOpenedForProMax(market, position, orderData) {
+    try {
+      // Busca informações do mercado
+      const Account = await AccountController.get();
+      const marketInfo = Account.markets.find(m => m.symbol === market);
+      if (!marketInfo) {
+        console.error(`❌ [PRO_MAX] Market info não encontrada para ${market}`);
+        return;
+      }
+      const decimal_quantity = marketInfo.decimal_quantity;
+      const decimal_price = marketInfo.decimal_price;
+      const stepSize_quantity = marketInfo.stepSize_quantity;
+
+      // Preço real de entrada
+      const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+      const isLong = parseFloat(position.netQuantity) > 0;
+      
+      // Recalcula os targets usando a estratégia PRO_MAX
+      // Importa a estratégia para usar o cálculo
+      const { ProMaxStrategy } = await import('../Decision/Strategies/ProMaxStrategy.js');
+      const strategy = new ProMaxStrategy();
+      // Para o cálculo, precisamos de dados de mercado (ATR, etc). Usamos o último candle disponível.
+      const candles = await Markets.getKLines(market, process.env.TIME, 30);
+      const { calculateIndicators } = await import('../Decision/Indicators.js');
+      const indicators = calculateIndicators(candles);
+      const data = { ...indicators, market: marketInfo, marketPrice: entryPrice };
+      const action = isLong ? 'long' : 'short';
+      const stopAndTargets = strategy.calculateStopAndMultipleTargets(data, entryPrice, action);
+      if (!stopAndTargets) {
+        console.error(`❌ [PRO_MAX] Não foi possível calcular targets para ${market}`);
+        return;
+      }
+      const { stop, targets } = stopAndTargets;
+      if (!targets || targets.length === 0) {
+        console.error(`❌ [PRO_MAX] Nenhum target calculado para ${market}`);
+        return;
+      }
+
+      // Quantidade total da posição
+      const totalQuantity = Math.abs(Number(position.netQuantity));
+      // Quantidade por target (divisão igualitária)
+      const quantityPerTarget = Math.floor((totalQuantity / targets.length) / stepSize_quantity) * stepSize_quantity;
+      // Ajusta o último target para garantir 100%
+      let remaining = totalQuantity - (quantityPerTarget * (targets.length - 1));
+
+      const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+      const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+
+      console.log(`🎯 [PRO_MAX] ${market}: Criando ${targets.length} take profits. Qtd por alvo: ${quantityPerTarget}, Qtd final: ${remaining}`);
+
+      // Cria ordens de take profit
+      for (let i = 0; i < targets.length; i++) {
+        const targetPrice = parseFloat(targets[i]);
+        const takeProfitTriggerPrice = (targetPrice + Number(position.markPrice)) / 2;
+        const qty = i === targets.length - 1 ? remaining : quantityPerTarget;
+        const orderBody = {
+          symbol: market,
+          side: isLong ? 'Ask' : 'Bid',
+          orderType: 'Limit',
+          postOnly: true,
+          reduceOnly: true,
+          quantity: formatQuantity(qty),
+          price: formatPrice(targetPrice),
+          takeProfitTriggerBy: 'LastPrice',
+          takeProfitTriggerPrice: formatPrice(takeProfitTriggerPrice),
+          takeProfitLimitPrice: formatPrice(targetPrice),
+          timeInForce: 'GTC',
+          selfTradePrevention: 'RejectTaker',
+          clientId: Math.floor(Math.random() * 1000000) + i
+        };
+        const result = await Order.executeOrder(orderBody);
+        if (result) {
+          console.log(`✅ [PRO_MAX] ${market}: Take Profit ${i + 1}/${targets.length} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
+        } else {
+          console.log(`⚠️ [PRO_MAX] ${market}: Take Profit ${i + 1}/${targets.length} não criado`);
+        }
+      }
+
+      // Cria ordem de stop loss se necessário
+      if (stop !== undefined && !isNaN(parseFloat(stop))) {
+        const stopLossTriggerPrice = (Number(stop) + Number(position.markPrice)) / 2;
+        const stopBody = {
+          symbol: market,
+          side: isLong ? 'Ask' : 'Bid',
+          orderType: 'Limit',
+          postOnly: true,
+          reduceOnly: true,
+          quantity: formatQuantity(totalQuantity),
+          price: formatPrice(stop),
+          stopLossTriggerBy: 'LastPrice',
+          stopLossTriggerPrice: formatPrice(stopLossTriggerPrice),
+          stopLossLimitPrice: formatPrice(stop),
+          timeInForce: 'GTC',
+          selfTradePrevention: 'RejectTaker',
+          clientId: Math.floor(Math.random() * 1000000) + 9999
+        };
+        const stopResult = await Order.executeOrder(stopBody);
+        if (stopResult) {
+          console.log(`🛡️ [PRO_MAX] ${market}: Stop loss criado - Preço: ${stop.toFixed(6)}`);
+        }
+      }
+    } catch (error) {
+      console.error(`❌ [PRO_MAX] Erro ao processar posição aberta para ${market}:`, error.message);
+    }
+  }
+
   /**
    * Valida se há margem suficiente para abrir uma ordem
    * @param {string} market - Símbolo do mercado
@@ -19,8 +203,8 @@ class OrderController {
       const positions = await Futures.getOpenPositions();
       const currentPosition = positions?.find(p => p.symbol === market);
       
-      // Calcula margem necessária para a nova ordem
-      const requiredMargin = volume * accountInfo.leverage;
+      // Calcula margem necessária para a nova ordem (volume / leverage)
+      const requiredMargin = volume / accountInfo.leverage;
       
       // Calcula margem já em uso
       let usedMargin = 0;
@@ -112,66 +296,93 @@ class OrderController {
     return closeResult;
   }
 
-  async openOrder({ entry, stop, target, targets, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity }) {
-    
+  /**
+   * Realiza take profit parcial de uma posição
+   * @param {object} position - Dados da posição
+   * @param {number} partialPercentage - Porcentagem da posição para realizar
+   * @returns {boolean} - Sucesso da operação
+   */
+  async takePartialProfit(position, partialPercentage = 50) {
     try {
-    
+      const Account = await AccountController.get()
+      const market = Account.markets.find((el) => {
+          return el.symbol === position.symbol
+      })
+      
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const totalQuantity = Math.abs(parseFloat(position.netQuantity));
+      const partialQuantity = (totalQuantity * partialPercentage) / 100;
+      const decimal = market.decimal_quantity
+
+      const body = {
+          symbol: position.symbol,
+          orderType: 'Market',
+          side: isLong ? 'Ask' : 'Bid', // Ask if LONG , Bid if SHORT
+          reduceOnly: true, 
+          clientId: Math.floor(Math.random() * 1000000),
+          quantity: String(partialQuantity.toFixed(decimal))
+      };
+
+      console.log(`💰 ${position.symbol}: Realizando take profit parcial de ${partialPercentage}% (${partialQuantity.toFixed(decimal)} de ${totalQuantity.toFixed(decimal)})`);
+
+      // Realiza o take profit parcial
+      const partialResult = await Order.executeOrder(body);
+      
+      if (partialResult) {
+        console.log(`✅ ${position.symbol}: Take profit parcial realizado com sucesso`);
+        return true;
+      } else {
+        console.error(`❌ ${position.symbol}: Falha ao realizar take profit parcial`);
+        return false;
+      }
+
+    } catch (error) {
+      console.error(`❌ Erro ao realizar take profit parcial para ${position.symbol}:`, error.message);
+      return false;
+    }
+  }
+
+  async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity }) {
+    try {
     const isLong = action === "long";
     const side = isLong ? "Bid" : "Ask";
-
     const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
     const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
-
     const entryPrice = parseFloat(entry);
-    
     // Obtém informações da conta e mercado
     const marketInfo = await AccountController.get();
     if (!marketInfo) {
       console.error(`❌ Não foi possível obter informações da conta para ${market}`);
       return false;
     }
-
     const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
     const tickSize = currentMarket?.tickSize || 0.0001;
-
     // Validação de margem antes de tentar abrir a ordem
     const marginValidation = await this.validateMargin(market, volume, marketInfo);
     if (!marginValidation.isValid) {
       console.warn(`⚠️ Margem insuficiente para ${market}: ${marginValidation.message}`);
       return false;
     }
-
     // Obtém o preço atual do mercado para usar como referência
     const markPrices = await Markets.getAllMarkPrices(market);
     const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
-
     // Calcula a diferença percentual entre o preço de entrada e o preço atual
     const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
-    
     // Ajusta o multiplicador baseado na volatilidade
     let tickMultiplier = 20; // Base mais conservador
-    if (priceDiff < 0.001) { // Se muito próximo do mercado
-      tickMultiplier = 30;
-    } else if (priceDiff < 0.005) { // Se próximo do mercado
-      tickMultiplier = 25;
-    }
-
+    if (priceDiff < 0.001) { tickMultiplier = 30; }
+    else if (priceDiff < 0.005) { tickMultiplier = 25; }
     // Usa o preço de mercado atual como base para evitar rejeições
     let adjustedPrice;
     if (isLong) {
-      // Para compra: preço ligeiramente abaixo do preço atual do mercado
       adjustedPrice = currentMarketPrice - (tickSize * tickMultiplier);
     } else {
-      // Para venda: preço ligeiramente acima do preço atual do mercado
       adjustedPrice = currentMarketPrice + (tickSize * tickMultiplier);
     }
-
     const quantity = formatQuantity(Math.floor((volume / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
     const price = formatPrice(adjustedPrice);
-
     // Log do ajuste de preço
     console.log(`💰 ${market}: Preço estratégia ${entryPrice.toFixed(6)} → Preço mercado ${currentMarketPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'}) [Diff: ${(priceDiff * 100).toFixed(3)}%]`);
-
     const body = {
       symbol: market,
       side,
@@ -182,57 +393,47 @@ class OrderController {
       timeInForce: "GTC",
       selfTradePrevention: "RejectTaker"
     };
-
     const stopLossTriggerPrice = (Number(stop) + Number(price)) / 2 
-
-    // Suporte para múltiplos targets (estratégia LEVEL)
-    if (targets && Array.isArray(targets) && targets.length > 0) {
-      // Usa o primeiro target para a ordem principal (compatibilidade)
-      const firstTarget = targets[0];
-      const takeProfitTriggerPrice = (Number(firstTarget) + Number(price)) / 2;
-      
-      body.takeProfitTriggerBy = "LastPrice";
-      body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
-      body.takeProfitLimitPrice = formatPrice(firstTarget);
-      
-      console.log(`🎯 ${market}: Múltiplos targets configurados (${targets.length} alvos) - Primeiro: ${firstTarget.toFixed(6)}`);
+    // Estratégia PRO_MAX: adiciona para monitoramento e cria apenas a ordem de entrada
+    if (process.env.TRADING_STRATEGY === 'PRO_MAX') {
+      OrderController.addPendingEntryOrder(market, {
+        stop,
+        isLong,
+        decimal_quantity,
+        decimal_price,
+        stepSize_quantity
+      });
+      console.log(`📋 ${market}: Ordem de entrada adicionada ao monitoramento (estratégia PRO_MAX)`);
     } else if (target !== undefined && !isNaN(parseFloat(target))) {
       // Fallback para target único (estratégia DEFAULT)
       const takeProfitTriggerPrice = (Number(target) + Number(price)) / 2;
-      
       body.takeProfitTriggerBy = "LastPrice";
       body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
       body.takeProfitLimitPrice = formatPrice(target);
     }
-
     if (stop !== undefined && !isNaN(parseFloat(stop))) {
       body.stopLossTriggerBy = "LastPrice";
       body.stopLossTriggerPrice = formatPrice(stopLossTriggerPrice);
       body.stopLossLimitPrice = formatPrice(stop);
     }
-
     if(body.quantity > 0 && body.price > 0){
       const result = await Order.executeOrder(body);
-      
-      // Se a ordem falhar, tenta com preço ainda mais conservador
       if (!result) {
         console.log(`⚠️ Tentando ordem com preço mais conservador para ${market}`);
-        
         const moreConservativePrice = isLong 
-          ? currentMarketPrice - (tickSize * (tickMultiplier + 15))  // Mais abaixo para compra
-          : currentMarketPrice + (tickSize * (tickMultiplier + 15));  // Mais acima para venda
-        
+          ? currentMarketPrice - (tickSize * (tickMultiplier + 15))
+          : currentMarketPrice + (tickSize * (tickMultiplier + 15));
         body.price = formatPrice(moreConservativePrice);
         console.log(`💰 ${market}: Novo preço ${moreConservativePrice.toFixed(6)}`);
-        
         return await Order.executeOrder(body);
       }
-      
       return result;
     }
-
+    console.error(`❌ ${market}: Quantidade (${body.quantity}) ou preço (${body.price}) inválidos`);
+    return false;
     } catch (error) {
       console.error('❌ OrderController.openOrder - Error:', error.message);
+      return false;
     }
   }
 
@@ -303,5 +504,6 @@ class OrderController {
 }
 
 export default new OrderController();
+export { OrderController };
 
 

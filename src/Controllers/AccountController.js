@@ -17,7 +17,11 @@ class AccountController {
       return null;
     }
 
-    let markets = await Markets.getMarkets()
+    let markets = await Markets.getMarkets();
+    if (!markets) {
+      console.error('❌ AccountController.get - Markets.getMarkets() retornou null. API pode estar offline.');
+      return null;
+    }
 
     const AUTHORIZED_MARKET = JSON.parse(process.env.AUTHORIZED_MARKET || '[]')
 

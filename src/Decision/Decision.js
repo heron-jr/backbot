@@ -1,6 +1,7 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
 import Order from '../Backpack/Authenticated/Order.js';
 import OrderController from '../Controllers/OrderController.js';
+import { OrderController as OrderControllerClass } from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import { calculateIndicators } from './Indicators.js';
@@ -237,8 +238,8 @@ class Decision {
     // Otimiza o cálculo da média RSI
     const media_rsi = dataset.reduce((sum, row) => sum + row.rsi.value, 0) / dataset.length;
 
-    // Só loga a média RSI se não for estratégia LEVEL
-    if (process.env.TRADING_STRATEGY !== 'LEVEL') {
+    // Só loga a média RSI se não for estratégia PRO_MAX
+    if (process.env.TRADING_STRATEGY !== 'PRO_MAX') {
       console.log("Média do RSI", media_rsi)
     }
 
@@ -302,6 +303,20 @@ class Decision {
     const successfulOrders = orderResults.filter(result => result !== null);
     const failedOrders = orderResults.filter(result => result === null);
     
+    // Log detalhado das ordens
+    console.log(`📊 Detalhes das ordens:`);
+    rows.forEach((row, index) => {
+      const result = orderResults[index];
+      const status = result !== null ? '✅' : '❌';
+      
+      // Para estratégia PRO_MAX, inclui o nível do sinal
+      if (process.env.TRADING_STRATEGY === 'PRO_MAX' && row.signalLevel) {
+        console.log(`${status} ${row.market} (${row.signalLevel}): ${result !== null ? 'Executada' : 'Falhou'}`);
+      } else {
+        console.log(`${status} ${row.market}: ${result !== null ? 'Executada' : 'Falhou'}`);
+      }
+    });
+    
     if (successfulOrders.length > 0) {
       console.log(`✅ ${successfulOrders.length} ordens executadas com sucesso`);
     }
@@ -320,6 +335,9 @@ class Decision {
       });
       console.log(`⏰ Nenhuma operação encontrada. Próxima análise às ${timeString}`);
     }
+
+    // Monitoramento de ordens pendentes agora é feito a cada 5 segundos em app.js
+    // para resposta mais rápida na criação de take profits
     } else {
       console.log(`⚠️ Capital insuficiente para operar. Disponível: $${Account.capitalAvailable.toFixed(2)}`);
     }

@@ -34,7 +34,6 @@ export class BaseStrategy {
    */
   validateTakeProfit(action, entry, stop, target, investmentUSD, fee) {
     // Configurações do take profit mínimo (apenas porcentagem e R/R)
-    const MIN_RISK_REWARD_RATIO = Number(process.env.MIN_RISK_REWARD_RATIO || 1.5);
     const MIN_TAKE_PROFIT_PCT = Number(process.env.MIN_TAKE_PROFIT_PCT || 0.5);
 
     const { pnl, risk } = this.calculatePnLAndRisk(action, entry, stop, target, investmentUSD, fee);
@@ -44,10 +43,9 @@ export class BaseStrategy {
     const takeProfitPct = ((action === 'long') ? target - entry : entry - target) / entry * 100;
     
     // Validações (apenas porcentagem e R/R)
-    const isValidRatio = riskRewardRatio >= MIN_RISK_REWARD_RATIO;
     const isValidPct = takeProfitPct >= MIN_TAKE_PROFIT_PCT;
     
-    const isValid = isValidRatio && isValidPct;
+    const isValid = isValidPct;
     
     return {
       isValid,
@@ -56,7 +54,6 @@ export class BaseStrategy {
       riskRewardRatio: Number(riskRewardRatio.toFixed(2)),
       takeProfitPct: Number(takeProfitPct.toFixed(2)),
       reasons: {
-        ratio: isValidRatio ? null : `R/R ${riskRewardRatio.toFixed(2)} < mínimo ${MIN_RISK_REWARD_RATIO}`,
         pct: isValidPct ? null : `TP ${takeProfitPct.toFixed(2)}% < mínimo ${MIN_TAKE_PROFIT_PCT}%`
       }
     };

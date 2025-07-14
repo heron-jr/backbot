@@ -1,10 +1,10 @@
 import { DefaultStrategy } from './DefaultStrategy.js';
-import { LevelStrategy } from './LevelStrategy.js';
+import { ProMaxStrategy } from './ProMaxStrategy.js';
 
 export class StrategyFactory {
   /**
    * Cria uma instância da estratégia baseada no tipo especificado
-   * @param {string} strategyType - Tipo da estratégia ('DEFAULT', 'LEVEL')
+   * @param {string} strategyType - Tipo da estratégia ('DEFAULT', 'PRO_MAX')
    * @returns {BaseStrategy} - Instância da estratégia
    */
   static createStrategy(strategyType) {
@@ -17,9 +17,9 @@ export class StrategyFactory {
       case 'DEFAULT':
         console.log(`✅ StrategyFactory: Criando estratégia DEFAULT`);
         return new DefaultStrategy();
-      case 'LEVEL':
-        console.log(`✅ StrategyFactory: Criando estratégia LEVEL`);
-        return new LevelStrategy();
+          case 'PRO_MAX':
+      console.log(`✅ StrategyFactory: Criando estratégia PRO_MAX`);
+      return new ProMaxStrategy();
       default:
         console.log(`⚠️ Estratégia "${strategy}" não encontrada, usando DEFAULT`);
         return new DefaultStrategy();
@@ -31,7 +31,7 @@ export class StrategyFactory {
    * @returns {string[]} - Array com nomes das estratégias
    */
   static getAvailableStrategies() {
-    return ['DEFAULT', 'LEVEL'];
+    return ['DEFAULT', 'PRO_MAX'];
   }
 
   /**
