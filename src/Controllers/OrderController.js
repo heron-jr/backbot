@@ -1,9 +1,61 @@
 import Order from '../Backpack/Authenticated/Order.js';
+import Futures from '../Backpack/Authenticated/Futures.js';
 import AccountController from './AccountController.js';
 import Utils from '../utils/Utils.js';
 import Markets from '../Backpack/Public/Markets.js';
 
 class OrderController {
+
+  /**
+   * Valida se há margem suficiente para abrir uma ordem
+   * @param {string} market - Símbolo do mercado
+   * @param {number} volume - Volume em USD
+   * @param {object} accountInfo - Informações da conta
+   * @returns {object} - { isValid: boolean, message: string }
+   */
+  async validateMargin(market, volume, accountInfo) {
+    try {
+      // Obtém posições abertas para calcular margem em uso
+      const positions = await Futures.getOpenPositions();
+      const currentPosition = positions?.find(p => p.symbol === market);
+      
+      // Calcula margem necessária para a nova ordem
+      const requiredMargin = volume * accountInfo.leverage;
+      
+      // Calcula margem já em uso
+      let usedMargin = 0;
+      if (positions && positions.length > 0) {
+        usedMargin = positions.reduce((total, pos) => {
+          const positionValue = Math.abs(parseFloat(pos.netQuantity) * parseFloat(pos.markPrice));
+          return total + positionValue;
+        }, 0);
+      }
+      
+      // Margem disponível (com margem de segurança de 95%)
+      const availableMargin = accountInfo.capitalAvailable * 0.95;
+      const remainingMargin = availableMargin - usedMargin;
+      
+      // Verifica se há margem suficiente
+      if (requiredMargin > remainingMargin) {
+        return {
+          isValid: false,
+          message: `Necessário: $${requiredMargin.toFixed(2)}, Disponível: $${remainingMargin.toFixed(2)}, Em uso: $${usedMargin.toFixed(2)}`
+        };
+      }
+      
+      return {
+        isValid: true,
+        message: `Margem OK - Disponível: $${remainingMargin.toFixed(2)}, Necessário: $${requiredMargin.toFixed(2)}`
+      };
+      
+    } catch (error) {
+      console.error('❌ Erro na validação de margem:', error.message);
+      return {
+        isValid: false,
+        message: `Erro ao validar margem: ${error.message}`
+      };
+    }
+  }
 
   async cancelPendingOrders(symbol) {
     try {
@@ -72,10 +124,22 @@ class OrderController {
 
     const entryPrice = parseFloat(entry);
     
-    // Obtém o tickSize do mercado
+    // Obtém informações da conta e mercado
     const marketInfo = await AccountController.get();
+    if (!marketInfo) {
+      console.error(`❌ Não foi possível obter informações da conta para ${market}`);
+      return false;
+    }
+
     const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
     const tickSize = currentMarket?.tickSize || 0.0001;
+
+    // Validação de margem antes de tentar abrir a ordem
+    const marginValidation = await this.validateMargin(market, volume, marketInfo);
+    if (!marginValidation.isValid) {
+      console.warn(`⚠️ Margem insuficiente para ${market}: ${marginValidation.message}`);
+      return false;
+    }
 
     // Obtém o preço atual do mercado para usar como referência
     const markPrices = await Markets.getAllMarkPrices(market);
