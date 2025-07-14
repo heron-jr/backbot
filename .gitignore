@@ -30,3 +30,6 @@ pids/
 
 # coverage
 coverage/
+
+.env
+docs/
