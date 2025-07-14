@@ -5,6 +5,32 @@ import Markets from '../Backpack/Public/Markets.js';
 
 class OrderController {
 
+  async cancelPendingOrders(symbol) {
+    try {
+      // Obtém ordens abertas para o símbolo
+      const openOrders = await Order.getOpenOrders(symbol);
+      
+      if (!openOrders || openOrders.length === 0) {
+        console.log(`📭 Nenhuma ordem pendente para ${symbol}`);
+        return true;
+      }
+
+      // Cancela todas as ordens pendentes
+      const cancelResult = await Order.cancelOpenOrders(symbol);
+      
+      if (cancelResult) {
+        console.log(`🗑️ ${openOrders.length} ordens canceladas para ${symbol}`);
+        return true;
+      } else {
+        console.error(`❌ Falha ao cancelar ordens para ${symbol}`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`❌ Erro ao cancelar ordens para ${symbol}:`, error.message);
+      return false;
+    }
+  }
+
   async forceClose(position) {
     const Account = await AccountController.get()
     const market = Account.markets.find((el) => {
@@ -23,7 +49,15 @@ class OrderController {
         quantity:String(quantity.toFixed(decimal))
     };
 
-    return await Order.executeOrder(body);
+    // Fecha a posição
+    const closeResult = await Order.executeOrder(body);
+    
+    // Cancela ordens pendentes para este símbolo
+    if (closeResult) {
+      await this.cancelPendingOrders(position.symbol);
+    }
+
+    return closeResult;
   }
 
   async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity }) {

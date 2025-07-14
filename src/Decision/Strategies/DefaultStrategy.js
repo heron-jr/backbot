@@ -52,18 +52,48 @@ export class DefaultStrategy extends BaseStrategy {
       const { stop, target } = stopTarget;
       const entry = price;
 
-      // Cálculo de PnL e risco
-      const { pnl, risk } = this.calculatePnLAndRisk(action, entry, stop, target, investmentUSD, fee);
+      // Validação de take profit mínimo (só se habilitada)
+      const ENABLE_TP_VALIDATION = process.env.ENABLE_TP_VALIDATION === 'true';
+      
+      if (ENABLE_TP_VALIDATION) {
+        const takeProfitValidation = this.validateTakeProfit(action, entry, stop, target, investmentUSD, fee);
+        
+        if (!takeProfitValidation.isValid) {
+          const reasons = Object.values(takeProfitValidation.reasons).filter(r => r !== null);
+          console.log(`⚠️ ${data.market.symbol}: Take profit rejeitado - ${reasons.join(', ')}`);
+          return null;
+        }
 
-      return {
-        market: data.market.symbol,
-        entry: Number(entry.toFixed(data.market.decimal_price)),
-        stop: Number(stop.toFixed(data.market.decimal_price)),
-        target: Number(target.toFixed(data.market.decimal_price)),
-        action,
-        pnl,
-        risk
-      };
+        // Cálculo de PnL e risco
+        const { pnl, risk } = this.calculatePnLAndRisk(action, entry, stop, target, investmentUSD, fee);
+
+        console.log(`✅ ${data.market.symbol}: TP ${takeProfitValidation.takeProfitPct}%, R/R ${takeProfitValidation.riskRewardRatio}, PnL $${pnl.toFixed(2)}`);
+
+        return {
+          market: data.market.symbol,
+          entry: Number(entry.toFixed(data.market.decimal_price)),
+          stop: Number(stop.toFixed(data.market.decimal_price)),
+          target: Number(target.toFixed(data.market.decimal_price)),
+          action,
+          pnl,
+          risk
+        };
+      } else {
+        // Se validação desabilitada, executa normalmente sem verificar take profit mínimo
+        const { pnl, risk } = this.calculatePnLAndRisk(action, entry, stop, target, investmentUSD, fee);
+
+        console.log(`✅ ${data.market.symbol}: Executando sem validação de TP mínimo - PnL $${pnl.toFixed(2)}`);
+
+        return {
+          market: data.market.symbol,
+          entry: Number(entry.toFixed(data.market.decimal_price)),
+          stop: Number(stop.toFixed(data.market.decimal_price)),
+          target: Number(target.toFixed(data.market.decimal_price)),
+          action,
+          pnl,
+          risk
+        };
+      }
 
     } catch (error) {
       console.error('DefaultStrategy.analyzeTrade - Error:', error);
