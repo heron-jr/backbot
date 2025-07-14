@@ -5,6 +5,7 @@ A crypto trading bot for Backpack Exchange. It trades perpetual futures automati
 ## 🚀 Features
 
 - **Multiple Trading Strategies**: Support for DEFAULT and LEVEL strategies
+- **Modular Stop Loss System**: Each strategy can have its own stop loss logic
 - **Flexible Capital Management**: Use fixed amounts or percentage of available capital
 - **Real-time Market Analysis**: Technical indicators including RSI, EMA, MACD, Bollinger Bands, VWAP, ATR, Stochastic, and ADX
 - **Risk Management**: Automatic stop-loss and trailing stop functionality
@@ -47,11 +48,13 @@ CAPITAL_PERCENTAGE=5  # 5% of available capital
 #### Risk Management
 ```bash
 LIMIT_ORDER=5                    # Max open orders
-STOP_LOSS_TYPE=USD              # USD or PERCENTAGE
+STOP_LOSS_TYPE=USD              # USD or PERCENTAGE (for DEFAULT strategy)
 MAX_NEGATIVE_PNL_STOP=-5        # Stop loss in USD (when STOP_LOSS_TYPE=USD)
 MAX_NEGATIVE_PNL_STOP_PCT=-4    # Stop loss in percentage (when STOP_LOSS_TYPE=PERCENTAGE)
 MINIMAL_VOLUME=50               # Min volume to maintain position
 ```
+
+**Note**: Stop loss logic is automatically selected based on your trading strategy. Each strategy can implement its own stop loss rules.
 
 ## 🏃‍♂️ Quick Start
 
