@@ -57,12 +57,38 @@ class Order {
     try {
       const response = await axios.get(`${process.env.API_URL}/api/v1/orders`, {
         headers,
-        params
+        params,
+        timeout: 15000 // 15 segundos de timeout
       });
       return response.data
     } catch (error) {
-      console.error('getOpenOrders - ERROR!', error.response?.data || error.message);
-      return null
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        console.warn('⚠️ getOpenOrders - Timeout, tentando novamente em 2s...');
+        // Retry após 2 segundos
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        try {
+          const retryHeaders = auth({
+            instruction: 'orderQueryAll',
+            timestamp: Date.now(),
+            params
+          });
+          
+          const retryResponse = await axios.get(`${process.env.API_URL}/api/v1/orders`, {
+            headers: retryHeaders,
+            params,
+            timeout: 20000 // Timeout maior na segunda tentativa
+          });
+          
+          console.log('✅ getOpenOrders - Retry bem-sucedido');
+          return retryResponse.data;
+        } catch (retryError) {
+          console.error('❌ getOpenOrders - Retry falhou:', retryError.response?.data || retryError.message);
+          return null;
+        }
+      } else {
+        console.error('getOpenOrders - ERROR!', error.response?.data || error.message);
+        return null
+      }
     }
   }
 
@@ -111,7 +137,13 @@ class Order {
       console.log('✅ executeOrder Success!', data.symbol);
       return data;
     } catch (err) {
-      console.error('❌ executeOrder - Error!', body, err.response?.data || err.message);
+      // Verifica se é erro de margem insuficiente
+      const errorData = err.response?.data;
+      if (errorData && errorData.code === 'INSUFFICIENT_MARGIN') {
+        console.warn(`⚠️ MARGEM INSUFICIENTE: ${body.symbol} - ${errorData.message}`);
+      } else {
+        console.error('❌ executeOrder - Error!', body, err.response?.data || err.message);
+      }
       return null;
     }
   }

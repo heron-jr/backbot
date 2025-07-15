@@ -11,7 +11,17 @@ class AccountController {
     const Accounts = await Account.getAccount()
     const Collateral = await Capital.getCollateral()
 
-    let markets = await Markets.getMarkets()
+    // Verifica se os dados da conta foram obtidos com sucesso
+    if (!Accounts || !Collateral) {
+      console.error('❌ Falha ao obter dados da conta. Verifique suas credenciais de API.');
+      return null;
+    }
+
+    let markets = await Markets.getMarkets();
+    if (!markets) {
+      console.error('❌ AccountController.get - Markets.getMarkets() retornou null. API pode estar offline.');
+      return null;
+    }
 
     const AUTHORIZED_MARKET = JSON.parse(process.env.AUTHORIZED_MARKET || '[]')
 
@@ -51,8 +61,8 @@ class AccountController {
     return obj
 
     } catch (error) {
-      console.log(error)
-     return null 
+      console.error('❌ AccountController.get - Error:', error.message)
+      return null 
     }
 
   }

@@ -1,4 +1,4 @@
-import { EMA, RSI, MACD, BollingerBands, VWAP } from 'technicalindicators';
+import { EMA, RSI, MACD, BollingerBands, ATR, Stochastic, ADX } from 'technicalindicators';
 
 function calculateVWAPClassicBands(candles) {
   let sumVol = 0;
@@ -161,6 +161,8 @@ function analyzeTrends(data) {
 
 export function calculateIndicators(candles) {
   const closes = candles.map(c => parseFloat(c.close));
+  const highs = candles.map(c => parseFloat(c.high));
+  const lows = candles.map(c => parseFloat(c.low));
 
   const volumesUSD = candles.map(c => ({
     volume:   parseFloat(c.quoteVolume),
@@ -168,6 +170,7 @@ export function calculateIndicators(candles) {
     price:    parseFloat(c.start) - parseFloat(c.close),
   }));
 
+  // Indicadores existentes
   const ema9 = EMA.calculate({ period: 9, values: closes });
   const ema21 = EMA.calculate({ period: 21, values: closes });
 
@@ -188,6 +191,35 @@ export function calculateIndicators(candles) {
     stdDev: 2
   });
 
+  const atr = ATR.calculate({
+    period: 14,
+    high: highs,
+    low: lows,
+    close: closes
+  });
+
+  const slowStoch = Stochastic.calculate({
+    period: 14,
+    high: highs,
+    low: lows,
+    close: closes,
+    signalPeriod: 3
+  });
+
+  const adx = ADX.calculate({
+    period: 14,
+    high: highs,
+    low: lows,
+    close: closes
+  });
+
+  // Calculate EMA of ADX values
+  const adxValues = adx.map(v => v.adx).filter(v => v !== null);
+  const adxEma = EMA.calculate({ 
+    values: adxValues, 
+    period: 21 
+  });
+
   const { vwap, stdDev, upperBands, lowerBands } = calculateVWAPClassicBands(candles);
   const volumeAnalyse = analyzeTrends(volumesUSD)
 
@@ -203,12 +235,17 @@ export function calculateIndicators(candles) {
     },
     rsi: {
       value: rsi.at(-1) ?? null,
+      avg: rsi.length >= 14 ? rsi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : null,
+      prev: rsi.at(-2) ?? null,
+      avgPrev: rsi.length >= 15 ? rsi.slice(-15, -1).reduce((sum, val) => sum + val, 0) / 14 : null,
       history: rsi
     },
     macd: {
       MACD: macd.at(-1)?.MACD ?? null,
       MACD_signal: macd.at(-1)?.signal ?? null,
       MACD_histogram: macd.at(-1)?.histogram ?? null,
+      histogram: macd.at(-1)?.histogram ?? null,
+      histogramPrev: macd.at(-2)?.histogram ?? null,
     },
     bollinger: {
       BOLL_upper: boll.at(-1)?.upper ?? null,
@@ -224,86 +261,37 @@ export function calculateIndicators(candles) {
         stdDev, 
         upperBands, 
         lowerBands
+    },
+    atr: {
+      atr: atr.at(-1) ?? null,
+      value: atr.at(-1) ?? null,
+      history: atr
+    },
+    stoch: {
+      k: slowStoch.at(-1)?.k ?? null,
+      d: slowStoch.at(-1)?.d ?? null,
+      kPrev: slowStoch.at(-2)?.k ?? null,
+      dPrev: slowStoch.at(-2)?.d ?? null,
+      history: slowStoch
+    },
+    slowStochastic: {
+      k: slowStoch.at(-1)?.k ?? null,
+      d: slowStoch.at(-1)?.d ?? null,
+      history: slowStoch
+    },
+    adx: {
+      adx: adx.at(-1)?.adx ?? null,
+      diPlus: adx.at(-1)?.pdi ?? null,
+      diMinus: adx.at(-1)?.mdi ?? null,
+      diPlusPrev: adx.at(-2)?.pdi ?? null,
+      diMinusPrev: adx.at(-2)?.mdi ?? null,
+      adxEma: adxEma.at(-1) ?? null,
+      history: adx,
+      emaHistory: adxEma
     }
   };
 }
 
-export function analyzeTrade(fee, data, investmentUSD, media_rsi) {
 
-  try {
-    
-  if (!data.vwap?.lowerBands?.length || !data.vwap?.upperBands?.length || data.vwap.vwap == null) return null;
-
-  const IsCrossBulligh = data.ema.crossType < 'goldenCross' && data.ema.candlesAgo < 2
-  const IsCrossBearish = data.ema.crossType < 'deathCross' && data.ema.candlesAgo < 2
-
-  const isReversingUp = data.rsi.value > 35 && media_rsi < 30;
-  const isReversingDown = data.rsi.value < 65 && media_rsi > 70;
-
-  const isBullish = data.ema.ema9 > data.ema.ema21 && data.ema.diffPct > 0.1;
-  const isBearish = data.ema.ema9 < data.ema.ema21 && data.ema.diffPct < -0.1;
-
-  const isRSIBullish = data.rsi.value > 50 && media_rsi > 40;
-  const isRSIBearish = data.rsi.value < 50 && media_rsi < 60;
-
-  const isLong  = (isBullish && isRSIBullish) || isReversingUp   || IsCrossBulligh;
-  const isShort = (isBearish && isRSIBearish) || isReversingDown || IsCrossBearish;
-
-  if (!isLong && !isShort) return null;
-
-  const action = isLong ? 'long' : 'short';
-  const price = parseFloat(data.marketPrice);
-
-  // Unifica e ordena as bandas
-  const bands = [...data.vwap.lowerBands, ...data.vwap.upperBands].map(Number).sort((a, b) => a - b);
-
-  // Encontra a banda abaixo e acima mais próximas
-  const bandBelow = bands.filter(b => b < price); // última abaixo
-  const bandAbove = bands.filter(b => b > price); // primeira acima
-
-  if(bandAbove.length === 0 || bandBelow.length === 0) return null
-
-  const entry = price; // ajuste de slippage otimista
-
-  let stop, target;
-  const percentVwap = 0.95
-
-  if (isLong) {
-    stop = bandBelow[1] 
-    target = entry + ((bandAbove[0] - entry) * percentVwap)
-  } else {
-    stop = bandAbove[1]
-    target = entry - ((entry - bandBelow[0]) * percentVwap)
-  }
-
-  // Cálculo de PnL e risco
-  const units = investmentUSD / entry;
-
-  const grossLoss = ((action === 'long') ? entry - stop : stop - entry ) * units
-  const grossTarget = ((action === 'long') ? target - entry : entry - target) * units
-
-  const entryFee = investmentUSD * fee;
-  const exitFeeTarget = grossTarget * fee;
-  const exitFeeLoss = grossLoss * fee;
-
-  const pnl  = grossTarget - (entryFee + exitFeeTarget)
-  const risk = grossLoss + (entryFee + exitFeeLoss)
-
-  return {
-    market: data.market.symbol,
-    entry: Number(entry.toFixed(data.market.decimal_price)),
-    stop: Number(stop.toFixed(data.market.decimal_price)),
-    target: Number(target.toFixed(data.market.decimal_price)),
-    action,
-    pnl: Number(pnl),
-    risk: Number(risk)
-  };
-  
-  } catch (error) {
-    return null
-    console.log(error)
-  }
-
-}
 
 

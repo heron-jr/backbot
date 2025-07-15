@@ -40,37 +40,44 @@ class PnlController {
   
   summarizeTrades(trades) {
     try {
-    const bySymbol = trades.reduce((acc, { symbol, price, quantity, fee, side }) => {
-      const p = parseFloat(price);
-      const q = parseFloat(quantity);
-      const f = parseFloat(fee);
-      const volume = p * q;
-      const pnl = side === 'Ask' ? volume : -volume;
-
-      if (!acc[symbol]) {
-        acc[symbol] = { totalFee: 0, totalVolume: 0, totalPnl: 0 };
+      // Verifica se trades é válido
+      if (!trades || !Array.isArray(trades) || trades.length === 0) {
+        console.log('📊 Nenhum trade encontrado para análise');
+        return { totalFee: 0, totalVolume: 0, volumeBylFee: 0 };
       }
 
-      acc[symbol].totalFee += f;
-      acc[symbol].totalVolume += volume;
-      acc[symbol].totalPnl += pnl;
-      return acc;
-    }, {});
+      const bySymbol = trades.reduce((acc, { symbol, price, quantity, fee, side }) => {
+        const p = parseFloat(price);
+        const q = parseFloat(quantity);
+        const f = parseFloat(fee);
+        const volume = p * q;
+        const pnl = side === 'Ask' ? volume : -volume;
 
-    const overall = Object.values(bySymbol).reduce(
-      (tot, curr) => ({
-        totalFee: tot.totalFee + curr.totalFee,
-        totalVolume: tot.totalVolume + curr.totalVolume
-      }),
-      { totalFee: 0, totalVolume: 0 }
-    );
+        if (!acc[symbol]) {
+          acc[symbol] = { totalFee: 0, totalVolume: 0, totalPnl: 0 };
+        }
 
-    const volumeBylFee = (overall.totalVolume / overall.totalFee ) 
+        acc[symbol].totalFee += f;
+        acc[symbol].totalVolume += volume;
+        acc[symbol].totalPnl += pnl;
+        return acc;
+      }, {});
 
-    return {totalFee: overall.totalFee, totalVolume: overall.totalVolume, volumeBylFee: volumeBylFee };
+      const overall = Object.values(bySymbol).reduce(
+        (tot, curr) => ({
+          totalFee: tot.totalFee + curr.totalFee,
+          totalVolume: tot.totalVolume + curr.totalVolume
+        }),
+        { totalFee: 0, totalVolume: 0 }
+      );
 
-     } catch (error) {
-      console.log(error)
+      const volumeBylFee = overall.totalFee > 0 ? (overall.totalVolume / overall.totalFee) : 0;
+
+      return { totalFee: overall.totalFee, totalVolume: overall.totalVolume, volumeBylFee: volumeBylFee };
+
+    } catch (error) {
+      console.error('❌ PnlController.summarizeTrades - Error:', error.message);
+      return { totalFee: 0, totalVolume: 0, volumeBylFee: 0 };
     }
   }
 

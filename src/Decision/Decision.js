@@ -1,10 +1,28 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
 import Order from '../Backpack/Authenticated/Order.js';
 import OrderController from '../Controllers/OrderController.js';
+import { OrderController as OrderControllerClass } from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import Markets from '../Backpack/Public/Markets.js';
-import { calculateIndicators, analyzeTrade } from './Indicators.js';
+import { calculateIndicators } from './Indicators.js';
+import { StrategyFactory } from './Strategies/StrategyFactory.js';
+
+const STRATEGY_DEFAULT = 'DEFAULT';
+
 class Decision {
+  constructor() {
+    const strategyType = process.env.TRADING_STRATEGY || STRATEGY_DEFAULT;
+    console.log(`🔍 Decision: TRADING_STRATEGY do .env: "${process.env.TRADING_STRATEGY}"`);
+    console.log(`🔍 Decision: strategyType final: "${strategyType}"`);
+    
+    this.strategy = StrategyFactory.createStrategy(strategyType);
+    
+    console.log(`🤖 Estratégia carregada: ${strategyType.toUpperCase()}`);
+    
+    // Cache simples para dados de mercado
+    this.marketCache = new Map();
+    this.cacheTimeout = 30000; // 30 segundos
+  }
 
   async getDataset(Account, closed_markets) {
     const dataset = []
@@ -14,42 +32,90 @@ class Decision {
     })
 
     try {
-    
-        for (const market of markets) {
-            const getAllMarkPrices = await Markets.getAllMarkPrices(market.symbol)
-            const candles = await Markets.getKLines(market.symbol, process.env.TIME, 30)
-            const analyze = calculateIndicators(candles)
-            const marketPrice = getAllMarkPrices[0].markPrice
+      // Paraleliza a coleta de dados de todos os mercados com cache
+      const dataPromises = markets.map(async (market) => {
+        try {
+          const cacheKey = `${market.symbol}_${process.env.TIME}`;
+          const now = Date.now();
+          const cached = this.marketCache.get(cacheKey);
+          
+          let getAllMarkPrices, candles;
+          
+          // Verifica se há cache válido
+          if (cached && (now - cached.timestamp) < this.cacheTimeout) {
+            getAllMarkPrices = cached.markPrices;
+            candles = cached.candles;
+            console.log(`📦 Cache hit para ${market.symbol}`);
+          } else {
+            // Busca dados novos
+            [getAllMarkPrices, candles] = await Promise.all([
+              Markets.getAllMarkPrices(market.symbol),
+              Markets.getKLines(market.symbol, process.env.TIME, 30)
+            ]);
+            
+            // Salva no cache
+            this.marketCache.set(cacheKey, {
+              markPrices: getAllMarkPrices,
+              candles: candles,
+              timestamp: now
+            });
+          }
+          
+          const analyze = calculateIndicators(candles);
+          const marketPrice = getAllMarkPrices[0].markPrice;
 
-            console.log("🔍 Analyzing", String(market.symbol).replace("_USDC_PERP", ""))
+          console.log("🔍 Analyzing", String(market.symbol).replace("_USDC_PERP", ""));
 
-            const obj = {
-              candles,
-              market,
-              marketPrice,
-              ...analyze
-            }
-
-            dataset.push(obj)
-        }
-
+          return {
+            candles,
+            market,
+            marketPrice,
+            ...analyze
+          };
         } catch (error) {
-          console.log(error)
+          console.error(`❌ Erro ao processar ${market.symbol}:`, error.message);
+          return null;
+        }
+      });
+
+      // Aguarda todas as operações em paralelo
+      const results = await Promise.all(dataPromises);
+      
+      // Filtra resultados nulos (erros)
+      results.forEach(result => {
+        if (result) {
+          dataset.push(result);
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ getDataset - Error:', error);
     }
 
-    return dataset
+    return dataset;
   }
 
 
   analyzeTrades(fee, datasets, investmentUSD, media_rsi) {
-    const results = [];
-    for (const data of datasets) {
-      const row = analyzeTrade(fee, data, investmentUSD, media_rsi)
-      if(row){
-        results.push(row)
+    // Paraleliza a análise de todos os datasets
+    const analysisPromises = datasets.map(async (data) => {
+      try {
+        return await this.strategy.analyzeTrade(fee, data, investmentUSD, media_rsi);
+      } catch (error) {
+        console.error(`❌ Erro na análise de ${data.market?.symbol}:`, error.message);
+        return null;
       }
-    }
-    return results.sort((a,b) => b.pnl - a.pnl)
+    });
+
+    // Executa todas as análises em paralelo
+    const results = Promise.all(analysisPromises);
+    
+    // Filtra resultados nulos e ordena por PnL
+    return results.then(analysisResults => 
+      analysisResults
+        .filter(result => result !== null)
+        .sort((a, b) => b.pnl - a.pnl)
+    );
   }
 
   analyzeMarket(candles, marketPrice, market) {
@@ -149,6 +215,12 @@ class Decision {
 
     const Account = await AccountController.get()
 
+    // Verifica se os dados da conta foram carregados com sucesso
+    if (!Account) {
+      console.error('❌ Falha ao carregar dados da conta. Verifique suas credenciais de API.');
+      return;
+    }
+
     if(Account.leverage > 10 && process.env.TIME !== "1m"){
       console.log(`Leverage ${Account.leverage}x and time candle high (${process.env.TIME}) HIGH RISK LIQUIDATION`)
     }
@@ -163,26 +235,44 @@ class Decision {
 
     const dataset = await this.getDataset(Account, closed_markets)
 
-    let media_rsi = 0
-    
-    for (const row of dataset) {
-      media_rsi += row.rsi.value
+    // Otimiza o cálculo da média RSI
+    const media_rsi = dataset.reduce((sum, row) => sum + row.rsi.value, 0) / dataset.length;
+
+    // Só loga a média RSI se não for estratégia PRO_MAX
+    if (process.env.TRADING_STRATEGY !== 'PRO_MAX') {
+      console.log("Média do RSI", media_rsi)
     }
 
-    media_rsi = media_rsi / dataset.length
-
-    console.log("Média do RSI", media_rsi)
-
+    // Calcula volume baseado em porcentagem ou valor fixo
     const VOLUME_ORDER = Number(process.env.VOLUME_ORDER)
+    const CAPITAL_PERCENTAGE = Number(process.env.CAPITAL_PERCENTAGE || 0)
+    
+    let investmentUSD;
+    
+    if (CAPITAL_PERCENTAGE > 0) {
+      // Usa porcentagem do capital disponível
+      investmentUSD = (Account.capitalAvailable * CAPITAL_PERCENTAGE) / 100;
+      console.log(`💰 Usando ${CAPITAL_PERCENTAGE}% do capital: $${investmentUSD.toFixed(2)}`);
+    } else {
+      // Usa valor fixo
+      investmentUSD = VOLUME_ORDER;
+      console.log(`💰 Usando valor fixo: $${investmentUSD.toFixed(2)}`);
+    }
 
-    if(VOLUME_ORDER < Account.capitalAvailable){ 
+    // Validação de segurança: nunca exceder o capital disponível
+    if (investmentUSD > Account.capitalAvailable) {
+      investmentUSD = Account.capitalAvailable;
+      console.log(`⚠️ Volume ajustado para capital disponível: $${investmentUSD.toFixed(2)}`);
+    }
 
-    const investmentUSD = VOLUME_ORDER
+    if(investmentUSD < Account.capitalAvailable){
     const fee = Account.fee
 
-    const rows = this.analyzeTrades(fee, dataset, investmentUSD, media_rsi)
+    const rows = await this.analyzeTrades(fee, dataset, investmentUSD, media_rsi)
 
-    for (const row of rows) {
+    // Paraleliza a execução de ordens com controle de capital
+    const orderPromises = rows.map(async (row) => {
+      try {
         const marketInfo = Account.markets.find((el) => el.symbol === row.market);
 
         row.volume = investmentUSD
@@ -193,19 +283,63 @@ class Decision {
         const orders = await OrderController.getRecentOpenOrders(row.market)
 
         if(orders.length > 0) {
-            
-            if(orders[0].minutes > 3){
-              await Order.cancelOpenOrders(row.market)
-              await OrderController.openOrder(row)
-            } 
-
+          if(orders[0].minutes > 3){
+            await Order.cancelOpenOrders(row.market)
+            return await OrderController.openOrder(row)
+          } 
         } else {
-          await OrderController.openOrder(row)
+          return await OrderController.openOrder(row)
         }
+      } catch (error) {
+        console.error(`❌ Erro ao executar ordem para ${row.market}:`, error.message);
+        return null;
+      }
+    });
 
-
+    // Executa todas as ordens em paralelo
+    const orderResults = await Promise.all(orderPromises);
+    
+    // Log dos resultados
+    const successfulOrders = orderResults.filter(result => result !== null);
+    const failedOrders = orderResults.filter(result => result === null);
+    
+    // Log detalhado das ordens
+    console.log(`📊 Detalhes das ordens:`);
+    rows.forEach((row, index) => {
+      const result = orderResults[index];
+      const status = result !== null ? '✅' : '❌';
+      
+      // Para estratégia PRO_MAX, inclui o nível do sinal
+      if (process.env.TRADING_STRATEGY === 'PRO_MAX' && row.signalLevel) {
+        console.log(`${status} ${row.market} (${row.signalLevel}): ${result !== null ? 'Executada' : 'Falhou'}`);
+      } else {
+        console.log(`${status} ${row.market}: ${result !== null ? 'Executada' : 'Falhou'}`);
+      }
+    });
+    
+    if (successfulOrders.length > 0) {
+      console.log(`✅ ${successfulOrders.length} ordens executadas com sucesso`);
+    }
+    if (failedOrders.length > 0) {
+      console.log(`❌ ${failedOrders.length} ordens falharam`);
+    }
+    
+    // Log informativo quando não há operações
+    if (rows.length === 0) {
+      const nextAnalysis = new Date(Date.now() + 60000); // 60 segundos
+      const timeString = nextAnalysis.toLocaleTimeString('pt-BR', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        hour12: false 
+      });
+      console.log(`⏰ Nenhuma operação encontrada. Próxima análise às ${timeString}`);
     }
 
+    // Monitoramento de ordens pendentes agora é feito a cada 5 segundos em app.js
+    // para resposta mais rápida na criação de take profits
+    } else {
+      console.log(`⚠️ Capital insuficiente para operar. Disponível: $${Account.capitalAvailable.toFixed(2)}`);
     }
 
 

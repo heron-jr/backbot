@@ -5,8 +5,11 @@
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon app.js",
-    "prod": "node app.js"
+    "start": "nodemon bootstrap.js",
+    "start:skip": "nodemon bootstrap.js -- --skip-selection",
+    "prod": "node bootstrap.js",
+    "prod:skip": "node bootstrap.js -- --skip-selection",
+    "test-auth": "node test-auth.js"
   },
   "keywords": [],
   "author": "@heron_jr",
