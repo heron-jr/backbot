@@ -21,7 +21,6 @@ class OrderController {
       ...cleanOrderData,
       addedAt: Date.now()
     };
-    console.log(`📋 [MONITOR] Ordem adicionada ao monitoramento: ${market} - Total: ${Object.keys(OrderController.pendingEntryOrders).length}`);
   }
 
   /**
@@ -124,21 +123,56 @@ class OrderController {
 
       // Quantidade total da posição
       const totalQuantity = Math.abs(Number(position.netQuantity));
-      // Quantidade por target (divisão igualitária)
-      const quantityPerTarget = Math.floor((totalQuantity / targets.length) / stepSize_quantity) * stepSize_quantity;
-      // Ajusta o último target para garantir 100%
-      let remaining = totalQuantity - (quantityPerTarget * (targets.length - 1));
+      // Número máximo de TPs possíveis baseado no step size
+      const maxTPs = Math.floor(totalQuantity / stepSize_quantity);
+      const nTPs = Math.min(targets.length, maxTPs);
+      
+      if (nTPs === 0) {
+        console.error(`❌ [PRO_MAX] Posição muito pequena para criar qualquer TP válido para ${market}`);
+        return;
+      }
 
+      // Log explicativo quando são criadas menos ordens do que o esperado
+      if (nTPs < targets.length) {
+        console.log(`📊 [PRO_MAX] ${market}: Ajuste de quantidade de TPs:`);
+        console.log(`   • Targets calculados: ${targets.length}`);
+        console.log(`   • Tamanho da posição: ${totalQuantity}`);
+        console.log(`   • Step size mínimo: ${stepSize_quantity}`);
+        console.log(`   • Máximo de TPs possíveis: ${maxTPs} (${totalQuantity} ÷ ${stepSize_quantity})`);
+        console.log(`   • TPs que serão criados: ${nTPs}`);
+        console.log(`   • Motivo: Posição pequena não permite dividir em ${targets.length} ordens de ${stepSize_quantity} cada`);
+      }
+
+      const quantities = [];
+      let remaining = totalQuantity;
+      for (let i = 0; i < nTPs; i++) {
+        let qty;
+        if (i === nTPs - 1) {
+          qty = remaining; // tudo que sobrou
+        } else {
+          qty = Math.floor((totalQuantity / nTPs) / stepSize_quantity) * stepSize_quantity;
+          if (qty < stepSize_quantity) {
+            qty = stepSize_quantity;
+            // Log quando a quantidade calculada é menor que o step size
+            if (nTPs < targets.length) {
+              console.log(`   • TP ${i + 1}: Quantidade calculada (${(totalQuantity / nTPs).toFixed(6)}) < step size (${stepSize_quantity}), ajustado para ${stepSize_quantity}`);
+            }
+          }
+          if (qty > remaining) qty = remaining;
+        }
+        quantities.push(qty);
+        remaining -= qty;
+      }
+      // Ajusta targets para o número real de TPs
+      const usedTargets = targets.slice(0, nTPs);
       const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
       const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
-
-      console.log(`🎯 [PRO_MAX] ${market}: Criando ${targets.length} take profits. Qtd por alvo: ${quantityPerTarget}, Qtd final: ${remaining}`);
-
+      console.log(`🎯 [PRO_MAX] ${market}: Criando ${nTPs} take profits. Quantidades: [${quantities.join(', ')}] (total: ${totalQuantity})`);
       // Cria ordens de take profit
-      for (let i = 0; i < targets.length; i++) {
-        const targetPrice = parseFloat(targets[i]);
+      for (let i = 0; i < nTPs; i++) {
+        const targetPrice = parseFloat(usedTargets[i]);
         const takeProfitTriggerPrice = (targetPrice + Number(position.markPrice)) / 2;
-        const qty = i === targets.length - 1 ? remaining : quantityPerTarget;
+        const qty = quantities[i];
         const orderBody = {
           symbol: market,
           side: isLong ? 'Ask' : 'Bid',
@@ -156,9 +190,9 @@ class OrderController {
         };
         const result = await Order.executeOrder(orderBody);
         if (result) {
-          console.log(`✅ [PRO_MAX] ${market}: Take Profit ${i + 1}/${targets.length} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
+          console.log(`✅ [PRO_MAX] ${market}: Take Profit ${i + 1}/${nTPs} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
         } else {
-          console.log(`⚠️ [PRO_MAX] ${market}: Take Profit ${i + 1}/${targets.length} não criado`);
+          console.log(`⚠️ [PRO_MAX] ${market}: Take Profit ${i + 1}/${nTPs} não criado`);
         }
       }
 

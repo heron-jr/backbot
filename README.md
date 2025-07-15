@@ -175,8 +175,67 @@ The strategy automatically adjusts target distances based on timeframe:
    npm start
    ```
 
+### 🎯 Interactive Strategy Selection
+
+When you start the bot, you'll see an interactive menu to select your trading strategy:
+
+```
+🤖 BACKBOT - Seleção de Estratégia
+=====================================
+
+📋 Estratégias Disponíveis:
+
+1️⃣  DEFAULT
+   📊 Foco: Volume na corretora
+   🎯 Objetivo: Maximizar número de operações
+   💡 Características:
+      • Sinais mais frequentes
+      • Stop loss dinâmico
+      • Take profit único
+      • Ideal para corretoras que pagam por volume
+
+2️⃣  PRO_MAX
+   📈 Foco: Lucro e qualidade de sinais
+   🎯 Objetivo: Maximizar retorno por operação
+   💡 Características:
+      • Sinais filtrados por qualidade (BRONZE/SILVER/GOLD/DIAMOND)
+      • Múltiplos take profits
+      • Stop loss baseado em ATR
+      • Ideal para traders que buscam lucro consistente
+
+3️⃣  Sair
+
+Escolha sua estratégia (1-3):
+```
+
+#### Command Line Options
+
+**Simple Start (Recommended for beginners):**
+```bash
+npm start
+```
+- Always shows strategy selection menu
+- Perfect for new users
+
+**Skip Strategy Selection (Advanced users):**
+```bash
+# Development mode
+npm run start:skip
+
+# Production mode  
+npm run prod:skip
+
+# Direct node command
+node app.js -- --skip-selection
+```
+
+**Auto-start with configured strategy:**
+- Set `TRADING_STRATEGY=DEFAULT` or `TRADING_STRATEGY=PRO_MAX` in your `.env` file
+- Then use `npm run start:skip` or `npm run prod:skip`
+
 ## 📚 Documentation
 
+- [Available Commands](COMMANDS.md) - Complete list of npm scripts and commands
 - [Strategy Documentation](docs/strategies.md)
 - [Capital Management](docs/capital-management.md)
 - [Project Context](docs/context.md)
