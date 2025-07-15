@@ -141,7 +141,9 @@ class OrderController {
       const { ProMaxStrategy } = await import('../Decision/Strategies/ProMaxStrategy.js');
       const strategy = new ProMaxStrategy();
       // Para o cálculo, precisamos de dados de mercado (ATR, etc). Usamos o último candle disponível.
-      const candles = await Markets.getKLines(market, process.env.TIME, 30);
+      // Usa o timeframe da ordem ou fallback para variável de ambiente
+      const timeframe = orderData?.time || process.env.TIME || '5m';
+      const candles = await Markets.getKLines(market, timeframe, 30);
       const { calculateIndicators } = await import('../Decision/Indicators.js');
       const indicators = calculateIndicators(candles);
       const data = { ...indicators, market: marketInfo, marketPrice: entryPrice };
@@ -465,7 +467,9 @@ class OrderController {
     };
     const stopLossTriggerPrice = (Number(stop) + Number(price)) / 2 
     // Estratégia PRO_MAX: adiciona para monitoramento e cria apenas a ordem de entrada
-    if (process.env.TRADING_STRATEGY === 'PRO_MAX') {
+    // Verifica se é estratégia PRO_MAX baseado no accountId ou configuração da conta
+    const isProMaxStrategy = accountId.includes('PRO_MAX') || accountId === 'CONTA2';
+    if (isProMaxStrategy) {
       OrderController.addPendingEntryOrder(market, {
         stop,
         isLong,

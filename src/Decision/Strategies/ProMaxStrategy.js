@@ -7,43 +7,44 @@ export class ProMaxStrategy extends BaseStrategy {
    * @param {object} data - Dados de mercado com indicadores
    * @param {number} investmentUSD - Valor a investir
    * @param {number} media_rsi - Média do RSI de todos os mercados
+   * @param {object} config - Configurações específicas da conta (opcional)
    * @returns {object|null} - Objeto com decisão de trading ou null se não houver sinal
    */
-  analyzeTrade(fee, data, investmentUSD, media_rsi) {
+  analyzeTrade(fee, data, investmentUSD, media_rsi, config = null) {
     try {
       // Validação inicial dos dados
       if (!this.validateData(data)) {
         return null;
       }
 
-      // Configurações da estratégia PRO_MAX
-      const IGNORE_BRONZE = process.env.IGNORE_BRONZE_SIGNALS === 'true';
-      const ADX_LENGTH = Number(process.env.ADX_LENGTH || 14);
-      const ADX_THRESHOLD = Number(process.env.ADX_THRESHOLD || 20);
-      const ADX_AVERAGE_LENGTH = Number(process.env.ADX_AVERAGE_LENGTH || 21);
+      // Configurações da estratégia PRO_MAX (prioriza config passado, depois variáveis de ambiente)
+      const IGNORE_BRONZE = config?.ignoreBronzeSignals === 'true' || process.env.IGNORE_BRONZE_SIGNALS === 'true';
+      const ADX_LENGTH = config?.adxLength || Number(process.env.ADX_LENGTH || 14);
+      const ADX_THRESHOLD = config?.adxThreshold || Number(process.env.ADX_THRESHOLD || 20);
+      const ADX_AVERAGE_LENGTH = config?.adxAverageLength || Number(process.env.ADX_AVERAGE_LENGTH || 21);
       
-      // Configurações de validação
-      const USE_RSI = process.env.USE_RSI_VALIDATION === 'true';
-      const USE_STOCH = process.env.USE_STOCH_VALIDATION === 'true';
-      const USE_MACD = process.env.USE_MACD_VALIDATION === 'true';
+      // Configurações de validação (prioriza config passado)
+      const USE_RSI = config?.useRsiValidation === 'true' || process.env.USE_RSI_VALIDATION === 'true';
+      const USE_STOCH = config?.useStochValidation === 'true' || process.env.USE_STOCH_VALIDATION === 'true';
+      const USE_MACD = config?.useMacdValidation === 'true' || process.env.USE_MACD_VALIDATION === 'true';
       
-      // Configurações RSI
-      const RSI_LENGTH = Number(process.env.RSI_LENGTH || 14);
-      const RSI_AVERAGE_LENGTH = Number(process.env.RSI_AVERAGE_LENGTH || 14);
-      const RSI_BULL_THRESHOLD = Number(process.env.RSI_BULL_THRESHOLD || 45);
-      const RSI_BEAR_THRESHOLD = Number(process.env.RSI_BEAR_THRESHOLD || 55);
+      // Configurações RSI (prioriza config passado)
+      const RSI_LENGTH = config?.rsiLength || Number(process.env.RSI_LENGTH || 14);
+      const RSI_AVERAGE_LENGTH = config?.rsiAverageLength || Number(process.env.RSI_AVERAGE_LENGTH || 14);
+      const RSI_BULL_THRESHOLD = config?.rsiBullThreshold || Number(process.env.RSI_BULL_THRESHOLD || 45);
+      const RSI_BEAR_THRESHOLD = config?.rsiBearThreshold || Number(process.env.RSI_BEAR_THRESHOLD || 55);
       
-      // Configurações Stochastic
-      const STOCH_K_LENGTH = Number(process.env.STOCH_K_LENGTH || 14);
-      const STOCH_D_LENGTH = Number(process.env.STOCH_D_LENGTH || 3);
-      const STOCH_SMOOTH = Number(process.env.STOCH_SMOOTH || 3);
-      const STOCH_BULL_THRESHOLD = Number(process.env.STOCH_BULL_THRESHOLD || 45);
-      const STOCH_BEAR_THRESHOLD = Number(process.env.STOCH_BEAR_THRESHOLD || 55);
+      // Configurações Stochastic (prioriza config passado)
+      const STOCH_K_LENGTH = config?.stochKLength || Number(process.env.STOCH_K_LENGTH || 14);
+      const STOCH_D_LENGTH = config?.stochDLength || Number(process.env.STOCH_D_LENGTH || 3);
+      const STOCH_SMOOTH = config?.stochSmooth || Number(process.env.STOCH_SMOOTH || 3);
+      const STOCH_BULL_THRESHOLD = config?.stochBullThreshold || Number(process.env.STOCH_BULL_THRESHOLD || 45);
+      const STOCH_BEAR_THRESHOLD = config?.stochBearThreshold || Number(process.env.STOCH_BEAR_THRESHOLD || 55);
       
-      // Configurações MACD
-      const MACD_FAST_LENGTH = Number(process.env.MACD_FAST_LENGTH || 12);
-      const MACD_SLOW_LENGTH = Number(process.env.MACD_SLOW_LENGTH || 26);
-      const MACD_SIGNAL_LENGTH = Number(process.env.MACD_SIGNAL_LENGTH || 9);
+      // Configurações MACD (prioriza config passado)
+      const MACD_FAST_LENGTH = config?.macdFastLength || Number(process.env.MACD_FAST_LENGTH || 12);
+      const MACD_SLOW_LENGTH = config?.macdSlowLength || Number(process.env.MACD_SLOW_LENGTH || 26);
+      const MACD_SIGNAL_LENGTH = config?.macdSignalLength || Number(process.env.MACD_SIGNAL_LENGTH || 9);
 
       // Análise ADX
       const adxAnalysis = this.analyzeADX(data, ADX_LENGTH, ADX_THRESHOLD, ADX_AVERAGE_LENGTH);

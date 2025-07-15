@@ -1,6 +1,6 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
 import Order from '../Backpack/Authenticated/Order.js';
-import { OrderController } from '../Controllers/OrderController.js';
+import OrderController from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import { calculateIndicators } from './Indicators.js';
@@ -9,10 +9,14 @@ import { StrategyFactory } from './Strategies/StrategyFactory.js';
 const STRATEGY_DEFAULT = 'DEFAULT';
 
 class Decision {
-  constructor() {
-    const strategyType = process.env.TRADING_STRATEGY || STRATEGY_DEFAULT;
-    console.log(`🔍 Decision: TRADING_STRATEGY do .env: "${process.env.TRADING_STRATEGY}"`);
-    console.log(`🔍 Decision: strategyType final: "${strategyType}"`);
+  constructor(strategyType = null) {
+    // A estratégia deve ser sempre definida via parâmetro (terminal)
+    // Não usa mais variável de ambiente como fallback
+    if (!strategyType) {
+      throw new Error('❌ Estratégia deve ser definida via parâmetro. Use o terminal para selecionar a estratégia.');
+    }
+    
+    console.log(`🔍 Decision: Estratégia definida via terminal: "${strategyType}"`);
     
     this.strategy = StrategyFactory.createStrategy(strategyType);
     
@@ -21,6 +25,24 @@ class Decision {
     // Cache simples para dados de mercado
     this.marketCache = new Map();
     this.cacheTimeout = 30000; // 30 segundos
+  }
+
+  /**
+   * Re-inicializa a estratégia com um novo tipo
+   * @param {string} strategyType - Novo tipo de estratégia
+   */
+  reinitializeStrategy(strategyType) {
+    if (!strategyType) {
+      console.log('⚠️ StrategyType não fornecido, mantendo estratégia atual');
+      return;
+    }
+    
+    console.log(`🔄 Re-inicializando estratégia: ${strategyType.toUpperCase()}`);
+    this.strategy = StrategyFactory.createStrategy(strategyType);
+    console.log(`✅ Estratégia re-inicializada: ${strategyType.toUpperCase()}`);
+    
+    // Reseta os logs para a nova sessão
+    this.operationSummaryLogged = false;
   }
 
   /**
@@ -183,11 +205,11 @@ class Decision {
   }
 
 
-  async analyzeTrades(fee, datasets, investmentUSD, media_rsi) {
+  async analyzeTrades(fee, datasets, investmentUSD, media_rsi, config = null) {
     // Paraleliza a análise de todos os datasets
     const analysisPromises = datasets.map(async (data) => {
       try {
-        return await this.strategy.analyzeTrade(fee, data, investmentUSD, media_rsi);
+        return await this.strategy.analyzeTrade(fee, data, investmentUSD, media_rsi, config);
       } catch (error) {
         const errorMsg = `❌ Erro na análise de ${data.market?.symbol}: ${error.message}`;
         if (logger) {
@@ -305,7 +327,7 @@ class Decision {
     // Usa o timeframe passado como parâmetro ou fallback para process.env.TIME
     const currentTimeframe = timeframe || process.env.TIME || '5m';
 
-    const Account = await AccountController.get()
+    const Account = await AccountController.get(config)
 
     // Verifica se os dados da conta foram carregados com sucesso
     if (!Account) {
@@ -356,7 +378,8 @@ class Decision {
     const media_rsi = dataset.reduce((sum, row) => sum + row.rsi.value, 0) / dataset.length;
 
     // Só loga a média RSI se não for estratégia PRO_MAX
-    if (process.env.TRADING_STRATEGY !== 'PRO_MAX') {
+    // Verifica a estratégia atual da instância ao invés da variável de ambiente
+    if (this.strategy.constructor.name !== 'ProMaxStrategy') {
       const rsiMsg = `Média do RSI ${media_rsi}`;
       if (logger) {
         logger.info(rsiMsg);
@@ -365,16 +388,20 @@ class Decision {
       }
     }
 
-    // Usa configuração passada como parâmetro ou fallback para variáveis de ambiente
-    const VOLUME_ORDER = config?.volumeOrder || Number(process.env.VOLUME_ORDER)
+    // Usa configuração passada como parâmetro (prioridade) ou fallback para variáveis de ambiente
+    const VOLUME_ORDER = config?.volumeOrder || Number(process.env.VOLUME_ORDER) || 100
     const CAPITAL_PERCENTAGE = config?.capitalPercentage || Number(process.env.CAPITAL_PERCENTAGE || 0)
     
     let investmentUSD;
     
-    if (CAPITAL_PERCENTAGE > 0) {
+    // Valida se os valores são números válidos
+    if (isNaN(VOLUME_ORDER) || VOLUME_ORDER <= 0) {
+      console.error(`❌ VOLUME_ORDER inválido: ${VOLUME_ORDER}. Usando valor padrão: 100`);
+      investmentUSD = 100;
+    } else if (CAPITAL_PERCENTAGE > 0) {
       // Usa porcentagem do capital disponível
       investmentUSD = (Account.capitalAvailable * CAPITAL_PERCENTAGE) / 100;
-      const capitalMsg = `💰 Usando ${CAPITAL_PERCENTAGE}% do capital: $${investmentUSD.toFixed(2)}`;
+      const capitalMsg = `💰 CONFIGURAÇÃO: ${CAPITAL_PERCENTAGE}% do capital disponível`;
       if (logger) {
         logger.capital(capitalMsg);
       } else {
@@ -383,7 +410,7 @@ class Decision {
     } else {
       // Usa valor fixo
       investmentUSD = VOLUME_ORDER;
-      const fixedMsg = `💰 Usando valor fixo: $${investmentUSD.toFixed(2)}`;
+      const fixedMsg = `💰 CONFIGURAÇÃO: Valor fixo de $${investmentUSD.toFixed(2)}`;
       if (logger) {
         logger.capital(fixedMsg);
       } else {
@@ -391,21 +418,30 @@ class Decision {
       }
     }
 
-    // Validação de segurança: nunca exceder o capital disponível
-    if (investmentUSD > Account.capitalAvailable) {
-      investmentUSD = Account.capitalAvailable;
-      const adjustMsg = `⚠️ Volume ajustado para capital disponível: $${investmentUSD.toFixed(2)}`;
+    // Log explicativo do capital e volume (apenas uma vez por análise)
+    if (!this.operationSummaryLogged) {
+      const equityAvailable = Account.capitalAvailable / Account.leverage;
+      const availableToTrade = Account.capitalAvailable;
+      
+      const capitalExplanation = `\n💰 RESUMO DA OPERAÇÃO:
+   • Capital Disponível: $${equityAvailable.toFixed(2)}
+   • Alavancagem: ${Account.leverage}x
+   • Disponível para Negociação: $${availableToTrade.toFixed(2)}
+   • Volume por operação: $${investmentUSD.toFixed(2)}
+   • Máximo de ordens: ${Account.maxOpenOrders}`;
+      
       if (logger) {
-        logger.warn(adjustMsg);
+        logger.capital(capitalExplanation);
       } else {
-        console.log(adjustMsg);
+        console.log(capitalExplanation);
       }
+      
+      this.operationSummaryLogged = true;
     }
 
-    if(investmentUSD < Account.capitalAvailable){
     const fee = Account.fee
 
-    const rows = await this.analyzeTrades(fee, dataset, investmentUSD, media_rsi)
+    const rows = await this.analyzeTrades(fee, dataset, investmentUSD, media_rsi, config)
 
     // Paraleliza a execução de ordens com controle de capital
     const orderPromises = rows.map(async (row) => {
@@ -467,7 +503,7 @@ class Decision {
       
       // Para estratégia PRO_MAX, inclui o nível do sinal
       let orderMsg;
-      if (process.env.TRADING_STRATEGY === 'PRO_MAX' && row.signalLevel) {
+      if (this.strategy.constructor.name === 'ProMaxStrategy' && row.signalLevel) {
         orderMsg = `${status} ${row.market} (${row.signalLevel}): ${result !== null ? 'Executada' : 'Falhou'}`;
       } else {
         orderMsg = `${status} ${row.market}: ${result !== null ? 'Executada' : 'Falhou'}`;
@@ -509,15 +545,6 @@ class Decision {
 
     // Monitoramento de ordens pendentes agora é feito a cada 5 segundos em app.js
     // para resposta mais rápida na criação de take profits
-    } else {
-      const insufficientMsg = `⚠️ Capital insuficiente para operar. Disponível: $${Account.capitalAvailable.toFixed(2)}`;
-      if (logger) {
-        logger.warn(insufficientMsg);
-      } else {
-        console.log(insufficientMsg);
-      }
-    }
-
 
     } catch (error) {
       const errorMsg = `❌ Erro na análise: ${error.message}`;
@@ -532,4 +559,5 @@ class Decision {
 
 }
 
-export default new Decision();
+// Exporta a classe ao invés de uma instância
+export default Decision;

@@ -243,6 +243,23 @@ class BotInstance {
         ignoreBronzeSignals: this.ignoreBronzeSignals,
         adxLength: this.adxLength,
         adxThreshold: this.adxThreshold,
+        // Configurações avançadas da estratégia PRO_MAX
+        adxAverageLength: this.config.adxAverageLength,
+        useRsiValidation: this.config.useRsiValidation,
+        useStochValidation: this.config.useStochValidation,
+        useMacdValidation: this.config.useMacdValidation,
+        rsiLength: this.config.rsiLength,
+        rsiAverageLength: this.config.rsiAverageLength,
+        rsiBullThreshold: this.config.rsiBullThreshold,
+        rsiBearThreshold: this.config.rsiBearThreshold,
+        stochKLength: this.config.stochKLength,
+        stochDLength: this.config.stochDLength,
+        stochSmooth: this.config.stochSmooth,
+        stochBullThreshold: this.config.stochBullThreshold,
+        stochBearThreshold: this.config.stochBearThreshold,
+        macdFastLength: this.config.macdFastLength,
+        macdSlowLength: this.config.macdSlowLength,
+        macdSignalLength: this.config.macdSignalLength,
         accountId: this.accountId
       };
       

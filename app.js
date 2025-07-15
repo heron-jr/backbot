@@ -11,7 +11,10 @@ import MultiBotManager from './src/MultiBot/MultiBotManager.js';
 import AccountConfig from './src/Config/AccountConfig.js';
 import readline from 'readline';
 
-const BOT_MODE = process.env.BOT_MODE;
+// BOT_MODE removido - sempre usa modo DEFAULT
+
+// Instância global do Decision (será inicializada com a estratégia selecionada)
+let decisionInstance = null;
 
 // Variáveis para controle do timer geral
 let globalTimerInterval = null;
@@ -75,8 +78,57 @@ function stopGlobalTimer() {
 }
 
 async function startDecision() {
-  // Para modo single, passa null como config para usar variáveis de ambiente
-  await Decision.analyze(null, null, null);
+  // Usa a instância global do Decision
+  if (!decisionInstance) {
+    console.error('❌ Instância do Decision não inicializada');
+    return;
+  }
+  
+  // Para modo single, cria configuração baseada na estratégia selecionada
+  let config = null;
+  const strategy = process.env.TRADING_STRATEGY || 'DEFAULT';
+  
+  if (strategy === 'DEFAULT') {
+    // Usa configurações da CONTA1
+    config = {
+      volumeOrder: Number(process.env.ACCOUNT1_VOLUME_ORDER) || Number(process.env.VOLUME_ORDER) || 100,
+      capitalPercentage: Number(process.env.ACCOUNT1_CAPITAL_PERCENTAGE) || Number(process.env.CAPITAL_PERCENTAGE) || 0,
+      limitOrder: Number(process.env.ACCOUNT1_LIMIT_ORDER) || Number(process.env.LIMIT_ORDER) || 100,
+      time: process.env.ACCOUNT1_TIME || process.env.TIME || '5m',
+      accountId: 'CONTA1'
+    };
+  } else if (strategy === 'PRO_MAX') {
+    // Usa configurações da CONTA2
+    config = {
+      volumeOrder: Number(process.env.ACCOUNT2_VOLUME_ORDER) || Number(process.env.VOLUME_ORDER) || 100,
+      capitalPercentage: Number(process.env.ACCOUNT2_CAPITAL_PERCENTAGE) || Number(process.env.CAPITAL_PERCENTAGE) || 0,
+      limitOrder: Number(process.env.ACCOUNT2_LIMIT_ORDER) || Number(process.env.LIMIT_ORDER) || 100,
+      time: process.env.ACCOUNT2_TIME || process.env.TIME || '5m',
+      accountId: 'CONTA2',
+      // Configurações específicas da estratégia PRO_MAX
+      ignoreBronzeSignals: process.env.ACCOUNT2_IGNORE_BRONZE_SIGNALS || process.env.IGNORE_BRONZE_SIGNALS || 'true',
+      adxLength: Number(process.env.ACCOUNT2_ADX_LENGTH) || Number(process.env.ADX_LENGTH) || 14,
+      adxThreshold: Number(process.env.ACCOUNT2_ADX_THRESHOLD) || Number(process.env.ADX_THRESHOLD) || 20,
+      adxAverageLength: Number(process.env.ACCOUNT2_ADX_AVERAGE_LENGTH) || Number(process.env.ADX_AVERAGE_LENGTH) || 21,
+      useRsiValidation: process.env.ACCOUNT2_USE_RSI_VALIDATION || process.env.USE_RSI_VALIDATION || 'true',
+      useStochValidation: process.env.ACCOUNT2_USE_STOCH_VALIDATION || process.env.USE_STOCH_VALIDATION || 'true',
+      useMacdValidation: process.env.ACCOUNT2_USE_MACD_VALIDATION || process.env.USE_MACD_VALIDATION || 'true',
+      rsiLength: Number(process.env.ACCOUNT2_RSI_LENGTH) || Number(process.env.RSI_LENGTH) || 14,
+      rsiAverageLength: Number(process.env.ACCOUNT2_RSI_AVERAGE_LENGTH) || Number(process.env.RSI_AVERAGE_LENGTH) || 14,
+      rsiBullThreshold: Number(process.env.ACCOUNT2_RSI_BULL_THRESHOLD) || Number(process.env.RSI_BULL_THRESHOLD) || 45,
+      rsiBearThreshold: Number(process.env.ACCOUNT2_RSI_BEAR_THRESHOLD) || Number(process.env.RSI_BEAR_THRESHOLD) || 55,
+      stochKLength: Number(process.env.ACCOUNT2_STOCH_K_LENGTH) || Number(process.env.STOCH_K_LENGTH) || 14,
+      stochDLength: Number(process.env.ACCOUNT2_STOCH_D_LENGTH) || Number(process.env.STOCH_D_LENGTH) || 3,
+      stochSmooth: Number(process.env.ACCOUNT2_STOCH_SMOOTH) || Number(process.env.STOCH_SMOOTH) || 3,
+      stochBullThreshold: Number(process.env.ACCOUNT2_STOCH_BULL_THRESHOLD) || Number(process.env.STOCH_BULL_THRESHOLD) || 45,
+      stochBearThreshold: Number(process.env.ACCOUNT2_STOCH_BEAR_THRESHOLD) || Number(process.env.STOCH_BEAR_THRESHOLD) || 55,
+      macdFastLength: Number(process.env.ACCOUNT2_MACD_FAST_LENGTH) || Number(process.env.MACD_FAST_LENGTH) || 12,
+      macdSlowLength: Number(process.env.ACCOUNT2_MACD_SLOW_LENGTH) || Number(process.env.MACD_SLOW_LENGTH) || 26,
+      macdSignalLength: Number(process.env.ACCOUNT2_MACD_SIGNAL_LENGTH) || Number(process.env.MACD_SIGNAL_LENGTH) || 9
+    };
+  }
+  
+  await decisionInstance.analyze(null, null, config);
   
   // Inicia o timer geral após cada análise
   showGlobalTimer();
@@ -114,17 +166,8 @@ async function startStops() {
 let monitorInterval = 5000; // 5 segundos padrão
 
 async function startPendingOrdersMonitor() {
-  if (process.env.TRADING_STRATEGY === 'PRO_MAX') {
-    try {
-      await OrderController.monitorPendingEntryOrders('DEFAULT');
-      // Se sucesso, volta ao intervalo normal
-      monitorInterval = 5000;
-    } catch (error) {
-      // Se erro, aumenta o intervalo para reduzir carga na API
-      monitorInterval = Math.min(monitorInterval * 1.5, 30000); // Máximo 30 segundos
-      console.warn(`⚠️ [MONITOR-DEFAULT] Erro detectado, aumentando intervalo para ${monitorInterval/1000}s`);
-    }
-  }
+  // No modo conta única, o monitoramento é feito pelo BotInstance no modo multi-conta
+  // Esta função é mantida apenas para compatibilidade
   setTimeout(startPendingOrdersMonitor, monitorInterval);
 }
 
@@ -170,11 +213,16 @@ async function showModeSelectionMenu(hasMultiAccountConfig) {
   });
 }
 
-// Função para re-inicializar a estratégia do Decision
-function reinitializeDecisionStrategy() {
-  const strategyType = process.env.TRADING_STRATEGY || 'DEFAULT';
-  Decision.strategy = StrategyFactory.createStrategy(strategyType);
-  console.log(`🔄 Estratégia re-inicializada: ${strategyType.toUpperCase()}`);
+// Função para inicializar ou re-inicializar a estratégia do Decision
+function initializeDecisionStrategy(strategyType) {
+  if (!strategyType) {
+    console.log('⚠️ StrategyType não fornecido para inicialização');
+    return;
+  }
+  
+  // Cria nova instância do Decision com a estratégia selecionada
+  decisionInstance = new Decision(strategyType);
+  console.log(`✅ Instância do Decision inicializada com estratégia: ${strategyType}`);
 }
 
 // Função para iniciar o bot em modo conta única (compatibilidade)
@@ -185,10 +233,13 @@ async function startSingleAccountBot() {
     const skipStrategySelection = process.argv.includes('--skip-selection') || process.argv.includes('--skip');
     
     if (skipStrategySelection) {
-      // Pula a seleção e usa a estratégia do .env
+      // Pula a seleção e usa a estratégia do .env (compatibilidade)
       if (process.env.TRADING_STRATEGY) {
         console.log(`🤖 Backbot iniciando com estratégia: ${process.env.TRADING_STRATEGY}`);
         console.log('⏳ Aguarde...\n');
+        
+        // Inicializa a estratégia com a do .env
+        initializeDecisionStrategy(process.env.TRADING_STRATEGY);
       } else {
         console.log('❌ Nenhuma estratégia configurada no .env');
         console.log('💡 Execute "npm start" para selecionar uma estratégia');
@@ -197,37 +248,30 @@ async function startSingleAccountBot() {
     } else {
       // Sempre mostra a seleção de estratégia para usuários leigos
       const selector = new StrategySelector();
-      await selector.run();
+      const selectedStrategy = await selector.run();
       
-      // Re-inicializa a estratégia após a seleção
-      reinitializeDecisionStrategy();
+      // Inicializa a estratégia após a seleção
+      initializeDecisionStrategy(selectedStrategy);
     }
 
     // Log da estratégia selecionada
     const strategy = process.env.TRADING_STRATEGY || 'DEFAULT';
     if (strategy === 'DEFAULT') {
       console.log('🔑 Estratégia DEFAULT: usando credenciais da CONTA1');
-    } else {
+    } else if (strategy === 'PRO_MAX') {
       console.log('🔑 Estratégia PRO_MAX: usando credenciais da CONTA2');
+    } else {
+      console.log(`🔑 Estratégia ${strategy}: usando credenciais específicas`);
     }
 
     // Inicia o PnL Controller
     PnlController.run(24);
 
-    // Inicia os serviços baseado no modo do bot
-    if (BOT_MODE === "DEFAULT") {
-      startDecision();
-      startStops();
-      startPendingOrdersMonitor();
-    } else if (BOT_MODE === "AUTOMATIC_STOP") {
-      startStops();
-      startPendingOrdersMonitor();
-    } else {
-      console.log('⚠️ Modo de bot não reconhecido. Iniciando em modo DEFAULT...');
-      startDecision();
-      startStops();
-      startPendingOrdersMonitor();
-    }
+    // Inicia os serviços (modo DEFAULT por padrão)
+    console.log('🚀 Iniciando serviços em modo DEFAULT...');
+    startDecision();
+    startStops();
+    startPendingOrdersMonitor();
 
   } catch (error) {
     console.error('❌ Erro ao iniciar o bot:', error.message);

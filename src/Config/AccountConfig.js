@@ -30,6 +30,23 @@ class AccountConfig {
         ignoreBronzeSignals: process.env.ACCOUNT1_IGNORE_BRONZE_SIGNALS || process.env.IGNORE_BRONZE_SIGNALS || 'true',
         adxLength: Number(process.env.ACCOUNT1_ADX_LENGTH) || Number(process.env.ADX_LENGTH) || 14,
         adxThreshold: Number(process.env.ACCOUNT1_ADX_THRESHOLD) || Number(process.env.ADX_THRESHOLD) || 20,
+        // Configurações avançadas da estratégia PRO_MAX
+        adxAverageLength: Number(process.env.ACCOUNT1_ADX_AVERAGE_LENGTH) || Number(process.env.ADX_AVERAGE_LENGTH) || 21,
+        useRsiValidation: process.env.ACCOUNT1_USE_RSI_VALIDATION || process.env.USE_RSI_VALIDATION || 'true',
+        useStochValidation: process.env.ACCOUNT1_USE_STOCH_VALIDATION || process.env.USE_STOCH_VALIDATION || 'true',
+        useMacdValidation: process.env.ACCOUNT1_USE_MACD_VALIDATION || process.env.USE_MACD_VALIDATION || 'true',
+        rsiLength: Number(process.env.ACCOUNT1_RSI_LENGTH) || Number(process.env.RSI_LENGTH) || 14,
+        rsiAverageLength: Number(process.env.ACCOUNT1_RSI_AVERAGE_LENGTH) || Number(process.env.RSI_AVERAGE_LENGTH) || 14,
+        rsiBullThreshold: Number(process.env.ACCOUNT1_RSI_BULL_THRESHOLD) || Number(process.env.RSI_BULL_THRESHOLD) || 45,
+        rsiBearThreshold: Number(process.env.ACCOUNT1_RSI_BEAR_THRESHOLD) || Number(process.env.RSI_BEAR_THRESHOLD) || 55,
+        stochKLength: Number(process.env.ACCOUNT1_STOCH_K_LENGTH) || Number(process.env.STOCH_K_LENGTH) || 14,
+        stochDLength: Number(process.env.ACCOUNT1_STOCH_D_LENGTH) || Number(process.env.STOCH_D_LENGTH) || 3,
+        stochSmooth: Number(process.env.ACCOUNT1_STOCH_SMOOTH) || Number(process.env.STOCH_SMOOTH) || 3,
+        stochBullThreshold: Number(process.env.ACCOUNT1_STOCH_BULL_THRESHOLD) || Number(process.env.STOCH_BULL_THRESHOLD) || 45,
+        stochBearThreshold: Number(process.env.ACCOUNT1_STOCH_BEAR_THRESHOLD) || Number(process.env.STOCH_BEAR_THRESHOLD) || 55,
+        macdFastLength: Number(process.env.ACCOUNT1_MACD_FAST_LENGTH) || Number(process.env.MACD_FAST_LENGTH) || 12,
+        macdSlowLength: Number(process.env.ACCOUNT1_MACD_SLOW_LENGTH) || Number(process.env.MACD_SLOW_LENGTH) || 26,
+        macdSignalLength: Number(process.env.ACCOUNT1_MACD_SIGNAL_LENGTH) || Number(process.env.MACD_SIGNAL_LENGTH) || 9,
       });
     }
 
@@ -51,6 +68,23 @@ class AccountConfig {
         ignoreBronzeSignals: process.env.ACCOUNT2_IGNORE_BRONZE_SIGNALS || process.env.IGNORE_BRONZE_SIGNALS || 'true',
         adxLength: Number(process.env.ACCOUNT2_ADX_LENGTH) || Number(process.env.ADX_LENGTH) || 14,
         adxThreshold: Number(process.env.ACCOUNT2_ADX_THRESHOLD) || Number(process.env.ADX_THRESHOLD) || 20,
+        // Configurações avançadas da estratégia PRO_MAX
+        adxAverageLength: Number(process.env.ACCOUNT2_ADX_AVERAGE_LENGTH) || Number(process.env.ADX_AVERAGE_LENGTH) || 21,
+        useRsiValidation: process.env.ACCOUNT2_USE_RSI_VALIDATION || process.env.USE_RSI_VALIDATION || 'true',
+        useStochValidation: process.env.ACCOUNT2_USE_STOCH_VALIDATION || process.env.USE_STOCH_VALIDATION || 'true',
+        useMacdValidation: process.env.ACCOUNT2_USE_MACD_VALIDATION || process.env.USE_MACD_VALIDATION || 'true',
+        rsiLength: Number(process.env.ACCOUNT2_RSI_LENGTH) || Number(process.env.RSI_LENGTH) || 14,
+        rsiAverageLength: Number(process.env.ACCOUNT2_RSI_AVERAGE_LENGTH) || Number(process.env.RSI_AVERAGE_LENGTH) || 14,
+        rsiBullThreshold: Number(process.env.ACCOUNT2_RSI_BULL_THRESHOLD) || Number(process.env.RSI_BULL_THRESHOLD) || 45,
+        rsiBearThreshold: Number(process.env.ACCOUNT2_RSI_BEAR_THRESHOLD) || Number(process.env.RSI_BEAR_THRESHOLD) || 55,
+        stochKLength: Number(process.env.ACCOUNT2_STOCH_K_LENGTH) || Number(process.env.STOCH_K_LENGTH) || 14,
+        stochDLength: Number(process.env.ACCOUNT2_STOCH_D_LENGTH) || Number(process.env.STOCH_D_LENGTH) || 3,
+        stochSmooth: Number(process.env.ACCOUNT2_STOCH_SMOOTH) || Number(process.env.STOCH_SMOOTH) || 3,
+        stochBullThreshold: Number(process.env.ACCOUNT2_STOCH_BULL_THRESHOLD) || Number(process.env.STOCH_BULL_THRESHOLD) || 45,
+        stochBearThreshold: Number(process.env.ACCOUNT2_STOCH_BEAR_THRESHOLD) || Number(process.env.STOCH_BEAR_THRESHOLD) || 55,
+        macdFastLength: Number(process.env.ACCOUNT2_MACD_FAST_LENGTH) || Number(process.env.MACD_FAST_LENGTH) || 12,
+        macdSlowLength: Number(process.env.ACCOUNT2_MACD_SLOW_LENGTH) || Number(process.env.MACD_SLOW_LENGTH) || 26,
+        macdSignalLength: Number(process.env.ACCOUNT2_MACD_SIGNAL_LENGTH) || Number(process.env.MACD_SIGNAL_LENGTH) || 9,
       });
     }
 

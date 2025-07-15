@@ -1,16 +1,16 @@
 import nacl from 'tweetnacl';
 
-export function auth({ instruction, params = {}, timestamp, window = 30000 }) {
+export function auth({ instruction, params = {}, timestamp, window = 30000, strategy = null }) {
   try {
     // Determina qual conta usar baseado na estratégia
-    const strategy = process.env.TRADING_STRATEGY || 'DEFAULT';
+    const finalStrategy = strategy || process.env.TRADING_STRATEGY || 'DEFAULT';
     let apiKey, apiSecret;
     
-    if (strategy === 'DEFAULT') {
+    if (finalStrategy === 'DEFAULT') {
       // Para estratégia DEFAULT, usa credenciais da CONTA1
       apiKey = process.env.ACCOUNT1_API_KEY;
       apiSecret = process.env.ACCOUNT1_API_SECRET;
-    } else if (strategy === 'PRO_MAX') {
+    } else if (finalStrategy === 'PRO_MAX') {
       // Para estratégia PRO_MAX, usa credenciais da CONTA2
       apiKey = process.env.ACCOUNT2_API_KEY;
       apiSecret = process.env.ACCOUNT2_API_SECRET;
@@ -22,7 +22,7 @@ export function auth({ instruction, params = {}, timestamp, window = 30000 }) {
     
     // Verifica se as chaves estão definidas
     if (!apiSecret || !apiKey) {
-      throw new Error(`API_SECRET e API_KEY devem estar definidas no .env para estratégia ${strategy}`);
+      throw new Error(`API_SECRET e API_KEY devem estar definidas no .env para estratégia ${finalStrategy}`);
     }
 
     // Decodifica a chave privada

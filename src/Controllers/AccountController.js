@@ -4,7 +4,7 @@ import Capital from '../Backpack/Authenticated/Capital.js';
 
 class AccountController {
 
-  async get() {
+  async get(config = null) {
     
     try {
     
@@ -44,9 +44,21 @@ class AccountController {
 
     const makerFee = parseFloat(Accounts.futuresMakerFee) / 10000
     const leverage = parseInt(Accounts.leverageLimit)
-    const capitalAvailable = parseFloat(Collateral.netEquityAvailable) * leverage * 0.95
+    const netEquityAvailable = parseFloat(Collateral.netEquityAvailable)
+    const capitalAvailable = netEquityAvailable * leverage * 0.95
     
-    const maxOpenOrders = parseInt(process.env.LIMIT_ORDER)
+    // Log explicativo do cálculo do capital (apenas na primeira vez)
+    if (!this.capitalLogged) {
+      console.log(`\n📊 CÁLCULO DO CAPITAL:
+   • Patrimônio Líquido Disponível: $${netEquityAvailable.toFixed(2)}
+   • Alavancagem: ${leverage}x
+   • Margem de segurança: 95%
+   • Capital disponível: $${netEquityAvailable.toFixed(2)} × ${leverage} × 0.95 = $${capitalAvailable.toFixed(2)}`);
+      this.capitalLogged = true;
+    }
+    
+    // Usa configuração passada como parâmetro (prioridade) ou fallback para variável de ambiente
+    const maxOpenOrders = config?.limitOrder || parseInt(process.env.LIMIT_ORDER)
     const minVolumeDollar = capitalAvailable / maxOpenOrders 
 
     const obj = {
@@ -88,6 +100,13 @@ class AccountController {
       })
     
     return markets
+  }
+
+  /**
+   * Reseta os logs para permitir nova exibição
+   */
+  resetLogs() {
+    this.capitalLogged = false;
   }
 
 }

@@ -75,7 +75,21 @@ export class DefaultStrategy extends BaseStrategy {
       // Cálculo de PnL e risco
       const { pnl, risk } = this.calculatePnLAndRisk(action, entry, stop, target, investmentUSD, fee);
 
-      console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - PnL $${pnl.toFixed(2)} - BTC Trend: ${btcTrendFilter.btcTrend}`);
+      // Log mais claro sobre a tendência do BTC
+      let btcTrendMsg;
+      if (btcTrendFilter.btcTrend === 'BTC_ITSELF') {
+        btcTrendMsg = 'BTC (líder do mercado)';
+      } else if (btcTrendFilter.btcTrend === 'BULLISH') {
+        btcTrendMsg = 'BTC em alta (favorável)';
+      } else if (btcTrendFilter.btcTrend === 'BEARISH') {
+        btcTrendMsg = 'BTC em baixa (favorável)';
+      } else if (btcTrendFilter.btcTrend === 'NEUTRAL') {
+        btcTrendMsg = 'BTC neutro (permitido)';
+      } else {
+        btcTrendMsg = `BTC: ${btcTrendFilter.btcTrend}`;
+      }
+      
+      console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - Tendência: ${btcTrendMsg}`);
 
       return {
         market: data.market.symbol,
