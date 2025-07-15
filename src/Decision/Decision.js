@@ -24,6 +24,71 @@ class Decision {
     this.cacheTimeout = 30000; // 30 segundos
   }
 
+  /**
+   * Mostra uma barra de progresso animada até a próxima execução
+   * @param {number} durationMs - Duração total em milissegundos
+   * @param {string} nextTime - Horário da próxima execução
+   */
+  showLoadingProgress(durationMs, nextTime) {
+    const interval = 200; // Atualiza a cada 200ms para ser mais suave
+    const steps = Math.floor(durationMs / interval);
+    let currentStep = 0;
+    let isActive = true;
+    let timeoutId = null;
+    
+    // Função para limpar a linha atual
+    const clearLine = () => {
+      process.stdout.write('\r' + ' '.repeat(80) + '\r');
+    };
+    
+    // Intercepta console.log para interromper o loading
+    const originalLog = console.log;
+    console.log = (...args) => {
+      if (isActive) {
+        clearLine();
+        isActive = false;
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        // Garante que o próximo log pule para uma nova linha
+        process.stdout.write('\n');
+      }
+      originalLog.apply(console, args);
+    };
+    
+    const progressBar = () => {
+      if (!isActive) {
+        // Restaura console.log original
+        console.log = originalLog;
+        return;
+      }
+      
+      const progress = Math.min((currentStep / steps) * 100, 100);
+      const filledBlocks = Math.floor(progress / 2);
+      const emptyBlocks = 50 - filledBlocks;
+      
+      const bar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
+      const percentage = Math.floor(progress);
+      
+      // Limpa a linha anterior e mostra o progresso
+      process.stdout.write('\r');
+      process.stdout.write(`⏳ Aguardando próxima análise... [${bar}] ${percentage}% | Próxima: ${nextTime}`);
+      
+      currentStep++;
+      
+      if (currentStep <= steps && isActive) {
+        timeoutId = setTimeout(progressBar, interval);
+      } else {
+        // Limpa a linha quando termina e restaura console.log
+        clearLine();
+        console.log = originalLog;
+      }
+    };
+    
+    // Pequeno delay para não interferir com logs anteriores
+    setTimeout(progressBar, 500);
+  }
+
   async getDataset(Account, closed_markets) {
     const dataset = []
 
@@ -334,6 +399,9 @@ class Decision {
         hour12: false 
       });
       console.log(`⏰ Nenhuma operação encontrada. Próxima análise às ${timeString}`);
+      
+      // Inicia o loading progressivo
+      this.showLoadingProgress(60000, timeString);
     }
 
     // Monitoramento de ordens pendentes agora é feito a cada 5 segundos em app.js
