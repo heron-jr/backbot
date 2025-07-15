@@ -321,7 +321,7 @@ export class ProMaxStrategy extends BaseStrategy {
   calculateStopAndMultipleTargets(data, price, action) {
     try {
       // Configurações das zonas de objetivo
-      const ATR_ZONE_MULTIPLIER = 3.7;
+      const ATR_ZONE_MULTIPLIER = 3.5;
       const SL_ATR_MULTIPLIER = 8.0;
       const MAX_TARGETS_PER_ORDER = Number(process.env.MAX_TARGETS_PER_ORDER || 20);
       

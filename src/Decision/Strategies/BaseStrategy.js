@@ -105,13 +105,27 @@ export class BaseStrategy {
 
     let stop, target;
 
+    // CORREÇÃO: Usa percentual fixo para stop mais próximo
+    const stopPercentage = 0.015; // 1.5% do preço atual
+    const targetPercentage = 0.025; // 2.5% do preço atual
+
     if (isLong) {
-      stop = bandBelow[1];
-      target = price + ((bandAbove[0] - price) * percentVwap);
+      // Stop: 1.5% abaixo do preço atual (mais próximo)
+      stop = price * (1 - stopPercentage);
+      
+      // Target: 2.5% acima do preço atual (mais distante)
+      target = price * (1 + targetPercentage);
     } else {
-      stop = bandAbove[1];
-      target = price - ((price - bandBelow[0]) * percentVwap);
+      // Stop: 1.5% acima do preço atual (mais próximo)
+      stop = price * (1 + stopPercentage);
+      
+      // Target: 2.5% abaixo do preço atual (mais distante)
+      target = price * (1 - targetPercentage);
     }
+
+    // Valida se os valores fazem sentido
+    if (isLong && (stop >= price || target <= price)) return null;
+    if (!isLong && (stop <= price || target >= price)) return null;
 
     return { stop, target };
   }

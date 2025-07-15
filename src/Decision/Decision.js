@@ -1,7 +1,6 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
 import Order from '../Backpack/Authenticated/Order.js';
-import OrderController from '../Controllers/OrderController.js';
-import { OrderController as OrderControllerClass } from '../Controllers/OrderController.js';
+import { OrderController } from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import { calculateIndicators } from './Indicators.js';
@@ -72,7 +71,7 @@ class Decision {
       
       // Limpa a linha anterior e mostra o progresso
       process.stdout.write('\r');
-      process.stdout.write(`⏳ Aguardando próxima análise... [${bar}] ${percentage}% | Próxima: ${nextTime}`);
+      process.stdout.write(`⏳ Aguardando próxima análise... [${bar}] ${percentage}% | Próxima: ${nextTime}\n`);
       
       currentStep++;
       
@@ -89,8 +88,11 @@ class Decision {
     setTimeout(progressBar, 500);
   }
 
-  async getDataset(Account, closed_markets) {
+  async getDataset(Account, closed_markets, timeframe = null, logger = null) {
     const dataset = []
+    
+    // Usa o timeframe passado como parâmetro ou fallback para process.env.TIME
+    const currentTimeframe = timeframe || process.env.TIME || '5m';
 
     const markets = Account.markets.filter((el) => {
       return !closed_markets.includes(el.symbol) 
@@ -100,7 +102,7 @@ class Decision {
       // Paraleliza a coleta de dados de todos os mercados com cache
       const dataPromises = markets.map(async (market) => {
         try {
-          const cacheKey = `${market.symbol}_${process.env.TIME}`;
+          const cacheKey = `${market.symbol}_${currentTimeframe}`;
           const now = Date.now();
           const cached = this.marketCache.get(cacheKey);
           
@@ -110,12 +112,17 @@ class Decision {
           if (cached && (now - cached.timestamp) < this.cacheTimeout) {
             getAllMarkPrices = cached.markPrices;
             candles = cached.candles;
-            console.log(`📦 Cache hit para ${market.symbol}`);
+            const cacheMsg = `📦 Cache hit para ${market.symbol}`;
+            if (logger) {
+              logger.info(cacheMsg);
+            } else {
+              console.log(cacheMsg);
+            }
           } else {
             // Busca dados novos
             [getAllMarkPrices, candles] = await Promise.all([
               Markets.getAllMarkPrices(market.symbol),
-              Markets.getKLines(market.symbol, process.env.TIME, 30)
+              Markets.getKLines(market.symbol, currentTimeframe, 30)
             ]);
             
             // Salva no cache
@@ -129,7 +136,12 @@ class Decision {
           const analyze = calculateIndicators(candles);
           const marketPrice = getAllMarkPrices[0].markPrice;
 
-          console.log("🔍 Analyzing", String(market.symbol).replace("_USDC_PERP", ""));
+          // const analyzeMsg = `🔍 Analyzing ${String(market.symbol).replace("_USDC_PERP", "")}`;
+          // if (logger) {
+          //   logger.info(analyzeMsg);
+          // } else {
+          //   console.log(analyzeMsg);
+          // }
 
           return {
             candles,
@@ -138,7 +150,12 @@ class Decision {
             ...analyze
           };
         } catch (error) {
-          console.error(`❌ Erro ao processar ${market.symbol}:`, error.message);
+          const errorMsg = `❌ Erro ao processar ${market.symbol}: ${error.message}`;
+          if (logger) {
+            logger.error(errorMsg);
+          } else {
+            console.error(errorMsg);
+          }
           return null;
         }
       });
@@ -154,33 +171,41 @@ class Decision {
       });
 
     } catch (error) {
-      console.error('❌ getDataset - Error:', error);
+      const errorMsg = '❌ getDataset - Error:';
+      if (logger) {
+        logger.error(errorMsg);
+      } else {
+        console.error(errorMsg);
+      }
     }
 
     return dataset;
   }
 
 
-  analyzeTrades(fee, datasets, investmentUSD, media_rsi) {
+  async analyzeTrades(fee, datasets, investmentUSD, media_rsi) {
     // Paraleliza a análise de todos os datasets
     const analysisPromises = datasets.map(async (data) => {
       try {
         return await this.strategy.analyzeTrade(fee, data, investmentUSD, media_rsi);
       } catch (error) {
-        console.error(`❌ Erro na análise de ${data.market?.symbol}:`, error.message);
+        const errorMsg = `❌ Erro na análise de ${data.market?.symbol}: ${error.message}`;
+        if (logger) {
+          logger.error(errorMsg);
+        } else {
+          console.error(errorMsg);
+        }
         return null;
       }
     });
 
     // Executa todas as análises em paralelo
-    const results = Promise.all(analysisPromises);
+    const analysisResults = await Promise.all(analysisPromises);
     
     // Filtra resultados nulos e ordena por PnL
-    return results.then(analysisResults => 
-      analysisResults
-        .filter(result => result !== null)
-        .sort((a, b) => b.pnl - a.pnl)
-    );
+    return analysisResults
+      .filter(result => result !== null)
+      .sort((a, b) => b.pnl - a.pnl);
   }
 
   analyzeMarket(candles, marketPrice, market) {
@@ -273,61 +298,108 @@ class Decision {
   };
   }
 
-  async analyze() {
+  async analyze(timeframe = null, logger = null, config = null) {
 
     try {
       
+    // Usa o timeframe passado como parâmetro ou fallback para process.env.TIME
+    const currentTimeframe = timeframe || process.env.TIME || '5m';
 
     const Account = await AccountController.get()
 
     // Verifica se os dados da conta foram carregados com sucesso
     if (!Account) {
-      console.error('❌ Falha ao carregar dados da conta. Verifique suas credenciais de API.');
+      const errorMsg = '❌ Falha ao carregar dados da conta. Verifique suas credenciais de API.';
+      if (logger) {
+        logger.error(errorMsg);
+      } else {
+        console.error(errorMsg);
+      }
       return;
     }
 
-    if(Account.leverage > 10 && process.env.TIME !== "1m"){
-      console.log(`Leverage ${Account.leverage}x and time candle high (${process.env.TIME}) HIGH RISK LIQUIDATION`)
+    if(Account.leverage > 10 && currentTimeframe !== "1m"){
+      const warningMsg = `\nLeverage ${Account.leverage}x and time candle high (${currentTimeframe}) HIGH RISK LIQUIDATION`;
+      if (logger) {
+        logger.warn(warningMsg);
+      } else {
+        console.log(warningMsg);
+      }
     }
    
     const positions = await Futures.getOpenPositions()
     const closed_markets = positions.map((el) => el.symbol)
 
     if(positions.length >= Number(Account.maxOpenOrders)){
-      console.log("Maximum number of orders reached", positions.length)
+      const maxOrdersMsg = `Maximum number of orders reached ${positions.length}`;
+      if (logger) {
+        logger.warn(maxOrdersMsg);
+      } else {
+        console.log(maxOrdersMsg);
+      }
       return
     }
 
-    const dataset = await this.getDataset(Account, closed_markets)
+    // Verificação adicional: também verifica ordens abertas para evitar duplicatas
+    const openOrders = await Order.getOpenOrders()
+    const marketsWithOpenOrders = openOrders ? openOrders.map(order => order.symbol) : []
+    const allClosedMarkets = [...new Set([...closed_markets, ...marketsWithOpenOrders])]
+    
+    // Log de debug para verificar mercados fechados
+    if (logger) {
+      logger.info(`🔒 Mercados com posições: ${closed_markets.length}, Mercados com ordens: ${marketsWithOpenOrders.length}, Total fechados: ${allClosedMarkets.length}`);
+    }
+
+    const dataset = await this.getDataset(Account, allClosedMarkets, currentTimeframe, logger)
 
     // Otimiza o cálculo da média RSI
     const media_rsi = dataset.reduce((sum, row) => sum + row.rsi.value, 0) / dataset.length;
 
     // Só loga a média RSI se não for estratégia PRO_MAX
     if (process.env.TRADING_STRATEGY !== 'PRO_MAX') {
-      console.log("Média do RSI", media_rsi)
+      const rsiMsg = `Média do RSI ${media_rsi}`;
+      if (logger) {
+        logger.info(rsiMsg);
+      } else {
+        console.log(rsiMsg);
+      }
     }
 
-    // Calcula volume baseado em porcentagem ou valor fixo
-    const VOLUME_ORDER = Number(process.env.VOLUME_ORDER)
-    const CAPITAL_PERCENTAGE = Number(process.env.CAPITAL_PERCENTAGE || 0)
+    // Usa configuração passada como parâmetro ou fallback para variáveis de ambiente
+    const VOLUME_ORDER = config?.volumeOrder || Number(process.env.VOLUME_ORDER)
+    const CAPITAL_PERCENTAGE = config?.capitalPercentage || Number(process.env.CAPITAL_PERCENTAGE || 0)
     
     let investmentUSD;
     
     if (CAPITAL_PERCENTAGE > 0) {
       // Usa porcentagem do capital disponível
       investmentUSD = (Account.capitalAvailable * CAPITAL_PERCENTAGE) / 100;
-      console.log(`💰 Usando ${CAPITAL_PERCENTAGE}% do capital: $${investmentUSD.toFixed(2)}`);
+      const capitalMsg = `💰 Usando ${CAPITAL_PERCENTAGE}% do capital: $${investmentUSD.toFixed(2)}`;
+      if (logger) {
+        logger.capital(capitalMsg);
+      } else {
+        console.log(capitalMsg);
+      }
     } else {
       // Usa valor fixo
       investmentUSD = VOLUME_ORDER;
-      console.log(`💰 Usando valor fixo: $${investmentUSD.toFixed(2)}`);
+      const fixedMsg = `💰 Usando valor fixo: $${investmentUSD.toFixed(2)}`;
+      if (logger) {
+        logger.capital(fixedMsg);
+      } else {
+        console.log(fixedMsg);
+      }
     }
 
     // Validação de segurança: nunca exceder o capital disponível
     if (investmentUSD > Account.capitalAvailable) {
       investmentUSD = Account.capitalAvailable;
-      console.log(`⚠️ Volume ajustado para capital disponível: $${investmentUSD.toFixed(2)}`);
+      const adjustMsg = `⚠️ Volume ajustado para capital disponível: $${investmentUSD.toFixed(2)}`;
+      if (logger) {
+        logger.warn(adjustMsg);
+      } else {
+        console.log(adjustMsg);
+      }
     }
 
     if(investmentUSD < Account.capitalAvailable){
@@ -349,14 +421,27 @@ class Decision {
 
         if(orders.length > 0) {
           if(orders[0].minutes > 3){
+            // Ordem antiga, cancela e cria nova
             await Order.cancelOpenOrders(row.market)
-            return await OrderController.openOrder(row)
-          } 
+            return await OrderController.openOrder({ ...row, accountId: config?.accountId || 'DEFAULT' })
+          } else {
+            // Ordem recente existe (menos de 3 minutos), não criar nova
+            if (logger) {
+              logger.info(`⏸️ ${row.market}: Ordem recente existe (${orders[0].minutes}min), pulando...`);
+            }
+            return null
+          }
         } else {
-          return await OrderController.openOrder(row)
+          // Nenhuma ordem existente, pode criar nova
+          return await OrderController.openOrder({ ...row, accountId: config?.accountId || 'DEFAULT' })
         }
       } catch (error) {
-        console.error(`❌ Erro ao executar ordem para ${row.market}:`, error.message);
+        const errorMsg = `❌ Erro ao executar ordem para ${row.market}: ${error.message}`;
+        if (logger) {
+          logger.error(errorMsg);
+        } else {
+          console.error(errorMsg);
+        }
         return null;
       }
     });
@@ -369,50 +454,78 @@ class Decision {
     const failedOrders = orderResults.filter(result => result === null);
     
     // Log detalhado das ordens
-    console.log(`📊 Detalhes das ordens:`);
+    const detailsMsg = `📊 Detalhes das ordens:`;
+    if (logger) {
+      logger.order(detailsMsg);
+    } else {
+      console.log(detailsMsg);
+    }
+    
     rows.forEach((row, index) => {
       const result = orderResults[index];
       const status = result !== null ? '✅' : '❌';
       
       // Para estratégia PRO_MAX, inclui o nível do sinal
+      let orderMsg;
       if (process.env.TRADING_STRATEGY === 'PRO_MAX' && row.signalLevel) {
-        console.log(`${status} ${row.market} (${row.signalLevel}): ${result !== null ? 'Executada' : 'Falhou'}`);
+        orderMsg = `${status} ${row.market} (${row.signalLevel}): ${result !== null ? 'Executada' : 'Falhou'}`;
       } else {
-        console.log(`${status} ${row.market}: ${result !== null ? 'Executada' : 'Falhou'}`);
+        orderMsg = `${status} ${row.market}: ${result !== null ? 'Executada' : 'Falhou'}`;
+      }
+      
+      if (logger) {
+        logger.order(orderMsg);
+      } else {
+        console.log(orderMsg);
       }
     });
     
     if (successfulOrders.length > 0) {
-      console.log(`✅ ${successfulOrders.length} ordens executadas com sucesso`);
+      const successMsg = `✅ ${successfulOrders.length} ordens executadas com sucesso`;
+      if (logger) {
+        logger.success(successMsg);
+      } else {
+        console.log(successMsg);
+      }
     }
     if (failedOrders.length > 0) {
-      console.log(`❌ ${failedOrders.length} ordens falharam`);
+      const failedMsg = `❌ ${failedOrders.length} ordens falharam`;
+      if (logger) {
+        logger.error(failedMsg);
+      } else {
+        console.log(failedMsg);
+      }
     }
     
     // Log informativo quando não há operações
     if (rows.length === 0) {
-      const nextAnalysis = new Date(Date.now() + 60000); // 60 segundos
-      const timeString = nextAnalysis.toLocaleTimeString('pt-BR', { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit',
-        hour12: false 
-      });
-      console.log(`⏰ Nenhuma operação encontrada. Próxima análise às ${timeString}`);
-      
-      // Inicia o loading progressivo
-      this.showLoadingProgress(60000, timeString);
+      const noOpsMsg = `⏰ Nenhuma operação encontrada.`;
+      if (logger) {
+        logger.info(noOpsMsg);
+      } else {
+        console.log(noOpsMsg);
+      }
     }
 
     // Monitoramento de ordens pendentes agora é feito a cada 5 segundos em app.js
     // para resposta mais rápida na criação de take profits
     } else {
-      console.log(`⚠️ Capital insuficiente para operar. Disponível: $${Account.capitalAvailable.toFixed(2)}`);
+      const insufficientMsg = `⚠️ Capital insuficiente para operar. Disponível: $${Account.capitalAvailable.toFixed(2)}`;
+      if (logger) {
+        logger.warn(insufficientMsg);
+      } else {
+        console.log(insufficientMsg);
+      }
     }
 
 
     } catch (error) {
-      console.log(error)
+      const errorMsg = `❌ Erro na análise: ${error.message}`;
+      if (logger) {
+        logger.error(errorMsg);
+      } else {
+        console.log(error);
+      }
     }
 
   } 

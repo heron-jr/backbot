@@ -134,16 +134,11 @@ class Order {
       const { data } = await axios.post(`${process.env.API_URL}/api/v1/order`, body, {
         headers
       });
-      console.log('✅ executeOrder Success!', data.symbol);
+      // Log removido - agora é feito no OrderController com accountId
       return data;
     } catch (err) {
-      // Verifica se é erro de margem insuficiente
-      const errorData = err.response?.data;
-      if (errorData && errorData.code === 'INSUFFICIENT_MARGIN') {
-        console.warn(`⚠️ MARGEM INSUFICIENTE: ${body.symbol} - ${errorData.message}`);
-      } else {
-        console.error('❌ executeOrder - Error!', body, err.response?.data || err.message);
-      }
+      // Logs removidos - agora são feitos no OrderController com accountId
+      // Apenas retorna null para indicar erro
       return null;
     }
   }

@@ -5,12 +5,16 @@ A crypto trading bot for Backpack Exchange. It trades perpetual futures automati
 ## 🚀 Features
 
 - **Multiple Trading Strategies**: Support for DEFAULT and PRO_MAX strategies
+- **Multi-Account Support**: Run multiple accounts with different strategies simultaneously
 - **Modular Stop Loss System**: Each strategy can have its own stop loss logic
 - **Flexible Capital Management**: Use fixed amounts or percentage of available capital
 - **Real-time Market Analysis**: Technical indicators including RSI, EMA, MACD, Bollinger Bands, VWAP, ATR, Stochastic, and ADX
 - **Risk Management**: Automatic stop-loss and trailing stop functionality
 - **Modular Architecture**: Easy to add new strategies and indicators
 - **PRO_MAX Strategy**: Advanced ADX-based strategy with signal quality levels (BRONZE, SILVER, GOLD, DIAMOND)
+- **Colored Logs**: Separate colored logs for each account/strategy for easy identification
+- **Interactive Menus**: User-friendly interface for strategy and account selection
+- **Loading Progress Bar**: Visual feedback during analysis cycles
 
 ## 📋 Requirements
 
@@ -25,6 +29,42 @@ Copy `env.example` to `.env` and configure your settings:
 ```bash
 # Copy example configuration
 cp env.example .env
+```
+
+### 🔧 Configuration Modes
+
+The bot supports two modes:
+
+#### 1. Single Account Mode (Default)
+Use the traditional configuration with one account:
+
+```bash
+# Single account configuration
+API_KEY=<your_api_key>
+API_SECRET=<your_api_secret>
+TRADING_STRATEGY=DEFAULT
+VOLUME_ORDER=100
+CAPITAL_PERCENTAGE=40
+```
+
+#### 2. Multi-Account Mode (New)
+Configure multiple accounts with different strategies:
+
+```bash
+# Account 1 - DEFAULT Strategy
+ACCOUNT1_API_KEY=<api_key_1>
+ACCOUNT1_API_SECRET=<api_secret_1>
+ACCOUNT1_STRATEGY=DEFAULT
+ACCOUNT1_VOLUME_ORDER=100
+ACCOUNT1_CAPITAL_PERCENTAGE=40
+
+# Account 2 - PRO_MAX Strategy
+ACCOUNT2_API_KEY=<api_key_2>
+ACCOUNT2_API_SECRET=<api_secret_2>
+ACCOUNT2_STRATEGY=PRO_MAX
+ACCOUNT2_VOLUME_ORDER=50
+ACCOUNT2_CAPITAL_PERCENTAGE=30
+ACCOUNT2_TIME=15m
 ```
 
 ### Key Configuration Options
@@ -63,23 +103,76 @@ ENABLE_TP_VALIDATION=false      # Enable real-time take profit monitoring
 TP_PARTIAL_PERCENTAGE=50        # Percentage of position to take partial profit
 ```
 
-**Note**: Stop loss logic is automatically selected based on your trading strategy. Each strategy can implement its own stop loss rules.
+## 🤖 Multi-Account System
 
-**Important**: The `MINIMAL_VOLUME` validation is only applied to the `DEFAULT` strategy. The `PRO_MAX` strategy does not use this validation to avoid premature position closure, as it works with multiple targets and may have smaller initial volumes.
+### Overview
+The multi-account system allows you to run multiple trading bots simultaneously, each with its own:
+- API credentials
+- Trading strategy
+- Capital management settings
+- Timeframe
+- Risk parameters
 
-**Stop Loss Strategy**: The `PRO_MAX` strategy uses the calculated stop loss (based on ATR) that is sent to the exchange, rather than a dynamic stop loss that adjusts continuously. This ensures consistency with the original strategy calculation.
+### Benefits
+- **Parallel Execution**: Multiple strategies running simultaneously
+- **Risk Diversification**: Different capital allocation per account
+- **Strategy Testing**: Compare different strategies in real-time
+- **Colored Logs**: Easy identification of which account is performing each action
 
-**Take Profit Management**: The `PRO_MAX` strategy uses a monitoring system that detects when entry orders are executed and then creates the corresponding take profit orders. This ensures that take profits are only created after the position is actually opened, avoiding premature order creation.
+### Configuration Example
 
-**Fast Monitoring**: The monitoring system runs every 5 seconds to ensure take profits are created immediately after entry orders are executed, providing faster response times compared to the main analysis cycle (1 minute).
+```bash
+# ========================================
+# CONTA 1 - DEFAULT Strategy (High Volume)
+# ========================================
+ACCOUNT1_API_KEY=<api_key_1>
+ACCOUNT1_API_SECRET=<api_secret_1>
+ACCOUNT1_NAME="Conta Principal"
+ACCOUNT1_STRATEGY=DEFAULT
+ACCOUNT1_ENABLED=true
+ACCOUNT1_VOLUME_ORDER=100
+ACCOUNT1_CAPITAL_PERCENTAGE=40
+ACCOUNT1_TIME=5m
 
-**Take Profit Monitoring**: When enabled (`ENABLE_TP_VALIDATION=true`), the bot monitors open positions and automatically takes partial profits when minimum criteria are met:
+# ========================================
+# CONTA 2 - PRO_MAX Strategy (High Quality)
+# ========================================
+ACCOUNT2_API_KEY=<api_key_2>
+ACCOUNT2_API_SECRET=<api_secret_2>
+ACCOUNT2_NAME="Conta Pro"
+ACCOUNT2_STRATEGY=PRO_MAX
+ACCOUNT2_ENABLED=true
+ACCOUNT2_VOLUME_ORDER=50
+ACCOUNT2_CAPITAL_PERCENTAGE=30
+ACCOUNT2_TIME=15m
+ACCOUNT2_IGNORE_BRONZE_SIGNALS=true
+```
 
-- **Minimum Take Profit**: Position must reach minimum percentage gain
-- **Partial Profit**: Takes configured percentage of position (default: 50%)
-- **Risk Reduction**: Secures profits while keeping remaining position open
+### Logs Example
 
-This feature helps secure profits early while allowing positions to continue running for additional gains.
+With multi-account mode, you'll see colored logs for each account:
+
+```
+🤖 [CONTA1-DEFAULT] 🔍 Analyzing BTC_USDC_PERP
+🤖 [CONTA1-DEFAULT] 💰 Usando 40% do capital: $6.65
+🤖 [CONTA1-DEFAULT] ✅ BTC_USDC_PERP: Executada
+
+🤖 [CONTA2-PRO_MAX] 🔍 Analyzing SOL_USDC_PERP
+🤖 [CONTA2-PRO_MAX] 🎯 SOL_USDC_PERP (🥇 GOLD): LONG - Confluências: 3/4
+🤖 [CONTA2-PRO_MAX] ✅ SOL_USDC_PERP (GOLD): Executada
+```
+
+### Account-Specific Settings
+
+Each account can have its own configuration:
+
+| Setting | Description | Example |
+|---------|-------------|---------|
+| `ACCOUNT1_STRATEGY` | Trading strategy | `DEFAULT` or `PRO_MAX` |
+| `ACCOUNT1_VOLUME_ORDER` | Fixed volume per trade | `100` |
+| `ACCOUNT1_CAPITAL_PERCENTAGE` | % of capital per trade | `40` |
+| `ACCOUNT1_TIME` | Timeframe | `5m`, `15m`, `1h` |
+| `ACCOUNT1_IGNORE_BRONZE_SIGNALS` | PRO_MAX specific | `true` |
 
 ## 🎯 PRO_MAX Strategy (ADX-based)
 
@@ -175,10 +268,33 @@ The strategy automatically adjusts target distances based on timeframe:
    npm start
    ```
 
-### 🎯 Interactive Strategy Selection
+### 🎯 Interactive Menus
 
-When you start the bot, you'll see an interactive menu to select your trading strategy:
+When you start the bot, you'll see interactive menus for configuration:
 
+#### Mode Selection Menu
+```
+🤖 BACKBOT - Seleção de Modo
+=====================================
+
+📋 Modos Disponíveis:
+
+1️⃣  CONTA ÚNICA
+   🔧 Configuração tradicional
+   📊 Uma estratégia por vez
+   💡 Ideal para iniciantes
+
+2️⃣  MÚLTIPLAS CONTAS
+   🚀 Execução paralela
+   📈 Múltiplas estratégias
+   💡 Ideal para traders avançados
+
+3️⃣  Sair
+
+Escolha o modo (1-3):
+```
+
+#### Strategy Selection Menu
 ```
 🤖 BACKBOT - Seleção de Estratégia
 =====================================
@@ -208,16 +324,39 @@ When you start the bot, you'll see an interactive menu to select your trading st
 Escolha sua estratégia (1-3):
 ```
 
+#### Account Selection Menu (Multi-Bot Mode)
+```
+🤖 BACKBOT - Seleção de Contas
+=====================================
+
+📋 Contas Configuradas:
+
+1️⃣  Conta Principal (DEFAULT)
+   📊 Estratégia: DEFAULT
+   💰 Volume: $100 (40% do capital)
+   ⏰ Timeframe: 5m
+
+2️⃣  Conta Pro (PRO_MAX)
+   📈 Estratégia: PRO_MAX
+   💰 Volume: $50 (30% do capital)
+   ⏰ Timeframe: 15m
+
+3️⃣  Executar Todas as Contas
+4️⃣  Sair
+
+Escolha a conta (1-4):
+```
+
 #### Command Line Options
 
 **Simple Start (Recommended for beginners):**
 ```bash
 npm start
 ```
-- Always shows strategy selection menu
+- Always shows interactive menus
 - Perfect for new users
 
-**Skip Strategy Selection (Advanced users):**
+**Skip Menus (Advanced users):**
 ```bash
 # Development mode
 npm run start:skip
@@ -233,12 +372,70 @@ node app.js -- --skip-selection
 - Set `TRADING_STRATEGY=DEFAULT` or `TRADING_STRATEGY=PRO_MAX` in your `.env` file
 - Then use `npm run start:skip` or `npm run prod:skip`
 
+## 📊 Bot Status Display
+
+The bot shows real-time status information:
+
+### Single Account Mode
+```
+🤖 BACKBOT - Status
+=====================================
+📊 Estratégia: DEFAULT
+💰 Capital: $16.62
+📈 Ordens Abertas: 2
+⏰ Próxima Análise: 00:45
+```
+
+### Multi-Account Mode
+```
+🤖 BACKBOT - Status Multi-Contas
+=====================================
+📊 Conta Principal (DEFAULT):
+   💰 Capital: $16.62 | 📈 Ordens: 2 | ⏰ 00:45
+
+📈 Conta Pro (PRO_MAX):
+   💰 Capital: $8.31 | 📈 Ordens: 1 | ⏰ 00:30
+
+⏰ Próxima Análise Geral: 00:45
+```
+
+## 🔄 Loading Progress Bar
+
+During analysis cycles, the bot shows a loading progress bar:
+
+```
+🔄 Analisando mercados... [████████████████████] 100%
+```
+
+The progress bar:
+- Updates in real-time during analysis
+- Prevents log overlap with other messages
+- Provides visual feedback during idle periods
+
 ## 📚 Documentation
 
 - [Available Commands](COMMANDS.md) - Complete list of npm scripts and commands
 - [Strategy Documentation](docs/strategies.md)
 - [Capital Management](docs/capital-management.md)
 - [Project Context](docs/context.md)
+
+## ⚠️ Important Notes
+
+**Stop Loss Logic**: Stop loss logic is automatically selected based on your trading strategy. Each strategy can implement its own stop loss rules.
+
+**PRO_MAX Strategy**: The `PRO_MAX` strategy uses the calculated stop loss (based on ATR) that is sent to the exchange, rather than a dynamic stop loss that adjusts continuously. This ensures consistency with the original strategy calculation.
+
+**Take Profit Management**: The `PRO_MAX` strategy uses a monitoring system that detects when entry orders are executed and then creates the corresponding take profit orders. This ensures that take profits are only created after the position is actually opened, avoiding premature order creation.
+
+**Fast Monitoring**: The monitoring system runs every 5 seconds to ensure take profits are created immediately after entry orders are executed, providing faster response times compared to the main analysis cycle (1 minute).
+
+**Take Profit Monitoring**: When enabled (`ENABLE_TP_VALIDATION=true`), the bot monitors open positions and automatically takes partial profits when minimum criteria are met:
+
+- **Minimum Take Profit**: Position must reach minimum percentage gain
+- **Partial Profit**: Takes configured percentage of position (default: 50%)
+- **Risk Reduction**: Secures profits while keeping remaining position open
+
+This feature helps secure profits early while allowing positions to continue running for additional gains.
 
 ## ⚠️ Disclaimer
 

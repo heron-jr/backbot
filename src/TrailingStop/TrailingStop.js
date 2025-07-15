@@ -24,19 +24,24 @@ class TrailingStop {
         return;
       }
 
+      // Log de debug para mostrar que está monitorando
+      // if (positions.length > 0) {
+      //   console.log(`🛡️ [TRAILING] Monitorando ${positions.length} posições abertas...`);
+      // }
+
       for (const position of positions) {
         // Usa o stop loss específico da estratégia
         const decision = this.stopLossStrategy.shouldClosePosition(position, Account);
         
         if (decision && decision.shouldClose) {
-          console.log(`❌ STOP LOSS (${decision.type}): ${decision.reason}. Fechando.`);
+          // console.log(`❌ STOP LOSS (${decision.type}): ${position.symbol} - ${decision.reason}. Fechando.`);
           await OrderController.forceClose(position);
           continue;
         }
 
         // Verifica se deve realizar take profit parcial
         if (decision && decision.shouldTakePartialProfit) {
-          console.log(`💰 TAKE PROFIT PARCIAL (${decision.type}): ${decision.reason}. Realizando ${decision.partialPercentage}%.`);
+          // console.log(`💰 TAKE PROFIT PARCIAL (${decision.type}): ${decision.reason}. Realizando ${decision.partialPercentage}%.`);
           await OrderController.takePartialProfit(position, decision.partialPercentage);
           continue;
         }
