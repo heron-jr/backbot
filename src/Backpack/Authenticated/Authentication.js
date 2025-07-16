@@ -1,14 +1,32 @@
 import nacl from 'tweetnacl';
 
-export function auth({ instruction, params = {}, timestamp, window = 30000 }) {
+export function auth({ instruction, params = {}, timestamp, window = 30000, strategy = null }) {
   try {
+    // Determina qual conta usar baseado na estratégia
+    const finalStrategy = strategy || process.env.TRADING_STRATEGY || 'DEFAULT';
+    let apiKey, apiSecret;
+    
+    if (finalStrategy === 'DEFAULT') {
+      // Para estratégia DEFAULT, usa credenciais da CONTA1
+      apiKey = process.env.ACCOUNT1_API_KEY;
+      apiSecret = process.env.ACCOUNT1_API_SECRET;
+    } else if (finalStrategy === 'PRO_MAX') {
+      // Para estratégia PRO_MAX, usa credenciais da CONTA2
+      apiKey = process.env.ACCOUNT2_API_KEY;
+      apiSecret = process.env.ACCOUNT2_API_SECRET;
+    } else {
+      // Fallback para credenciais padrão (compatibilidade)
+      apiKey = process.env.API_KEY;
+      apiSecret = process.env.API_SECRET;
+    }
+    
     // Verifica se as chaves estão definidas
-    if (!process.env.API_SECRET || !process.env.API_KEY) {
-      throw new Error('API_SECRET e API_KEY devem estar definidas no .env');
+    if (!apiSecret || !apiKey) {
+      throw new Error(`API_SECRET e API_KEY devem estar definidas no .env para estratégia ${finalStrategy}`);
     }
 
     // Decodifica a chave privada
-    const privateKeySeed = Buffer.from(process.env.API_SECRET, 'base64'); 
+    const privateKeySeed = Buffer.from(apiSecret, 'base64'); 
     const keyPair = nacl.sign.keyPair.fromSeed(privateKeySeed);
 
     // Ordena e constrói os parâmetros
@@ -24,7 +42,7 @@ export function auth({ instruction, params = {}, timestamp, window = 30000 }) {
     const signature = nacl.sign.detached(Buffer.from(payload), keyPair.secretKey);
 
     return {
-      'X-API-Key': process.env.API_KEY,
+      'X-API-Key': apiKey,
       'X-Signature': Buffer.from(signature).toString('base64'),
       'X-Timestamp': timestamp.toString(),
       'X-Window': window.toString(),

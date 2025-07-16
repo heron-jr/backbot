@@ -2,31 +2,41 @@
 
 ## 🚀 Comandos de Inicialização
 
-### 🎯 Comando Principal (Recomendado para iniciantes)
+### 🎯 Comando Principal (Recomendado para produção)
 ```bash
 npm start
 ```
+- **Executa diretamente** a estratégia DEFAULT (sem menu)
+- Perfeito para produção e automação
+- Inicia imediatamente sem interação
+
+### 🎮 Comando com Menu Interativo (Recomendado para desenvolvimento)
+```bash
+npm run menu
+```
 - **Sempre** mostra o menu de seleção de estratégia
-- Perfeito para novos usuários
+- Perfeito para desenvolvimento e testes
 - Interface amigável e intuitiva
 
 ### ⚙️ Comandos Avançados
 
 #### Development Mode (com auto-restart)
 ```bash
-npm start                    # Sempre mostra seleção (recomendado)
+npm start                    # Executa DEFAULT diretamente
+npm run menu                 # Mostra seleção de estratégia
 npm run start:skip          # Pula seleção, usa estratégia do .env
 ```
 
 #### Production Mode (sem auto-restart)
 ```bash
-npm run prod                # Sempre mostra seleção
+npm run prod                # Executa DEFAULT diretamente
+npm run prod:menu           # Mostra seleção de estratégia
 npm run prod:skip           # Pula seleção, usa estratégia do .env
 ```
 
 #### Comandos Diretos (Node.js)
 ```bash
-node app.js                 # Sempre mostra seleção
+node app.js                 # Mostra seleção de estratégia
 node app.js -- --skip-selection  # Pula seleção
 ```
 
@@ -40,9 +50,11 @@ npm run test-auth
 
 | Comando | Descrição | Modo | Recomendado |
 |---------|-----------|------|-------------|
-| `npm start` | **Sempre mostra seleção de estratégia** | Development | ✅ **Sim** |
+| `npm start` | **Executa DEFAULT diretamente** | Development | ✅ **Produção** |
+| `npm run menu` | **Mostra seleção de estratégia** | Development | ✅ **Desenvolvimento** |
 | `npm run start:skip` | Pula seleção, usa estratégia do .env | Development | Para avançados |
-| `npm run prod` | **Sempre mostra seleção de estratégia** | Production | ✅ **Sim** |
+| `npm run prod` | **Executa DEFAULT diretamente** | Production | ✅ **Produção** |
+| `npm run prod:menu` | **Mostra seleção de estratégia** | Production | ✅ **Desenvolvimento** |
 | `npm run prod:skip` | Pula seleção, usa estratégia do .env | Production | Para avançados |
 | `npm run test-auth` | Teste de autenticação | Test | Para debug |
 
@@ -60,12 +72,19 @@ npm run test-auth
 
 ## ⚙️ Configuração
 
-### Para Usuários Iniciantes (Recomendado)
+### Para Produção (Recomendado)
 ```bash
 npm start
 ```
+- Executa diretamente a estratégia DEFAULT
+- Ideal para automação e produção
+
+### Para Desenvolvimento/Testes (Recomendado)
+```bash
+npm run menu
+```
 - Sempre mostra o menu de seleção
-- Não precisa configurar nada no `.env`
+- Perfeito para testar diferentes estratégias
 
 ### Para Usuários Avançados (Auto-start)
 Configure no arquivo `.env`:

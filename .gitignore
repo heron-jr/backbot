@@ -9,9 +9,6 @@ build/
 .DS_Store
 Thumbs.db
 
-# ambiente
-.env
-
 # logs
 logs/
 *.log
@@ -31,5 +28,4 @@ pids/
 # coverage
 coverage/
 
-.env
 docs/

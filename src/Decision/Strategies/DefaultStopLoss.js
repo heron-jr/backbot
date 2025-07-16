@@ -20,7 +20,7 @@ export class DefaultStopLoss extends BaseStopLoss {
       const USE_PERCENTAGE = STOP_LOSS_TYPE.toUpperCase() === 'PERCENTAGE';
       const MAX_NEGATIVE_PNL_STOP = Number(process.env.MAX_NEGATIVE_PNL_STOP || -5);
       const MAX_NEGATIVE_PNL_STOP_PCT = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4);
-      const MINIMAL_VOLUME = Number(process.env.MINIMAL_VOLUME || 50);
+      const MINIMAL_VOLUME = Number(process.env.MINIMAL_VOLUME || 0.01);
 
       // Configurações de take profit mínimo em tempo real
       const MIN_TAKE_PROFIT_USD = Number(process.env.MIN_TAKE_PROFIT_USD || 0.5);
@@ -29,13 +29,14 @@ export class DefaultStopLoss extends BaseStopLoss {
 
       // Verifica volume mínimo (específico da estratégia DEFAULT)
       // NOTA: A estratégia PRO_MAX não usa esta validação para evitar fechamento prematuro
-      if (this.isVolumeBelowMinimum(position, MINIMAL_VOLUME)) {
-        return {
-          shouldClose: true,
-          reason: `VOLUME_MIN: Volume ${Number(position.netExposureNotional)} menor que mínimo ${MINIMAL_VOLUME}`,
-          type: 'VOLUME_MIN'
-        };
-      }
+      // NOTA 2: Para contas com pouco capital e sem alavancagem, esta validação pode ser muito restritiva
+      // if (this.isVolumeBelowMinimum(position, MINIMAL_VOLUME)) {
+      //   return {
+      //     shouldClose: true,
+      //     reason: `VOLUME_MIN: Volume ${Number(position.netExposureNotional)} menor que mínimo ${MINIMAL_VOLUME}`,
+      //     type: 'VOLUME_MIN'
+      //   };
+      // }
 
       // Calcula PnL
       const { pnl, pnlPct } = this.calculatePnL(position, account);
