@@ -265,7 +265,11 @@ The strategy automatically adjusts target distances based on timeframe:
 
 3. **Run the bot:**
    ```bash
+   # Executa diretamente a estratégia DEFAULT (sem menu)
    npm start
+   
+   # Executa com menu interativo para escolher estratégia
+   npm run menu
    ```
 
 ### 🎯 Interactive Menus
@@ -349,12 +353,23 @@ Escolha a conta (1-4):
 
 #### Command Line Options
 
-**Simple Start (Recommended for beginners):**
+**Direct Strategy Execution (Recommended for production):**
 ```bash
+# Executa diretamente a estratégia DEFAULT (sem menu)
 npm start
+
+# Executa diretamente a estratégia DEFAULT em produção
+npm run prod
 ```
-- Always shows interactive menus
-- Perfect for new users
+
+**Interactive Menu (Recommended for development/testing):**
+```bash
+# Executa com menu interativo para escolher estratégia
+npm run menu
+
+# Executa com menu interativo em produção
+npm run prod:menu
+```
 
 **Skip Menus (Advanced users):**
 ```bash

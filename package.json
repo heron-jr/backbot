@@ -5,9 +5,11 @@
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon bootstrap.js",
+    "start": "TRADING_STRATEGY=DEFAULT nodemon bootstrap.js",
+    "menu": "nodemon bootstrap.js",
     "start:skip": "nodemon bootstrap.js -- --skip-selection",
-    "prod": "node bootstrap.js",
+    "prod": "TRADING_STRATEGY=DEFAULT node bootstrap.js",
+    "prod:menu": "node bootstrap.js",
     "prod:skip": "node bootstrap.js -- --skip-selection",
     "test-auth": "node test-auth.js"
   },

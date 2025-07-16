@@ -180,21 +180,20 @@ async function showModeSelectionMenu(hasMultiAccountConfig) {
     
     console.log('1️⃣  Estratégia VOLUMES (PADRÃO)');
     console.log('   📊 Foco: Volume na corretora');
-    console.log('   🎯 Ideal para: Novos usuários');
+    console.log('   🎯 Ideal para: Fazer volume na corretora');
     console.log('   💡 Características:');
     console.log('      • Sinais mais frequentes');
     console.log('      • Stop loss dinâmico');
     console.log('      • Take profit único');
     console.log('      • Ideal para corretoras que pagam por volume\n');
     
-    console.log('2️⃣  Estratégia LUCRO (PRO MAX)');
+    console.log('2️⃣  Estratégia LUCRO (PRO MAX) [BETA]');
     console.log('   📈 Foco: Lucro por operação');
-    console.log('   🎯 Ideal para: Usuários experientes');
+    console.log('   🎯 Ideal para: Lucro por operação, com stop loss dinâmico e take profit com alvos.');
     console.log('   💡 Características:');
     console.log('      • Sinais filtrados por qualidade (BRONZE/SILVER/GOLD/DIAMOND)');
     console.log('      • Múltiplos take profits');
-    console.log('      • Stop loss baseado em ATR');
-    console.log('      • Ideal para traders que buscam lucro consistente\n');
+    console.log('      • Stop loss baseado em ATR\n');
     
     console.log('3️⃣  Sair\n');
     
@@ -235,84 +234,50 @@ function initializeDecisionStrategy(strategyType) {
   console.log(`✅ Instância do Decision inicializada com estratégia: ${strategyType}`);
 }
 
-// Função para iniciar o bot em modo conta única (compatibilidade)
-async function startSingleAccountBot() {
-  try {
-    // Para usuários leigos, sempre mostra a seleção de estratégia
-    // A menos que seja especificado para pular via argumento
-    const skipStrategySelection = process.argv.includes('--skip-selection') || process.argv.includes('--skip');
-    
-    if (skipStrategySelection) {
-      // Pula a seleção e usa a estratégia do .env (compatibilidade)
-      if (process.env.TRADING_STRATEGY) {
-        console.log(`🤖 Backbot iniciando com estratégia: ${process.env.TRADING_STRATEGY}`);
-        console.log('⏳ Aguarde...\n');
-        
-        // Inicializa a estratégia com a do .env
-        initializeDecisionStrategy(process.env.TRADING_STRATEGY);
-      } else {
-        console.log('❌ Nenhuma estratégia configurada no .env');
-        console.log('💡 Execute "npm start" para selecionar uma estratégia');
-        process.exit(1);
-      }
-    } else {
-      // Sempre mostra a seleção de estratégia para usuários leigos
-      const selector = new StrategySelector();
-      const selectedStrategy = await selector.run();
-      
-      // Inicializa a estratégia após a seleção
-      initializeDecisionStrategy(selectedStrategy);
-    }
-
-    // Log da estratégia selecionada
-    const strategy = process.env.TRADING_STRATEGY || 'DEFAULT';
-    if (strategy === 'DEFAULT') {
-      console.log('🔑 Estratégia VOLUMES: usando credenciais da CONTA1');
-    } else if (strategy === 'PRO_MAX') {
-      console.log('🔑 Estratégia LUCRO: usando credenciais da CONTA1');
-    } else {
-      console.log(`🔑 Estratégia ${strategy}: usando credenciais específicas`);
-    }
-
-    // Inicia o PnL Controller
-    PnlController.run(24);
-
-    // Inicia os serviços
-    console.log('🚀 Iniciando serviços...');
-    startDecision();
-    startStops();
-    startPendingOrdersMonitor();
-
-  } catch (error) {
-    console.error('❌ Erro ao iniciar o bot:', error.message);
-    process.exit(1);
-  }
-}
-
 // Função principal para iniciar o bot
 async function startBot() {
   try {
     // Verifica se há configurações de múltiplas contas
     const accountConfig = new AccountConfig();
+    await accountConfig.initialize();
     const hasMultiAccountConfig = accountConfig.hasMultiAccountConfig();
 
-    // Exibe menu de seleção de estratégia (simplificado)
-    const selectedStrategy = await showModeSelectionMenu(hasMultiAccountConfig);
-
-    if (selectedStrategy === 'exit') {
-      console.log('👋 Encerrando BackBot.');
-      process.exit(0);
+    // Verifica se há pelo menos uma conta válida
+    if (!accountConfig.hasAnyAccount()) {
+      console.log('❌ Nenhuma conta com credenciais válidas encontrada!');
+      console.log('   Configure as credenciais no arquivo .env:');
+      console.log('   • ACCOUNT1_API_KEY e ACCOUNT1_API_SECRET');
+      console.log('   • ACCOUNT2_API_KEY e ACCOUNT2_API_SECRET');
+      process.exit(1);
     }
 
-    // Determina o modo baseado na estratégia e configuração
-    if (selectedStrategy === 'PRO_MAX' && hasMultiAccountConfig) {
-      // Estratégia PRO_MAX com multi-conta configurada = modo multi-conta
-      console.log('🚀 Iniciando BackBot em modo Multi-Conta...\n');
+    // Verifica se a estratégia foi definida via variável de ambiente
+    const envStrategy = process.env.TRADING_STRATEGY;
+    let selectedStrategy;
+
+    if (envStrategy) {
+      // Executa diretamente com a estratégia definida
+      selectedStrategy = envStrategy;
+      console.log(`🚀 Iniciando BackBot com estratégia: ${selectedStrategy}`);
+    } else {
+      // Exibe menu de seleção de estratégia (simplificado)
+      selectedStrategy = await showModeSelectionMenu(hasMultiAccountConfig);
+
+      if (selectedStrategy === 'exit') {
+        console.log('👋 Encerrando BackBot.');
+        process.exit(0);
+      }
+    }
+
+    // Lógica simplificada: opção 2 sempre executa PRO MAX
+    if (selectedStrategy === 'PRO_MAX') {
+      // Estratégia PRO_MAX = sempre modo multi-conta (mesmo com uma conta)
+      console.log('🚀 Iniciando BackBot em modo PRO MAX...\n');
       isMultiBotMode = true;
       const multiBotManager = new MultiBotManager();
       await multiBotManager.runMultiMode();
     } else {
-      // Estratégia DEFAULT ou PRO_MAX sem multi-conta = modo conta única
+      // Estratégia DEFAULT = sempre modo conta única
       console.log('🚀 Iniciando BackBot em modo Conta Única...\n');
       isMultiBotMode = false;
       
@@ -320,11 +285,7 @@ async function startBot() {
       initializeDecisionStrategy(selectedStrategy);
       
       // Log da estratégia selecionada
-      if (selectedStrategy === 'DEFAULT') {
-        console.log('🔑 Estratégia VOLUMES: usando credenciais da CONTA1');
-      } else if (selectedStrategy === 'PRO_MAX') {
-        console.log('🔑 Estratégia LUCRO: usando credenciais da CONTA1');
-      }
+      console.log('🔑 Estratégia VOLUMES: usando credenciais da CONTA1');
 
       // Inicia o PnL Controller
       PnlController.run(24);

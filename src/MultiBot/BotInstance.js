@@ -263,8 +263,11 @@ class BotInstance {
         accountId: this.accountId
       };
       
+      // Cria uma instância do Decision com a estratégia específica desta conta
+      const decisionInstance = new Decision(this.strategy);
+      
       // Executa análise passando o timeframe específico da conta, o logger e a configuração
-      await Decision.analyze(this.time, this.logger, instanceConfig);
+      await decisionInstance.analyze(this.time, this.logger, instanceConfig);
       
       // Restaura variáveis originais
       this.restoreEnvironmentVariables();

@@ -20,11 +20,12 @@ class MultiBotManager {
   async initialize() {
     this.logger.info('Inicializando MultiBot Manager...');
     
-    // Carrega configurações
-    AccountConfig.loadConfigurations();
+    // Carrega e valida configurações
+    this.accountConfig = new AccountConfig();
+    await this.accountConfig.initialize();
     
     // Valida configurações
-    const validation = AccountConfig.validateConfigurations();
+    const validation = this.accountConfig.validateConfigurations();
     if (!validation.isValid) {
       this.logger.error('Configurações inválidas:');
       validation.errors.forEach(error => this.logger.error(`  • ${error}`));
@@ -32,8 +33,8 @@ class MultiBotManager {
     }
     
     // Verifica se há contas configuradas
-    if (!AccountConfig.hasAnyAccount()) {
-      this.logger.error('Nenhuma conta configurada');
+    if (!this.accountConfig.hasAnyAccount()) {
+      this.logger.error('Nenhuma conta com credenciais válidas encontrada');
       return false;
     }
     
@@ -81,8 +82,7 @@ class MultiBotManager {
    * Mostra menu de seleção de contas
    */
   async showAccountSelection() {
-    const accountConfig = new AccountConfig();
-    const enabledAccounts = accountConfig.getEnabledAccounts();
+    const enabledAccounts = this.accountConfig.getEnabledAccounts();
     
     console.log('\n🤖 Seleção de Contas');
     console.log('=====================================\n');
@@ -115,10 +115,8 @@ class MultiBotManager {
     try {
       this.logger.info(`Iniciando ${accountIds.length} bot(s)...`);
       
-      // Cria instâncias dos bots
-      const accountConfig = new AccountConfig();
       for (const accountId of accountIds) {
-        const account = accountConfig.getAccount(accountId);
+        const account = this.accountConfig.getAccount(accountId);
         if (!account) {
           this.logger.error(`Conta ${accountId} não encontrada`);
           continue;
@@ -259,16 +257,26 @@ class MultiBotManager {
    * Executa em modo múltiplas contas
    */
   async runMultiMode() {
-    this.logger.info('Executando em modo múltiplas contas...');
+    this.logger.info('Executando em modo PRO MAX...');
     
-    const accountConfig = new AccountConfig();
-    const enabledAccounts = accountConfig.getEnabledAccounts();
-    if (enabledAccounts.length === 0) {
-      this.logger.error('Nenhuma conta habilitada encontrada');
+    // Garante que o AccountConfig foi inicializado
+    if (!this.accountConfig) {
+      await this.initialize();
+    }
+    
+    // Filtra apenas contas com estratégia PRO_MAX
+    const allAccounts = this.accountConfig.getAllAccounts();
+    const proMaxAccounts = allAccounts.filter(account => account.strategy === 'PRO_MAX' && account.enabled);
+    
+    if (proMaxAccounts.length === 0) {
+      this.logger.error('Nenhuma conta PRO_MAX habilitada encontrada');
+      this.logger.info('Configure uma conta com ACCOUNT2_STRATEGY=PRO_MAX no .env');
       return false;
     }
     
-    const accountIds = enabledAccounts.map(account => account.id);
+    const accountIds = proMaxAccounts.map(account => account.id);
+    this.logger.info(`Iniciando ${accountIds.length} conta(s) PRO_MAX: ${accountIds.join(', ')}`);
+    
     const success = await this.startBots(accountIds);
     
     if (success) {
