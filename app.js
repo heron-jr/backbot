@@ -162,6 +162,34 @@ async function startStops() {
   setTimeout(startStops, trailingStopInterval);
 }
 
+// Função para exibir status do stop loss dinâmico
+function showDynamicStopLossStatus() {
+  try {
+    const status = TrailingStop.getCurrentStopLossValues();
+    const stopLossType = process.env.STOP_LOSS_TYPE || 'USD';
+    
+    console.log('\n🛡️ STATUS DO STOP LOSS DINÂMICO');
+    console.log('='.repeat(40));
+    console.log(`📊 Tipo: ${stopLossType}`);
+    console.log(`💰 Stop Loss USD: $${status.usd.toFixed(2)}`);
+    console.log(`📈 Stop Loss %: ${status.percentage.toFixed(2)}%`);
+    console.log(`🔢 Total de fechamentos: ${status.totalCloses}`);
+    console.log(`⚠️ Fechamentos prematuros: ${status.prematureCloses}`);
+    console.log(`⏰ Fechamentos tardios: ${status.lateCloses}`);
+    
+    if (status.totalCloses > 0) {
+      const prematureRate = (status.prematureCloses / status.totalCloses * 100).toFixed(1);
+      const lateRate = (status.lateCloses / status.totalCloses * 100).toFixed(1);
+      console.log(`📊 Taxa prematuros: ${prematureRate}%`);
+      console.log(`📊 Taxa tardios: ${lateRate}%`);
+    }
+    
+    console.log('='.repeat(40));
+  } catch (error) {
+    console.error('Erro ao exibir status do stop loss:', error.message);
+  }
+}
+
 // Monitoramento rápido de ordens pendentes (apenas estratégia PRO_MAX)
 let monitorInterval = 5000; // 5 segundos padrão
 
@@ -303,5 +331,45 @@ async function startBot() {
   }
 }
 
+// Sistema de comandos interativos
+function setupInteractiveCommands() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  console.log('\n💡 Comandos disponíveis:');
+  console.log('   • "status" - Ver status do stop loss dinâmico');
+  console.log('   • "exit" - Sair do bot');
+  console.log('   • "help" - Ver esta ajuda\n');
+
+  rl.on('line', (input) => {
+    const command = input.trim().toLowerCase();
+    
+    switch (command) {
+      case 'status':
+        showDynamicStopLossStatus();
+        break;
+      case 'help':
+        console.log('\n💡 Comandos disponíveis:');
+        console.log('   • "status" - Ver status do stop loss dinâmico');
+        console.log('   • "exit" - Sair do bot');
+        console.log('   • "help" - Ver esta ajuda\n');
+        break;
+      case 'exit':
+        console.log('\n👋 Encerrando BackBot...');
+        process.exit(0);
+        break;
+      default:
+        console.log('❌ Comando não reconhecido. Digite "help" para ver os comandos disponíveis.');
+    }
+  });
+}
+
 // Inicia o bot
 startBot();
+
+// Configura comandos interativos após 3 segundos
+setTimeout(() => {
+  setupInteractiveCommands();
+}, 3000);
