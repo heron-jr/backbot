@@ -14,23 +14,23 @@ export class StrategySelector {
    * Exibe o menu de seleção de estratégia
    */
   showMenu() {
-    console.log('\n🤖 BACKBOT - Seleção de Estratégia');
+    console.log('\n🤖 BACKBOT - Configuração Inicial');
     console.log('=====================================\n');
     
-    console.log('📋 Estratégias Disponíveis:\n');
+    console.log('📋 Escolha como deseja operar:\n');
     
-    console.log('1️⃣  DEFAULT');
+    console.log('1️⃣  Estratégia VOLUMES (PADRÃO)');
     console.log('   📊 Foco: Volume na corretora');
-    console.log('   🎯 Objetivo: Maximizar número de operações');
+    console.log('   🎯 Ideal para: Novos usuários');
     console.log('   💡 Características:');
     console.log('      • Sinais mais frequentes');
     console.log('      • Stop loss dinâmico');
     console.log('      • Take profit único');
     console.log('      • Ideal para corretoras que pagam por volume\n');
     
-    console.log('2️⃣  PRO_MAX');
-    console.log('   📈 Foco: Lucro e qualidade de sinais');
-    console.log('   🎯 Objetivo: Maximizar retorno por operação');
+    console.log('2️⃣  Estratégia LUCRO (PRO MAX)');
+    console.log('   📈 Foco: Lucro por operação');
+    console.log('   🎯 Ideal para: Usuários experientes');
     console.log('   💡 Características:');
     console.log('      • Sinais filtrados por qualidade (BRONZE/SILVER/GOLD/DIAMOND)');
     console.log('      • Múltiplos take profits');
@@ -50,15 +50,15 @@ export class StrategySelector {
         
         switch (choice) {
           case '1':
-            console.log('\n✅ Estratégia DEFAULT selecionada!');
+            console.log('\n✅ Estratégia VOLUMES (PADRÃO) selecionada!');
             console.log('🎯 Foco: Volume na corretora');
             this.rl.close();
             resolve('DEFAULT');
             break;
             
           case '2':
-            console.log('\n✅ Estratégia PRO_MAX selecionada!');
-            console.log('🎯 Foco: Lucro e qualidade de sinais');
+            console.log('\n✅ Estratégia LUCRO (PRO MAX) selecionada!');
+            console.log('🎯 Foco: Lucro por operação');
             this.rl.close();
             resolve('PRO_MAX');
             break;

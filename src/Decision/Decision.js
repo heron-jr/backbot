@@ -113,8 +113,24 @@ class Decision {
   async getDataset(Account, closed_markets, timeframe = null, logger = null) {
     const dataset = []
     
-    // Usa o timeframe passado como parâmetro ou fallback para process.env.TIME
-    const currentTimeframe = timeframe || process.env.TIME || '5m';
+    // Usa o timeframe passado como parâmetro ou fallback para configuração da conta
+    let currentTimeframe = timeframe;
+    
+    if (!currentTimeframe) {
+      // Determina a estratégia atual para usar a configuração correta
+      const strategyName = this.strategy.constructor.name;
+      
+      if (strategyName === 'ProMaxStrategy') {
+        // Estratégia PRO_MAX usa CONTA2
+        currentTimeframe = process.env.ACCOUNT2_TIME || process.env.TIME || '5m';
+      } else {
+        // Estratégia DEFAULT usa CONTA1
+        currentTimeframe = process.env.ACCOUNT1_TIME || process.env.TIME || '5m';
+      }
+    }
+    
+    // Usa 100 candles para garantir que todos os indicadores tenham dados suficientes
+    const candleCount = 100;
 
     const markets = Account.markets.filter((el) => {
       return !closed_markets.includes(el.symbol) 
@@ -144,7 +160,7 @@ class Decision {
             // Busca dados novos
             [getAllMarkPrices, candles] = await Promise.all([
               Markets.getAllMarkPrices(market.symbol),
-              Markets.getKLines(market.symbol, currentTimeframe, 30)
+              Markets.getKLines(market.symbol, currentTimeframe, candleCount)
             ]);
             
             // Salva no cache
@@ -205,11 +221,11 @@ class Decision {
   }
 
 
-  async analyzeTrades(fee, datasets, investmentUSD, media_rsi, config = null) {
+  async analyzeTrades(fee, datasets, investmentUSD, media_rsi, config = null, btcTrend = 'NEUTRAL') {
     // Paraleliza a análise de todos os datasets
     const analysisPromises = datasets.map(async (data) => {
       try {
-        return await this.strategy.analyzeTrade(fee, data, investmentUSD, media_rsi, config);
+        return await this.strategy.analyzeTrade(fee, data, investmentUSD, media_rsi, config, btcTrend);
       } catch (error) {
         const errorMsg = `❌ Erro na análise de ${data.market?.symbol}: ${error.message}`;
         if (logger) {
@@ -324,8 +340,21 @@ class Decision {
 
     try {
       
-    // Usa o timeframe passado como parâmetro ou fallback para process.env.TIME
-    const currentTimeframe = timeframe || process.env.TIME || '5m';
+    // Usa o timeframe passado como parâmetro ou fallback para configuração da conta
+    let currentTimeframe = timeframe;
+    
+    if (!currentTimeframe) {
+      // Determina a estratégia atual para usar a configuração correta
+      const strategyName = this.strategy.constructor.name;
+      
+      if (strategyName === 'ProMaxStrategy') {
+        // Estratégia PRO_MAX usa CONTA2
+        currentTimeframe = process.env.ACCOUNT2_TIME || process.env.TIME || '5m';
+      } else {
+        // Estratégia DEFAULT usa CONTA1
+        currentTimeframe = process.env.ACCOUNT1_TIME || process.env.TIME || '5m';
+      }
+    }
 
     const Account = await AccountController.get(config)
 
@@ -370,6 +399,48 @@ class Decision {
     // Log de debug para verificar mercados fechados
     if (logger) {
       logger.info(`🔒 Mercados com posições: ${closed_markets.length}, Mercados com ordens: ${marketsWithOpenOrders.length}, Total fechados: ${allClosedMarkets.length}`);
+    }
+
+    // ANÁLISE DO BTC PRIMEIRO (antes das altcoins)
+    console.log(`\n📊 ANÁLISE DO BTC (${currentTimeframe}):`);
+    let btcTrend = 'NEUTRAL';
+    try {
+      // Usa 100 candles para garantir que todos os indicadores tenham dados suficientes
+      const btcCandles = await Markets.getKLines('BTC_USDC_PERP', currentTimeframe, 100);
+      if (btcCandles && btcCandles.length > 0) {
+        const btcIndicators = calculateIndicators(btcCandles);
+        
+        // Validação adicional dos indicadores do BTC
+        if (!btcIndicators || !btcIndicators.rsi || !btcIndicators.stoch || !btcIndicators.macd || !btcIndicators.adx) {
+          console.log(`   ⚠️ BTC: Dados de indicadores insuficientes`);
+        } else {
+          const btcAnalysis = this.strategy.analyzeSignals(btcIndicators, true);
+          
+          if (btcAnalysis && btcAnalysis.hasSignal) {
+            console.log(`   🟢 BTC: ${btcAnalysis.signalType}`);
+            if (btcAnalysis.analysisDetails && btcAnalysis.analysisDetails.length > 0) {
+              btcAnalysis.analysisDetails.forEach(detail => {
+                console.log(`      • ${detail}`);
+              });
+            }
+            // Define tendência do BTC baseada no sinal
+            btcTrend = btcAnalysis.isLong ? 'BULLISH' : 'BEARISH';
+          } else {
+            console.log(`   ⚪ BTC: Sem sinais (NEUTRO - não permite operações em altcoins)`);
+            if (btcAnalysis && btcAnalysis.analysisDetails && btcAnalysis.analysisDetails.length > 0) {
+              btcAnalysis.analysisDetails.forEach(detail => {
+                console.log(`      • ${detail}`);
+              });
+            }
+            btcTrend = 'NEUTRAL';
+          }
+        }
+      } else {
+        console.log(`   ⚠️ BTC: Dados de candles insuficientes`);
+      }
+    } catch (error) {
+      console.log(`   ❌ BTC: Erro na análise - ${error.message}`);
+      console.log(`      Detalhes: ${error.stack?.split('\n')[1] || 'Erro desconhecido'}`);
     }
 
     const dataset = await this.getDataset(Account, allClosedMarkets, currentTimeframe, logger)
@@ -441,10 +512,13 @@ class Decision {
 
     const fee = Account.fee
 
-    const rows = await this.analyzeTrades(fee, dataset, investmentUSD, media_rsi, config)
+    const rows = await this.analyzeTrades(fee, dataset, investmentUSD, media_rsi, config, btcTrend)
 
-    // Paraleliza a execução de ordens com controle de capital
-    const orderPromises = rows.map(async (row) => {
+    // Executa ordens em paralelo usando Promise.all
+    console.log(`\n🚀 Executando ${rows.length} ordens em paralelo...`);
+    
+    // Prepara todas as ordens
+    const orderPromises = rows.map(async (row, index) => {
       try {
         const marketInfo = Account.markets.find((el) => el.symbol === row.market);
 
@@ -453,24 +527,30 @@ class Decision {
         row.decimal_price = marketInfo.decimal_price
         row.stepSize_quantity = marketInfo.stepSize_quantity
 
-        const orders = await OrderController.getRecentOpenOrders(row.market)
-
-        if(orders.length > 0) {
-          if(orders[0].minutes > 3){
-            // Ordem antiga, cancela e cria nova
-            await Order.cancelOpenOrders(row.market)
-            return await OrderController.openOrder({ ...row, accountId: config?.accountId || 'DEFAULT' })
-          } else {
-            // Ordem recente existe (menos de 3 minutos), não criar nova
-            if (logger) {
-              logger.info(`⏸️ ${row.market}: Ordem recente existe (${orders[0].minutes}min), pulando...`);
-            }
-            return null
-          }
-        } else {
-          // Nenhuma ordem existente, pode criar nova
-          return await OrderController.openOrder({ ...row, accountId: config?.accountId || 'DEFAULT' })
+        // Verifica se já existe uma posição ativa para este mercado
+        const positions = await Futures.getOpenPositions();
+        const existingPosition = positions.find(p => p.symbol === row.market && Math.abs(Number(p.netQuantity)) > 0);
+        
+        if (existingPosition) {
+          // Já existe posição ativa, não criar nova ordem
+          console.log(`   ⏸️ ${row.market}: Posição ativa existe (${existingPosition.netQuantity}), pulando...`);
+          return { index, market: row.market, result: null };
         }
+
+        // Verifica se já existe uma ordem de entrada pendente (simplificado)
+        const entryOrders = await OrderController.getRecentEntryOrders(row.market)
+
+        if(entryOrders.length > 0) {
+          // Se já existe ordem de entrada pendente, não criar nova (independente do tempo)
+          console.log(`   ⏸️ ${row.market}: Ordem de entrada pendente já existe, pulando...`);
+          return { index, market: row.market, result: null };
+        } else {
+          // Nenhuma ordem de entrada pendente, pode criar nova
+          console.log(`   ➡️ ${row.market}: Nenhuma ordem de entrada pendente, criando nova ordem...`);
+          const result = await OrderController.openOrder({ ...row, accountId: config?.accountId || 'DEFAULT' })
+          return { index, market: row.market, result };
+        }
+        
       } catch (error) {
         const errorMsg = `❌ Erro ao executar ordem para ${row.market}: ${error.message}`;
         if (logger) {
@@ -478,16 +558,29 @@ class Decision {
         } else {
           console.error(errorMsg);
         }
-        return null;
+        return { index, market: row.market, result: { error: error.message } };
       }
     });
 
     // Executa todas as ordens em paralelo
     const orderResults = await Promise.all(orderPromises);
     
+    // Ordena os resultados pelo índice original e mostra logs
+    orderResults.sort((a, b) => a.index - b.index);
+    
+    orderResults.forEach(({ market, result }) => {
+      if (result && !result.error) {
+        console.log(`   ✅ ${market}: Executada`);
+      } else if (result && result.error) {
+        console.log(`   ❌ ${market}: Falhou - ${result.error}`);
+      } else {
+        console.log(`   ⏸️ ${market}: Pulado (ordem recente)`);
+      }
+    });
+    
     // Log dos resultados
-    const successfulOrders = orderResults.filter(result => result !== null);
-    const failedOrders = orderResults.filter(result => result === null);
+    const successfulOrders = orderResults.filter(({ result }) => result && !result.error);
+    const failedOrders = orderResults.filter(({ result }) => !result || result.error);
     
     // Log detalhado das ordens
     const detailsMsg = `📊 Detalhes das ordens:`;
@@ -497,16 +590,24 @@ class Decision {
       console.log(detailsMsg);
     }
     
-    rows.forEach((row, index) => {
-      const result = orderResults[index];
-      const status = result !== null ? '✅' : '❌';
+    // Log resumo da análise quando há operações
+    console.log(`\n📈 RESUMO DA ANÁLISE:`);
+    console.log(`   • Mercados analisados: ${dataset.length}`);
+    console.log(`   • Sinais encontrados: ${rows.length}`);
+    console.log(`   • Operações executadas: ${successfulOrders.length}`);
+    console.log(`   • Operações falharam: ${failedOrders.length}`);
+    
+    orderResults.forEach(({ market, result }) => {
+      const status = result && !result.error ? '✅' : '❌';
+      const errorMsg = result?.error ? ` - ${result.error}` : '';
       
       // Para estratégia PRO_MAX, inclui o nível do sinal
       let orderMsg;
-      if (this.strategy.constructor.name === 'ProMaxStrategy' && row.signalLevel) {
-        orderMsg = `${status} ${row.market} (${row.signalLevel}): ${result !== null ? 'Executada' : 'Falhou'}`;
+      const row = rows.find(r => r.market === market);
+      if (this.strategy.constructor.name === 'ProMaxStrategy' && row?.signalLevel) {
+        orderMsg = `${status} ${market} (${row.signalLevel}): ${result && !result.error ? 'Executada' : 'Falhou' + errorMsg}`;
       } else {
-        orderMsg = `${status} ${row.market}: ${result !== null ? 'Executada' : 'Falhou'}`;
+        orderMsg = `${status} ${market}: ${result && !result.error ? 'Executada' : 'Falhou' + errorMsg}`;
       }
       
       if (logger) {
@@ -533,6 +634,8 @@ class Decision {
       }
     }
     
+
+
     // Log informativo quando não há operações
     if (rows.length === 0) {
       const noOpsMsg = `⏰ Nenhuma operação encontrada.`;
@@ -541,6 +644,12 @@ class Decision {
       } else {
         console.log(noOpsMsg);
       }
+      
+      // Log resumo da análise quando não há operações
+      console.log(`\n📈 RESUMO DA ANÁLISE:`);
+      console.log(`   • Mercados analisados: ${dataset.length}`);
+      console.log(`   • Sinais encontrados: 0`);
+      console.log(`   • Operações executadas: 0`);
     }
 
     // Monitoramento de ordens pendentes agora é feito a cada 5 segundos em app.js

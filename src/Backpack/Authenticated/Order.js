@@ -134,12 +134,11 @@ class Order {
       const { data } = await axios.post(`${process.env.API_URL}/api/v1/order`, body, {
         headers
       });
-      // Log removido - agora é feito no OrderController com accountId
       return data;
     } catch (err) {
-      // Logs removidos - agora são feitos no OrderController com accountId
-      // Apenas retorna null para indicar erro
-      return null;
+      // Captura o motivo do erro para retornar
+      const errorMessage = err.response?.data?.message || err.response?.data?.msg || err.message || 'Erro desconhecido';
+      return { error: errorMessage };
     }
   }
 

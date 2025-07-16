@@ -171,24 +171,34 @@ async function startPendingOrdersMonitor() {
   setTimeout(startPendingOrdersMonitor, monitorInterval);
 }
 
-// Função para exibir menu de seleção de modo interativo
+// Função para exibir menu de seleção de modo interativo (simplificado)
 async function showModeSelectionMenu(hasMultiAccountConfig) {
   return new Promise((resolve) => {
-    console.log('\n🤖 BACKBOT - Seleção de Modo');
+    console.log('\n🤖 BACKBOT - Configuração Inicial');
     console.log('=====================================\n');
-    console.log('📋 Modos Disponíveis:\n');
+    console.log('📋 Escolha como deseja operar:\n');
     
-    const choices = ['Conta Única'];
-    if (hasMultiAccountConfig) {
-      choices.push('Multi-Conta');
-    }
-    choices.push('Sair');
+    console.log('1️⃣  Estratégia VOLUMES (PADRÃO)');
+    console.log('   📊 Foco: Volume na corretora');
+    console.log('   🎯 Ideal para: Novos usuários');
+    console.log('   💡 Características:');
+    console.log('      • Sinais mais frequentes');
+    console.log('      • Stop loss dinâmico');
+    console.log('      • Take profit único');
+    console.log('      • Ideal para corretoras que pagam por volume\n');
     
-    choices.forEach((choice, index) => {
-      console.log(`${index + 1}. ${choice}`);
-    });
+    console.log('2️⃣  Estratégia LUCRO (PRO MAX)');
+    console.log('   📈 Foco: Lucro por operação');
+    console.log('   🎯 Ideal para: Usuários experientes');
+    console.log('   💡 Características:');
+    console.log('      • Sinais filtrados por qualidade (BRONZE/SILVER/GOLD/DIAMOND)');
+    console.log('      • Múltiplos take profits');
+    console.log('      • Stop loss baseado em ATR');
+    console.log('      • Ideal para traders que buscam lucro consistente\n');
     
-    console.log('\n💡 Digite o número da opção desejada');
+    console.log('3️⃣  Sair\n');
+    
+    console.log('💡 Digite o número da opção desejada');
     
     const rl = readline.createInterface({
       input: process.stdin,
@@ -200,10 +210,10 @@ async function showModeSelectionMenu(hasMultiAccountConfig) {
       const choice = parseInt(answer.trim());
       
       if (choice === 1) {
-        resolve('single');
-      } else if (choice === 2 && hasMultiAccountConfig) {
-        resolve('multi');
-      } else if (choice === (hasMultiAccountConfig ? 3 : 2)) {
+        resolve('DEFAULT');
+      } else if (choice === 2) {
+        resolve('PRO_MAX');
+      } else if (choice === 3) {
         resolve('exit');
       } else {
         console.log('❌ Opção inválida. Tente novamente.');
@@ -257,9 +267,9 @@ async function startSingleAccountBot() {
     // Log da estratégia selecionada
     const strategy = process.env.TRADING_STRATEGY || 'DEFAULT';
     if (strategy === 'DEFAULT') {
-      console.log('🔑 Estratégia DEFAULT: usando credenciais da CONTA1');
+      console.log('🔑 Estratégia VOLUMES: usando credenciais da CONTA1');
     } else if (strategy === 'PRO_MAX') {
-      console.log('🔑 Estratégia PRO_MAX: usando credenciais da CONTA2');
+      console.log('🔑 Estratégia LUCRO: usando credenciais da CONTA1');
     } else {
       console.log(`🔑 Estratégia ${strategy}: usando credenciais específicas`);
     }
@@ -267,8 +277,8 @@ async function startSingleAccountBot() {
     // Inicia o PnL Controller
     PnlController.run(24);
 
-    // Inicia os serviços (modo DEFAULT por padrão)
-    console.log('🚀 Iniciando serviços em modo DEFAULT...');
+    // Inicia os serviços
+    console.log('🚀 Iniciando serviços...');
     startDecision();
     startStops();
     startPendingOrdersMonitor();
@@ -286,23 +296,44 @@ async function startBot() {
     const accountConfig = new AccountConfig();
     const hasMultiAccountConfig = accountConfig.hasMultiAccountConfig();
 
-    // Exibe menu de seleção de modo
-    const mode = await showModeSelectionMenu(hasMultiAccountConfig);
+    // Exibe menu de seleção de estratégia (simplificado)
+    const selectedStrategy = await showModeSelectionMenu(hasMultiAccountConfig);
 
-    if (mode === 'single') {
-      // Modo conta única
-      console.log('🚀 Iniciando BackBot em modo Conta Única...\n');
-      isMultiBotMode = false;
-      await startSingleAccountBot();
-    } else if (mode === 'multi') {
-      // Modo multi-conta
+    if (selectedStrategy === 'exit') {
+      console.log('👋 Encerrando BackBot.');
+      process.exit(0);
+    }
+
+    // Determina o modo baseado na estratégia e configuração
+    if (selectedStrategy === 'PRO_MAX' && hasMultiAccountConfig) {
+      // Estratégia PRO_MAX com multi-conta configurada = modo multi-conta
       console.log('🚀 Iniciando BackBot em modo Multi-Conta...\n');
       isMultiBotMode = true;
       const multiBotManager = new MultiBotManager();
       await multiBotManager.runMultiMode();
     } else {
-      console.log('👋 Encerrando BackBot.');
-      process.exit(0);
+      // Estratégia DEFAULT ou PRO_MAX sem multi-conta = modo conta única
+      console.log('🚀 Iniciando BackBot em modo Conta Única...\n');
+      isMultiBotMode = false;
+      
+      // Inicializa a estratégia selecionada
+      initializeDecisionStrategy(selectedStrategy);
+      
+      // Log da estratégia selecionada
+      if (selectedStrategy === 'DEFAULT') {
+        console.log('🔑 Estratégia VOLUMES: usando credenciais da CONTA1');
+      } else if (selectedStrategy === 'PRO_MAX') {
+        console.log('🔑 Estratégia LUCRO: usando credenciais da CONTA1');
+      }
+
+      // Inicia o PnL Controller
+      PnlController.run(24);
+
+      // Inicia os serviços
+      console.log('🚀 Iniciando serviços...');
+      startDecision();
+      startStops();
+      startPendingOrdersMonitor();
     }
 
   } catch (error) {

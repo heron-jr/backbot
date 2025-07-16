@@ -45,30 +45,21 @@ class OrderController {
    * @param {string} accountId - ID da conta para monitorar
    */
   static async monitorPendingEntryOrders(accountId = 'DEFAULT') {
-    try {
-      console.log(`\n🚀 [MONITOR-${accountId}] Iniciando monitoramento...`);
-      
+    try {      
       const accountOrders = OrderController.pendingEntryOrdersByAccount[accountId];
       if (!accountOrders) {
-        console.log(`📭 [MONITOR-${accountId}] Nenhuma ordem pendente para esta conta`);
         return;
       }
       
       const markets = Object.keys(accountOrders);
       if (markets.length === 0) {
-        console.log(`📭 [MONITOR-${accountId}] Nenhum mercado pendente`);
         return;
       }
-
-      // Log de debug para verificar se está monitorando
-      console.log(`🔍 [MONITOR-${accountId}] Monitorando ${markets.length} ordens pendentes: ${markets.join(', ')}`);
 
       // Tenta obter posições com retry
       let positions = [];
       try {
-        console.log(`📡 [MONITOR-${accountId}] Obtendo posições da API...`);
         positions = await Futures.getOpenPositions() || [];
-        console.log(`📊 [MONITOR-${accountId}] Posições obtidas: ${positions.length} - Símbolos: ${positions.map(p => p.symbol).join(', ')}`);
       } catch (error) {
         console.warn(`⚠️ [MONITOR-${accountId}] Falha ao obter posições, continuando monitoramento...`);
         positions = [];
@@ -78,30 +69,41 @@ class OrderController {
         const orderData = accountOrders[market];
         const position = positions.find(p => p.symbol === market && Math.abs(Number(p.netQuantity)) > 0);
         
-        console.log(`🔍 [MONITOR-${accountId}] Verificando ${market}: Posição encontrada = ${position ? 'SIM' : 'NÃO'}`);
         if (position) {
-          console.log(`📈 [MONITOR-${accountId}] ${market}: netQuantity = ${position.netQuantity}, avgEntryPrice = ${position.avgEntryPrice}`);
         }
         
         if (position) {
           // Posição foi aberta, delega para método dedicado
-          console.log(`🎯 [${accountId}] ${market}: Ordem de entrada executada, processando TPs...`);
           await OrderController.handlePositionOpenedForProMax(market, position, orderData, accountId);
           OrderController.removePendingEntryOrder(market, accountId);
         } else {
           // Verifica se a ordem ainda existe (não foi cancelada)
           try {
-            console.log(`📋 [MONITOR-${accountId}] ${market}: Obtendo ordens abertas...`);
             const openOrders = await Order.getOpenOrders(market);
-            const hasEntryOrder = openOrders && openOrders.some(o => 
-              !o.reduceOnly && o.orderType === 'Limit' && o.symbol === market
-            );
             
-            console.log(`📋 [MONITOR-${accountId}] ${market}: Ordens abertas = ${openOrders ? openOrders.length : 0}, Ordem de entrada existe = ${hasEntryOrder ? 'SIM' : 'NÃO'}`);
+            // Verifica se há alguma ordem de entrada pendente (não reduceOnly, Limit, e não é stop loss/take profit)
+            const hasEntryOrder = openOrders && openOrders.some(o => {
+              // Deve ser uma ordem de entrada (não reduceOnly)
+              const isEntryOrder = !o.reduceOnly;
+              
+              // Deve ser do tipo Limit
+              const isLimitOrder = o.orderType === 'Limit';
+              
+              // Deve ser do símbolo correto
+              const isCorrectSymbol = o.symbol === market;
+              
+              // NÃO deve ser uma ordem de stop loss ou take profit
+              const isNotStopLoss = !o.stopLossTriggerPrice && !o.stopLossLimitPrice;
+              const isNotTakeProfit = !o.takeProfitTriggerPrice && !o.takeProfitLimitPrice;
+              
+              // Deve estar pendente
+              const isPending = o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled';
+              
+              return isEntryOrder && isLimitOrder && isCorrectSymbol && isNotStopLoss && isNotTakeProfit && isPending;
+            });
             
             if (!hasEntryOrder) {
               // Ordem não existe mais (foi cancelada ou executada sem posição)
-              console.log(`⚠️ [${accountId}] ${market}: Ordem de entrada não encontrada, removendo do monitoramento`);
               OrderController.removePendingEntryOrder(market, accountId);
             }
           } catch (orderError) {
@@ -110,7 +112,6 @@ class OrderController {
         }
       }
       
-      console.log(`✅ [MONITOR-${accountId}] Monitoramento concluído`);
     } catch (error) {
       console.error(`❌ [${accountId}] Erro no monitoramento de ordens pendentes:`, error.message);
     }
@@ -319,22 +320,54 @@ class OrderController {
       const openOrders = await Order.getOpenOrders(symbol);
       
       if (!openOrders || openOrders.length === 0) {
-        console.log(`📭 Nenhuma ordem pendente para ${symbol}`);
         return true;
       }
 
-      // Cancela todas as ordens pendentes
-      const cancelResult = await Order.cancelOpenOrders(symbol);
+      // Filtra apenas ordens de entrada pendentes (não ordens de stop loss ou take profit)
+      const pendingEntryOrders = openOrders.filter(order => {
+        // Verifica se é uma ordem pendente
+        const isPending = order.status === 'Pending' || 
+                         order.status === 'New' || 
+                         order.status === 'PartiallyFilled';
+        
+        // Verifica se NÃO é uma ordem de stop loss ou take profit
+        const isNotStopLoss = !order.stopLossTriggerPrice && !order.stopLossLimitPrice;
+        const isNotTakeProfit = !order.takeProfitTriggerPrice && !order.takeProfitLimitPrice;
+        
+        // Verifica se NÃO é uma ordem reduceOnly (que são ordens de saída)
+        const isNotReduceOnly = !order.reduceOnly;
+        
+        return isPending && isNotStopLoss && isNotTakeProfit && isNotReduceOnly;
+      });
+
+      if (pendingEntryOrders.length === 0) {
+        console.log(`ℹ️ ${symbol}: Nenhuma ordem de entrada pendente encontrada para cancelar`);
+        return true;
+      }
+
+      // Log detalhado das ordens que serão canceladas
+      console.log(`🔍 ${symbol}: Encontradas ${pendingEntryOrders.length} ordens de entrada pendentes para cancelar:`);
+      pendingEntryOrders.forEach((order, index) => {
+        console.log(`   ${index + 1}. ID: ${order.orderId}, Status: ${order.status}, ReduceOnly: ${order.reduceOnly}, StopLoss: ${!!order.stopLossTriggerPrice}, TakeProfit: ${!!order.takeProfitTriggerPrice}`);
+      });
+
+      // Cancela apenas as ordens de entrada pendentes específicas
+      const cancelPromises = pendingEntryOrders.map(order => 
+        Order.cancelOpenOrder(symbol, order.orderId, order.clientId)
+      );
       
-      if (cancelResult) {
-        console.log(`🗑️ ${openOrders.length} ordens canceladas para ${symbol}`);
+      const cancelResults = await Promise.all(cancelPromises);
+      const successfulCancels = cancelResults.filter(result => result !== null).length;
+      
+      if (successfulCancels > 0) {
+        console.log(`🗑️ ${symbol}: ${successfulCancels} ordens de entrada pendentes canceladas com sucesso`);
         return true;
       } else {
-        console.error(`❌ Falha ao cancelar ordens para ${symbol}`);
+        console.error(`❌ ${symbol}: Falha ao cancelar ordens de entrada pendentes`);
         return false;
       }
     } catch (error) {
-      console.error(`❌ Erro ao cancelar ordens para ${symbol}:`, error.message);
+      console.error(`❌ Erro ao cancelar ordens de entrada pendentes para ${symbol}:`, error.message);
       return false;
     }
   }
@@ -432,7 +465,7 @@ class OrderController {
     // Validação de margem antes de tentar abrir a ordem
     const marginValidation = await this.validateMargin(market, volume, marketInfo);
     if (!marginValidation.isValid) {
-      // console.warn(`⚠️ [${accountId}] MARGEM INSUFICIENTE: ${market} - ${marginValidation.message}`);
+      console.warn(`⚠️ [${accountId}] MARGEM INSUFICIENTE: ${market} - ${marginValidation.message}`);
       return false;
     }
     // Obtém o preço atual do mercado para usar como referência
@@ -440,10 +473,22 @@ class OrderController {
     const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
     // Calcula a diferença percentual entre o preço de entrada e o preço atual
     const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
-    // Ajusta o multiplicador baseado na volatilidade
-    let tickMultiplier = 20; // Base mais conservador
-    if (priceDiff < 0.001) { tickMultiplier = 30; }
-    else if (priceDiff < 0.005) { tickMultiplier = 25; }
+    // Ajusta o multiplicador baseado na volatilidade e no ativo específico
+    let tickMultiplier = 50; // Base
+    
+    // Multiplicadores específicos para ativos de alta volatilidade
+    if (market === 'BTC_USDC_PERP') {
+      tickMultiplier = 150; // BTC precisa de margem muito maior
+    } else if (market === 'ETH_USDC_PERP') {
+      tickMultiplier = 100; // ETH também precisa de margem maior
+    } else if (priceDiff < 0.001) {
+      tickMultiplier = 80; // Para outros ativos com baixa volatilidade
+    } else if (priceDiff < 0.005) {
+      tickMultiplier = 60;
+    } else if (priceDiff < 0.01) {
+      tickMultiplier = 40;
+    }
+    
     // Usa o preço de mercado atual como base para evitar rejeições
     let adjustedPrice;
     if (isLong) {
@@ -496,28 +541,28 @@ class OrderController {
     if(body.quantity > 0 && body.price > 0){
       const result = await Order.executeOrder(body);
       if (!result) {
-        // console.log(`⚠️ [${accountId}] Tentando ordem com preço mais conservador para ${market}`);
-        const moreConservativePrice = isLong 
-          ? currentMarketPrice - (tickSize * (tickMultiplier + 15))
-          : currentMarketPrice + (tickSize * (tickMultiplier + 15));
-        body.price = formatPrice(moreConservativePrice);
-        // console.log(`💰 [${accountId}] ${market}: Novo preço ${moreConservativePrice.toFixed(6)}`);
-        const retryResult = await Order.executeOrder(body);
-        if (retryResult) {
-          // console.log(`✅ [${accountId}] executeOrder Success! ${market}`);
-        } else {
-          // console.error(`❌ [${accountId}] executeOrder - Error! ${market}`);
+        // Tenta com preço muito mais conservador para evitar "immediately match"
+        let retryMultiplier = tickMultiplier + 50; // Base
+        
+        // Retry específico para ativos de alta volatilidade
+        if (market === 'BTC_USDC_PERP') {
+          retryMultiplier = tickMultiplier + 100; // BTC precisa de retry muito maior
+        } else if (market === 'ETH_USDC_PERP') {
+          retryMultiplier = tickMultiplier + 75; // ETH também precisa de retry maior
         }
+        
+        const moreConservativePrice = isLong 
+          ? currentMarketPrice - (tickSize * retryMultiplier)
+          : currentMarketPrice + (tickSize * retryMultiplier);
+        body.price = formatPrice(moreConservativePrice);
+        const retryResult = await Order.executeOrder(body);
         return retryResult;
       }
-      // console.log(`✅ [${accountId}] executeOrder Success! ${market}`);
       return result;
     }
-    // console.error(`❌ [${accountId}] ${market}: Quantidade (${body.quantity}) ou preço (${body.price}) inválidos`);
-    return false;
+    return { error: 'Quantidade ou preço inválidos' };
     } catch (error) {
-      console.error(`❌ [${accountId}] OrderController.openOrder - Error:`, error.message);
-      return false;
+      return { error: error.message };
     }
   }
 
@@ -532,6 +577,60 @@ class OrderController {
             price: parseFloat(el.price)
         }
     })
+  }
+
+  /**
+   * Obtém apenas ordens de entrada recentes (não stop loss/take profit)
+   * @param {string} market - Símbolo do mercado
+   * @returns {Array} - Lista de ordens de entrada
+   */
+  async getRecentEntryOrders(market) {
+    const orders = await Order.getOpenOrders(market)
+    
+    if (!orders || orders.length === 0) {
+      return [];
+    }
+
+    // Filtra apenas ordens de entrada Limit (não stop loss/take profit)
+    const entryOrders = orders.filter(order => {
+      // Verifica se é uma ordem pendente
+      const isPending = order.status === 'Pending' || 
+                       order.status === 'New' || 
+                       order.status === 'PartiallyFilled';
+      
+      // Verifica se é uma ordem Limit (ordens de entrada)
+      const isLimitOrder = order.orderType === 'Limit';
+      
+      // Verifica se NÃO é uma ordem de stop loss ou take profit
+      const isNotStopLoss = !order.stopLossTriggerPrice && !order.stopLossLimitPrice;
+      const isNotTakeProfit = !order.takeProfitTriggerPrice && !order.takeProfitLimitPrice;
+      
+      // Verifica se NÃO é uma ordem reduceOnly (que são ordens de saída)
+      const isNotReduceOnly = !order.reduceOnly;
+      
+      const isEntryOrder = isPending && isLimitOrder && isNotStopLoss && isNotTakeProfit && isNotReduceOnly;
+      
+      // Log detalhado para debug
+      if (isPending) {
+        console.log(`   📋 ${market}: ID=${order.orderId}, Type=${order.orderType}, Status=${order.status}, ReduceOnly=${order.reduceOnly}, StopLoss=${!!order.stopLossTriggerPrice}, TakeProfit=${!!order.takeProfitTriggerPrice} → ${isEntryOrder ? 'ENTRADA' : 'OUTRO'}`);
+      }
+      
+      return isEntryOrder;
+    });
+
+    const orderShorted = entryOrders.sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    const result = orderShorted.map((el) => {
+        const minutes = Utils.minutesAgo(el.createdAt);
+        console.log(`   ⏰ ${market}: Ordem ${el.id} criada há ${minutes} minutos`);
+        return {
+            id: el.id,
+            minutes: minutes,
+            triggerPrice: parseFloat(el.triggerPrice),
+            price: parseFloat(el.price)
+        }
+    });
+
+    return result;
   }
 
   async getAllOrdersSchedule(markets_open) {

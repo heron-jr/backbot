@@ -43,7 +43,7 @@ export class BaseStopLoss {
    */
   isVolumeBelowMinimum(position, minVolume) {
     const volume = Number(position.netExposureNotional);
-    return volume <= minVolume;
+    return volume < minVolume;
   }
 
   /**
