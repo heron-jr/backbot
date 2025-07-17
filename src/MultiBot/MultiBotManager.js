@@ -327,21 +327,32 @@ class MultiBotManager {
       process.stdout.write(`[${progressBar}] ${percentage}% | Próxima: ${timeString}`);
     };
 
-    // Intercepta console.log para manter o progresso no rodapé
-    console.log = (...args) => {
-      // Limpa a linha do progresso antes de mostrar o log
-      clearProgressLine();
-      // Mostra o log
-      originalLog.apply(console, args);
-      // Restaura o progresso no rodapé
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min((elapsed / durationMs) * 100, 100);
-      const bars = Math.floor(progress / 5);
-      const emptyBars = 20 - bars;
-      const progressBar = '█'.repeat(bars) + '░'.repeat(emptyBars);
-      const percentage = Math.floor(progress);
-      showProgress(progress, progressBar, percentage);
-    };
+      // Intercepta console.log para manter o progresso no rodapé
+  console.log = (...args) => {
+    // Filtra logs que podem quebrar a barra de progresso
+    const message = args.join(' ');
+    const isSpamLog = message.includes('Stop loss já existe') || 
+                     message.includes('ℹ️ [CONTA') ||
+                     message.includes('⚠️ [CONTA');
+    
+    // Se for log de spam, não mostra para não quebrar a barra
+    if (isSpamLog) {
+      return;
+    }
+    
+    // Limpa a linha do progresso antes de mostrar o log
+    clearProgressLine();
+    // Mostra o log
+    originalLog.apply(console, args);
+    // Restaura o progresso no rodapé
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min((elapsed / durationMs) * 100, 100);
+    const bars = Math.floor(progress / 5);
+    const emptyBars = 20 - bars;
+    const progressBar = '█'.repeat(bars) + '░'.repeat(emptyBars);
+    const percentage = Math.floor(progress);
+    showProgress(progress, progressBar, percentage);
+  };
 
     // Intercepta console.error
     console.error = (...args) => {

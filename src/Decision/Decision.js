@@ -459,7 +459,7 @@ class Decision {
         if (!btcIndicators || !btcIndicators.rsi || !btcIndicators.stoch || !btcIndicators.macd || !btcIndicators.adx) {
           console.log(`   ⚠️ BTC: Dados de indicadores insuficientes`);
         } else {
-          const btcAnalysis = this.strategy.analyzeSignals(btcIndicators, true);
+          const btcAnalysis = this.strategy.analyzeSignals(btcIndicators, true, config);
           
           if (btcAnalysis && btcAnalysis.hasSignal) {
             console.log(`   🟢 BTC: ${btcAnalysis.signalType}`);

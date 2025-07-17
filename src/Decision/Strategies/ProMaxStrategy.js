@@ -6,14 +6,15 @@ export class ProMaxStrategy extends BaseStrategy {
    * Analisa sinais para compatibilidade com Decision.js
    * @param {object} data - Dados de mercado
    * @param {boolean} isBTCAnalysis - Se é análise do BTC
+   * @param {object} config - Configurações específicas da conta (opcional)
    * @returns {object} - Objeto com sinais
    */
-  analyzeSignals(data, isBTCAnalysis = false) {
+  analyzeSignals(data, isBTCAnalysis = false, config = null) {
     try {
-      // Para estratégia PRO_MAX, usa análise ADX
-      const ADX_LENGTH = Number(process.env.ADX_LENGTH || 14);
-      const ADX_THRESHOLD = Number(process.env.ADX_THRESHOLD || 20);
-      const ADX_AVERAGE_LENGTH = Number(process.env.ADX_AVERAGE_LENGTH || 21);
+      // Para estratégia PRO_MAX, usa análise ADX (prioriza config passado)
+      const ADX_LENGTH = config?.adxLength || Number(process.env.ADX_LENGTH || 14);
+      const ADX_THRESHOLD = config?.adxThreshold || Number(process.env.ADX_THRESHOLD || 20);
+      const ADX_AVERAGE_LENGTH = config?.adxAverageLength || Number(process.env.ADX_AVERAGE_LENGTH || 21);
       
       const adxAnalysis = this.analyzeADX(data, ADX_LENGTH, ADX_THRESHOLD, ADX_AVERAGE_LENGTH);
       
@@ -24,23 +25,23 @@ export class ProMaxStrategy extends BaseStrategy {
         };
       }
       
-      // Análise de validação de indicadores
+      // Análise de validação de indicadores (prioriza config passado)
       const validationAnalysis = this.analyzeValidations(data, {
-        useRSI: process.env.USE_RSI_VALIDATION === 'true',
-        useStoch: process.env.USE_STOCH_VALIDATION === 'true',
-        useMACD: process.env.USE_MACD_VALIDATION === 'true',
-        rsiLength: Number(process.env.RSI_LENGTH || 14),
-        rsiAverageLength: Number(process.env.RSI_AVERAGE_LENGTH || 14),
-        rsiBullThreshold: Number(process.env.RSI_BULL_THRESHOLD || 45),
-        rsiBearThreshold: Number(process.env.RSI_BEAR_THRESHOLD || 55),
-        stochKLength: Number(process.env.STOCH_K_LENGTH || 14),
-        stochDLength: Number(process.env.STOCH_D_LENGTH || 3),
-        stochSmooth: Number(process.env.STOCH_SMOOTH || 3),
-        stochBullThreshold: Number(process.env.STOCH_BULL_THRESHOLD || 45),
-        stochBearThreshold: Number(process.env.STOCH_BEAR_THRESHOLD || 55),
-        macdFastLength: Number(process.env.MACD_FAST_LENGTH || 12),
-        macdSlowLength: Number(process.env.MACD_SLOW_LENGTH || 26),
-        macdSignalLength: Number(process.env.MACD_SIGNAL_LENGTH || 9)
+        useRSI: config?.useRsiValidation === 'true' || process.env.USE_RSI_VALIDATION === 'true',
+        useStoch: config?.useStochValidation === 'true' || process.env.USE_STOCH_VALIDATION === 'true',
+        useMACD: config?.useMacdValidation === 'true' || process.env.USE_MACD_VALIDATION === 'true',
+        rsiLength: config?.rsiLength || Number(process.env.RSI_LENGTH || 14),
+        rsiAverageLength: config?.rsiAverageLength || Number(process.env.RSI_AVERAGE_LENGTH || 14),
+        rsiBullThreshold: config?.rsiBullThreshold || Number(process.env.RSI_BULL_THRESHOLD || 45),
+        rsiBearThreshold: config?.rsiBearThreshold || Number(process.env.RSI_BEAR_THRESHOLD || 55),
+        stochKLength: config?.stochKLength || Number(process.env.STOCH_K_LENGTH || 14),
+        stochDLength: config?.stochDLength || Number(process.env.STOCH_D_LENGTH || 3),
+        stochSmooth: config?.stochSmooth || Number(process.env.STOCH_SMOOTH || 3),
+        stochBullThreshold: config?.stochBullThreshold || Number(process.env.STOCH_BULL_THRESHOLD || 45),
+        stochBearThreshold: config?.stochBearThreshold || Number(process.env.STOCH_BEAR_THRESHOLD || 55),
+        macdFastLength: config?.macdFastLength || Number(process.env.MACD_FAST_LENGTH || 12),
+        macdSlowLength: config?.macdSlowLength || Number(process.env.MACD_SLOW_LENGTH || 26),
+        macdSignalLength: config?.macdSignalLength || Number(process.env.MACD_SIGNAL_LENGTH || 9)
       });
       
       // Calcula confluências
@@ -67,19 +68,142 @@ export class ProMaxStrategy extends BaseStrategy {
         analysisDetails.push(`LONG (${signalLevel}) - Confluências: ${bullConfluences}/4`);
         analysisDetails.push(`ADX: ${adxAnalysis.adx.toFixed(2)} < ${ADX_THRESHOLD}`);
         analysisDetails.push(`DI+: ${adxAnalysis.diPlus.toFixed(2)} > DI-: ${adxAnalysis.diMinus.toFixed(2)}`);
+        
+        // Detalha quais indicadores contribuíram para o sinal
+        const validationAnalysis = this.analyzeValidations(data, {
+          useRSI: process.env.USE_RSI_VALIDATION === 'true',
+          useStoch: process.env.USE_STOCH_VALIDATION === 'true',
+          useMACD: process.env.USE_MACD_VALIDATION === 'true',
+          rsiLength: Number(process.env.RSI_LENGTH || 14),
+          rsiAverageLength: Number(process.env.RSI_AVERAGE_LENGTH || 14),
+          rsiBullThreshold: Number(process.env.RSI_BULL_THRESHOLD || 45),
+          rsiBearThreshold: Number(process.env.RSI_BEAR_THRESHOLD || 55),
+          stochKLength: Number(process.env.STOCH_K_LENGTH || 14),
+          stochDLength: Number(process.env.STOCH_D_LENGTH || 3),
+          stochSmooth: Number(process.env.STOCH_SMOOTH || 3),
+          stochBullThreshold: Number(process.env.STOCH_BULL_THRESHOLD || 45),
+          stochBearThreshold: Number(process.env.STOCH_BEAR_THRESHOLD || 55),
+          macdFastLength: Number(process.env.MACD_FAST_LENGTH || 12),
+          macdSlowLength: Number(process.env.MACD_SLOW_LENGTH || 26),
+          macdSignalLength: Number(process.env.MACD_SIGNAL_LENGTH || 9)
+        });
+        
+        if (validationAnalysis.rsi.bullish) analysisDetails.push(`✓ RSI: BULLISH`);
+        if (validationAnalysis.stoch.bullish) analysisDetails.push(`✓ Stoch: BULLISH`);
+        if (validationAnalysis.macd.bullish) analysisDetails.push(`✓ MACD: BULLISH`);
+        
       } else if (adxAnalysis.bearishCondition && isValidBearSignal && bearConfluences > 0) {
         action = 'short';
         signalLevel = bearSignalLevel;
         analysisDetails.push(`SHORT (${signalLevel}) - Confluências: ${bearConfluences}/4`);
         analysisDetails.push(`ADX: ${adxAnalysis.adx.toFixed(2)} < ${ADX_THRESHOLD}`);
         analysisDetails.push(`DI-: ${adxAnalysis.diMinus.toFixed(2)} > DI+: ${adxAnalysis.diPlus.toFixed(2)}`);
+        
+        // Detalha quais indicadores contribuíram para o sinal
+        const validationAnalysis = this.analyzeValidations(data, {
+          useRSI: process.env.USE_RSI_VALIDATION === 'true',
+          useStoch: process.env.USE_STOCH_VALIDATION === 'true',
+          useMACD: process.env.USE_MACD_VALIDATION === 'true',
+          rsiLength: Number(process.env.RSI_LENGTH || 14),
+          rsiAverageLength: Number(process.env.RSI_AVERAGE_LENGTH || 14),
+          rsiBullThreshold: Number(process.env.RSI_BULL_THRESHOLD || 45),
+          rsiBearThreshold: Number(process.env.RSI_BEAR_THRESHOLD || 55),
+          stochKLength: Number(process.env.STOCH_K_LENGTH || 14),
+          stochDLength: Number(process.env.STOCH_D_LENGTH || 3),
+          stochSmooth: Number(process.env.STOCH_SMOOTH || 3),
+          stochBullThreshold: Number(process.env.STOCH_BULL_THRESHOLD || 45),
+          stochBearThreshold: Number(process.env.STOCH_BEAR_THRESHOLD || 55),
+          macdFastLength: Number(process.env.MACD_FAST_LENGTH || 12),
+          macdSlowLength: Number(process.env.MACD_SLOW_LENGTH || 26),
+          macdSignalLength: Number(process.env.MACD_SIGNAL_LENGTH || 9)
+        });
+        
+        if (validationAnalysis.rsi.bearish) analysisDetails.push(`✓ RSI: BEARISH`);
+        if (validationAnalysis.stoch.bearish) analysisDetails.push(`✓ Stoch: BEARISH`);
+        if (validationAnalysis.macd.bearish) analysisDetails.push(`✓ MACD: BEARISH`);
       } else {
         analysisDetails.push('Sem sinais válidos');
         if (adxAnalysis.adx >= ADX_THRESHOLD) {
           analysisDetails.push(`ADX alto: ${adxAnalysis.adx.toFixed(2)} >= ${ADX_THRESHOLD}`);
         }
+        
+        // Detalha cada indicador individualmente
+        const validationAnalysis = this.analyzeValidations(data, {
+          useRSI: process.env.USE_RSI_VALIDATION === 'true',
+          useStoch: process.env.USE_STOCH_VALIDATION === 'true',
+          useMACD: process.env.USE_MACD_VALIDATION === 'true',
+          rsiLength: Number(process.env.RSI_LENGTH || 14),
+          rsiAverageLength: Number(process.env.RSI_AVERAGE_LENGTH || 14),
+          rsiBullThreshold: Number(process.env.RSI_BULL_THRESHOLD || 45),
+          rsiBearThreshold: Number(process.env.RSI_BEAR_THRESHOLD || 55),
+          stochKLength: Number(process.env.STOCH_K_LENGTH || 14),
+          stochDLength: Number(process.env.STOCH_D_LENGTH || 3),
+          stochSmooth: Number(process.env.STOCH_SMOOTH || 3),
+          stochBullThreshold: Number(process.env.STOCH_BULL_THRESHOLD || 45),
+          stochBearThreshold: Number(process.env.STOCH_BEAR_THRESHOLD || 55),
+          macdFastLength: Number(process.env.MACD_FAST_LENGTH || 12),
+          macdSlowLength: Number(process.env.MACD_SLOW_LENGTH || 26),
+          macdSignalLength: Number(process.env.MACD_SIGNAL_LENGTH || 9)
+        });
+        
+        // Log detalhado dos indicadores
+        const useRsiValidation = config?.useRsiValidation === 'true' || process.env.USE_RSI_VALIDATION === 'true';
+        const useStochValidation = config?.useStochValidation === 'true' || process.env.USE_STOCH_VALIDATION === 'true';
+        const useMacdValidation = config?.useMacdValidation === 'true' || process.env.USE_MACD_VALIDATION === 'true';
+        
+        if (useRsiValidation && data.rsi) {
+          const rsi = data.rsi.value;
+          const rsiAvg = data.rsi.avg || rsi;
+          const rsiPrev = data.rsi.prev || rsi;
+          const rsiAvgPrev = data.rsi.avgPrev || rsiAvg;
+          const rsiBullThreshold = config?.rsiBullThreshold || Number(process.env.RSI_BULL_THRESHOLD || 45);
+          const rsiBearThreshold = config?.rsiBearThreshold || Number(process.env.RSI_BEAR_THRESHOLD || 55);
+          const rsiBullish = rsi > rsiAvg && rsi < rsiBullThreshold && rsiPrev <= rsiAvgPrev;
+          const rsiBearish = rsi < rsiAvg && rsi > rsiBearThreshold && rsiPrev >= rsiAvgPrev;
+          analysisDetails.push(`RSI: ${rsi?.toFixed(1) || 'N/A'} (${rsiBullish ? 'BULLISH' : rsiBearish ? 'BEARISH' : 'NEUTRO'})`);
+        } else if (data.rsi) {
+          // Log RSI mesmo se validação estiver desabilitada
+          const rsi = data.rsi.value;
+          analysisDetails.push(`RSI: ${rsi?.toFixed(1) || 'N/A'} (validação desabilitada)`);
+        } else {
+          analysisDetails.push(`RSI: Não disponível`);
+        }
+        
+        if (useStochValidation && data.stoch) {
+          const stochK = data.stoch.k;
+          const stochD = data.stoch.d;
+          const stochKPrev = data.stoch.kPrev || stochK;
+          const stochDPrev = data.stoch.dPrev || stochD;
+          const stochBullThreshold = config?.stochBullThreshold || Number(process.env.STOCH_BULL_THRESHOLD || 45);
+          const stochBearThreshold = config?.stochBearThreshold || Number(process.env.STOCH_BEAR_THRESHOLD || 55);
+          const stochBullish = stochK > stochD && stochK < stochBullThreshold && stochKPrev <= stochDPrev;
+          const stochBearish = stochK < stochD && stochK > stochBearThreshold && stochKPrev >= stochDPrev;
+          analysisDetails.push(`Stoch: K=${stochK?.toFixed(1) || 'N/A'}, D=${stochD?.toFixed(1) || 'N/A'} (${stochBullish ? 'BULLISH' : stochBearish ? 'BEARISH' : 'NEUTRO'})`);
+        } else if (data.stoch) {
+          // Log Stochastic mesmo se validação estiver desabilitada
+          const stochK = data.stoch.k;
+          const stochD = data.stoch.d;
+          analysisDetails.push(`Stoch: K=${stochK?.toFixed(1) || 'N/A'}, D=${stochD?.toFixed(1) || 'N/A'} (validação desabilitada)`);
+        } else {
+          analysisDetails.push(`Stoch: Não disponível`);
+        }
+        
+        if (useMacdValidation && data.macd) {
+          const histogram = data.macd.histogram;
+          const histogramPrev = data.macd.histogramPrev || histogram;
+          const macdBullish = histogram < 0 && histogram > histogramPrev;
+          const macdBearish = histogram >= 0 && histogram < histogramPrev;
+          analysisDetails.push(`MACD: Hist=${histogram?.toFixed(3) || 'N/A'} (${macdBullish ? 'BULLISH' : macdBearish ? 'BEARISH' : 'NEUTRO'})`);
+        } else if (data.macd) {
+          // Log MACD mesmo se validação estiver desabilitada
+          const histogram = data.macd.histogram;
+          analysisDetails.push(`MACD: Hist=${histogram?.toFixed(3) || 'N/A'} (validação desabilitada)`);
+        } else {
+          analysisDetails.push(`MACD: Não disponível`);
+        }
+        
         if (bullConfluences === 0 && bearConfluences === 0) {
-          analysisDetails.push('Sem confluências de indicadores');
+          analysisDetails.push(`Confluências: BULL=${bullConfluences}, BEAR=${bearConfluences}`);
         }
       }
       

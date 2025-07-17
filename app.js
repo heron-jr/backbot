@@ -66,6 +66,17 @@ function showGlobalTimer() {
 
   // Intercepta console.log para manter o progresso no rodapé
   console.log = (...args) => {
+    // Filtra logs que podem quebrar a barra de progresso
+    const message = args.join(' ');
+    const isSpamLog = message.includes('Stop loss já existe') || 
+                     message.includes('ℹ️ [CONTA') ||
+                     message.includes('⚠️ [CONTA');
+    
+    // Se for log de spam, não mostra para não quebrar a barra
+    if (isSpamLog) {
+      return;
+    }
+    
     // Limpa a linha do progresso antes de mostrar o log
     clearProgressLine();
     // Mostra o log

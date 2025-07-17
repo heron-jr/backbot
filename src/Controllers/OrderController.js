@@ -11,6 +11,9 @@ class OrderController {
 
   // Contador estático para evitar loop infinito
   static stopLossAttempts = null;
+  
+  // Cache para posições que já têm stop loss validado
+  static validatedStopLossPositions = new Set();
 
   /**
    * Adiciona ordem de entrada para monitoramento (apenas estratégia PRO_MAX)
@@ -159,8 +162,12 @@ class OrderController {
           );
           
           if (hasTakeProfitOrders) {
-            // Mesmo com take profits, valida se existe stop loss
-            await OrderController.validateAndCreateStopLoss(position, accountId);
+            // Verifica se já validamos o stop loss desta posição
+            const positionKey = `${accountId}_${position.symbol}`;
+            if (!OrderController.validatedStopLossPositions.has(positionKey)) {
+              // Mesmo com take profits, valida se existe stop loss
+              await OrderController.validateAndCreateStopLoss(position, accountId);
+            }
             continue;
           }
           
@@ -729,33 +736,52 @@ class OrderController {
     // Obtém o preço atual do mercado para usar como referência
     const markPrices = await Markets.getAllMarkPrices(market);
     const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
-    // Calcula a diferença percentual entre o preço de entrada e o preço atual
-    const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
-    // Ajusta o multiplicador baseado na volatilidade e no ativo específico
-    let tickMultiplier = 50; // Base
     
-    // Multiplicadores específicos para ativos de alta volatilidade
-    if (market === 'BTC_USDC_PERP') {
-      tickMultiplier = 150; // BTC precisa de margem muito maior
-    } else if (market === 'ETH_USDC_PERP') {
-      tickMultiplier = 100; // ETH também precisa de margem maior
-    } else if (priceDiff < 0.001) {
-      tickMultiplier = 80; // Para outros ativos com baixa volatilidade
-    } else if (priceDiff < 0.005) {
-      tickMultiplier = 60;
-    } else if (priceDiff < 0.01) {
-      tickMultiplier = 40;
-    }
+    // Para ordens limit, usa o preço exato que foi passado
+    // Para ordens de mercado automáticas, ajusta o preço para evitar rejeições
+    let finalPrice;
+    let quantity;
     
-    // Usa o preço de mercado atual como base para evitar rejeições
-    let adjustedPrice;
-    if (isLong) {
-      adjustedPrice = currentMarketPrice - (tickSize * tickMultiplier);
+    // Verifica se é uma ordem manual (preço específico) ou automática (baseada no mercado)
+    const isManualOrder = entryPrice > 0 && Math.abs(entryPrice - currentMarketPrice) > (tickSize * 10);
+    
+    if (isManualOrder) {
+      // Ordem manual: usa o preço exato que o usuário digitou
+      finalPrice = formatPrice(entryPrice);
+      quantity = formatQuantity(Math.floor((actualVolume / entryPrice) / stepSize_quantity) * stepSize_quantity);
+      console.log(`💰 [${accountId}] ${market}: Ordem MANUAL - Preço exato: ${entryPrice.toFixed(6)}`);
     } else {
-      adjustedPrice = currentMarketPrice + (tickSize * tickMultiplier);
+      // Ordem automática: ajusta o preço para evitar rejeições
+      const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
+      
+      // Ajusta o multiplicador baseado na volatilidade e no ativo específico
+      let tickMultiplier = 50; // Base
+      
+      // Multiplicadores específicos para ativos de alta volatilidade
+      if (market === 'BTC_USDC_PERP') {
+        tickMultiplier = 150; // BTC precisa de margem muito maior
+      } else if (market === 'ETH_USDC_PERP') {
+        tickMultiplier = 100; // ETH também precisa de margem maior
+      } else if (priceDiff < 0.001) {
+        tickMultiplier = 80; // Para outros ativos com baixa volatilidade
+      } else if (priceDiff < 0.005) {
+        tickMultiplier = 60;
+      } else if (priceDiff < 0.01) {
+        tickMultiplier = 40;
+      }
+      
+      // Usa o preço de mercado atual como base para evitar rejeições
+      let adjustedPrice;
+      if (isLong) {
+        adjustedPrice = currentMarketPrice - (tickSize * tickMultiplier);
+      } else {
+        adjustedPrice = currentMarketPrice + (tickSize * tickMultiplier);
+      }
+      
+      finalPrice = formatPrice(adjustedPrice);
+      quantity = formatQuantity(Math.floor((actualVolume / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
+      console.log(`💰 [${accountId}] ${market}: Ordem AUTOMÁTICA - Preço ajustado: ${adjustedPrice.toFixed(6)} (original: ${entryPrice.toFixed(6)})`);
     }
-    const quantity = formatQuantity(Math.floor((actualVolume / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
-    const price = formatPrice(adjustedPrice);
     // Log do ajuste de preço
     // console.log(`💰 [${accountId}] ${market}: Preço estratégia ${entryPrice.toFixed(6)} → Preço mercado ${currentMarketPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'}) [Diff: ${(priceDiff * 100).toFixed(3)}%]`);
     const body = {
@@ -764,7 +790,7 @@ class OrderController {
       orderType: "Limit",
       postOnly: true,  
       quantity,
-      price,
+      price: finalPrice,
       timeInForce: "GTC",
       selfTradePrevention: "RejectTaker"
     };
@@ -969,7 +995,12 @@ class OrderController {
       );
 
       if (hasStopLoss) {
-        console.log(`\nℹ️ [${accountId}] ${position.symbol}: Stop loss já existe`);
+        // Se já validamos esta posição, não loga novamente
+        const positionKey = `${accountId}_${position.symbol}`;
+        if (!OrderController.validatedStopLossPositions.has(positionKey)) {
+          console.log(`ℹ️ [${accountId}] ${position.symbol}: Stop loss já existe`);
+          OrderController.validatedStopLossPositions.add(positionKey);
+        }
         return true;
       }
 
@@ -1071,6 +1102,9 @@ class OrderController {
       
       if (stopResult && !stopResult.error) {
         console.log(`✅ [${accountId}] ${position.symbol}: Stop loss criado - Preço: ${stop.toFixed(6)}, Quantidade: ${totalQuantity}`);
+        // Adiciona ao cache de posições validadas
+        const positionKey = `${accountId}_${position.symbol}`;
+        OrderController.validatedStopLossPositions.add(positionKey);
         return true;
       } else {
         console.log(`⚠️ [${accountId}] ${position.symbol}: Não foi possível criar stop loss. Motivo: ${stopResult && stopResult.error ? stopResult.error : 'desconhecido'}`);
@@ -1081,6 +1115,16 @@ class OrderController {
       console.error(`❌ [${accountId}] Erro ao validar/criar stop loss para ${position.symbol}:`, error.message);
       return false;
     }
+  }
+
+  /**
+   * Remove posição do cache de stop loss validado (quando posição é fechada)
+   * @param {string} symbol - Símbolo do mercado
+   * @param {string} accountId - ID da conta
+   */
+  static removeFromStopLossCache(symbol, accountId) {
+    const positionKey = `${accountId}_${symbol}`;
+    OrderController.validatedStopLossPositions.delete(positionKey);
   }
 
   /**

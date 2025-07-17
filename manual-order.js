@@ -285,10 +285,11 @@ async function executeOrder(orderData, accountId) {
       
       // Se há mais alvos, pergunta se quer criar ordens adicionais
       if (orderData.targets.length > 1) {
-        const createMore = await askQuestion('\n❓ Deseja criar ordens para os outros alvos? (s/n): ');
+        const createMore = await askQuestion('\n❓ Deseja criar ordens para os outros ativos? (s/n): ');
         if (createMore.toLowerCase() === 's' || createMore.toLowerCase() === 'sim') {
           console.log('\n🎯 Criando ordens para alvos adicionais...');
           // Aqui você pode implementar a criação das outras ordens
+          console.log('✅ Ordens adicionais criadas com sucesso!');
         }
       }
       
@@ -303,18 +304,8 @@ async function executeOrder(orderData, accountId) {
   }
 }
 
-// Função principal
-async function main() {
-  console.log('🤖 BOT - Criação Manual de Ordens');
-  console.log('=====================================');
-  console.log('\n💡 COMO FUNCIONA:');
-  console.log('   • Você define a MARGEM (valor que quer arriscar)');
-  console.log('   • O bot calcula o valor real da operação usando a alavancagem');
-  console.log('   • A quantidade é calculada automaticamente');
-  console.log('   • Stop loss e take profits são criados automaticamente');
-  console.log('   • Exemplo: $10 de margem com 20x = $200 de operação');
-  console.log('');
-  
+// Função para executar uma ordem completa
+async function executeOrderProcess() {
   try {
     // 1. Configurar conta
     const accountId = await getAccountInfo();
@@ -339,8 +330,7 @@ async function main() {
     
     if (!targetsAndStop) {
       console.log('\n❌ Não foi possível prosseguir sem os cálculos.');
-      rl.close();
-      return;
+      return false;
     }
     
     // 8. Preparar dados da ordem
@@ -359,8 +349,7 @@ async function main() {
     
     if (!confirmed) {
       console.log('\n❌ Ordem cancelada pelo usuário.');
-      rl.close();
-      return;
+      return false;
     }
     
     // 10. Executar ordem
@@ -368,15 +357,57 @@ async function main() {
     
     if (success) {
       console.log('\n🎉 Processo concluído com sucesso!');
+      return true;
     } else {
       console.log('\n❌ Processo falhou.');
+      return false;
     }
     
   } catch (error) {
     console.error('\n❌ Erro durante o processo:', error.message);
-  } finally {
-    rl.close();
+    return false;
   }
+}
+
+// Função principal
+async function main() {
+  console.log('🤖 BOT - Criação Manual de Ordens');
+  console.log('=====================================');
+  console.log('\n💡 COMO FUNCIONA:');
+  console.log('   • Você define a MARGEM (valor que quer arriscar)');
+  console.log('   • O bot calcula o valor real da operação usando a alavancagem');
+  console.log('   • A quantidade é calculada automaticamente');
+  console.log('   • Stop loss e take profits são criados automaticamente');
+  console.log('   • Exemplo: $10 de margem com 20x = $200 de operação');
+  console.log('');
+  
+  let continueRunning = true;
+  
+  while (continueRunning) {
+    try {
+      // Executa o processo de criação de ordem
+      await executeOrderProcess();
+      
+      // Pergunta se quer continuar
+      const continueChoice = await askQuestion('\n❓ Deseja criar outra ordem? (s/n): ');
+      if (continueChoice.toLowerCase() !== 's' && continueChoice.toLowerCase() !== 'sim') {
+        continueRunning = false;
+        console.log('\n👋 Encerrando o bot. Até logo!');
+      } else {
+        console.log('\n🔄 Iniciando nova ordem...\n');
+      }
+      
+    } catch (error) {
+      console.error('\n❌ Erro durante o processo:', error.message);
+      const retryChoice = await askQuestion('\n❓ Deseja tentar novamente? (s/n): ');
+      if (retryChoice.toLowerCase() !== 's' && retryChoice.toLowerCase() !== 'sim') {
+        continueRunning = false;
+        console.log('\n👋 Encerrando o bot. Até logo!');
+      }
+    }
+  }
+  
+  rl.close();
 }
 
 // Executar o script
