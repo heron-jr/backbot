@@ -43,10 +43,6 @@ function showGlobalTimer() {
     hour12: false 
   });
 
-  console.log('\n' + '='.repeat(60));
-  console.log('⏰ TIMER GERAL - Próxima análise para todas as contas');
-  console.log('='.repeat(60));
-
   // Intercepta console.log para manter o progresso no rodapé
   const originalLog = console.log;
   const originalError = console.error;
@@ -403,11 +399,6 @@ function setupInteractiveCommands() {
     input: process.stdin,
     output: process.stdout
   });
-
-  console.log('\n💡 Comandos disponíveis:');
-  console.log('   • "status" - Ver status do stop loss dinâmico');
-  console.log('   • "exit" - Sair do bot');
-  console.log('   • "help" - Ver esta ajuda\n');
 
   rl.on('line', (input) => {
     const command = input.trim().toLowerCase();

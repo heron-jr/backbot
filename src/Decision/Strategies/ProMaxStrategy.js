@@ -285,6 +285,67 @@ export class ProMaxStrategy extends BaseStrategy {
   }
 
   /**
+   * Verifica se deve fechar posição baseada no cruzamento do ADX
+   * Similar à lógica do PineScript: diCrossover e diCrossunder
+   * @param {object} position - Dados da posição
+   * @param {object} data - Dados de mercado com indicadores ADX
+   * @returns {object|null} - Objeto com decisão de fechamento ou null se não deve fechar
+   */
+  shouldClosePositionByADX(position, data) {
+    try {
+      // Validação inicial dos dados
+      if (!position || !data || !data.adx) {
+        return null;
+      }
+
+      const diPlus = data.adx?.diPlus || 0;
+      const diMinus = data.adx?.diMinus || 0;
+      const diPlusPrev = data.adx?.diPlusPrev || 0;
+      const diMinusPrev = data.adx?.diMinusPrev || 0;
+      const isLong = parseFloat(position.netQuantity) > 0;
+
+      // Verifica cruzamento do ADX (apenas com candle fechado)
+      let shouldClose = false;
+      let reason = '';
+
+      if (isLong) {
+        // Para posição LONG: se DI+ < DI- (cruzamento para baixo), fechar
+        const diCrossover = diPlus < diMinus && diPlusPrev >= diMinusPrev;
+        if (diCrossover) {
+          shouldClose = true;
+          reason = `ADX CROSSOVER: DI+ (${diPlus.toFixed(2)}) < DI- (${diMinus.toFixed(2)}) - Fechando posição LONG`;
+        }
+      } else {
+        // Para posição SHORT: se DI- < DI+ (cruzamento para cima), fechar
+        const diCrossunder = diMinus < diPlus && diMinusPrev >= diPlusPrev;
+        if (diCrossunder) {
+          shouldClose = true;
+          reason = `ADX CROSSUNDER: DI- (${diMinus.toFixed(2)}) < DI+ (${diPlus.toFixed(2)}) - Fechando posição SHORT`;
+        }
+      }
+
+      if (shouldClose) {
+        return {
+          shouldClose: true,
+          reason: reason,
+          type: 'ADX_CROSSOVER',
+          diPlus,
+          diMinus,
+          diPlusPrev,
+          diMinusPrev,
+          positionType: isLong ? 'LONG' : 'SHORT'
+        };
+      }
+
+      return null;
+
+    } catch (error) {
+      console.error('ProMaxStrategy.shouldClosePositionByADX - Error:', error);
+      return null;
+    }
+  }
+
+  /**
    * Analisa validações de indicadores (RSI, Stochastic, MACD)
    * @param {object} data - Dados de mercado
    * @param {object} config - Configurações dos indicadores

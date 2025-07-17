@@ -306,10 +306,6 @@ class MultiBotManager {
       hour12: false 
     });
 
-    console.log('\n' + '='.repeat(60));
-    console.log('⏰ TIMER GERAL - Próxima análise para todas as contas');
-    console.log('='.repeat(60));
-
     // Intercepta console.log para manter o progresso no rodapé
     const originalLog = console.log;
     const originalError = console.error;

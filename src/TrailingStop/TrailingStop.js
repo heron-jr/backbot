@@ -3,6 +3,7 @@ import OrderController from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import { StopLossFactory } from '../Decision/Strategies/StopLossFactory.js';
 import PnlController from '../Controllers/PnlController.js';
+import Markets from '../Backpack/Public/Markets.js';
 
 class TrailingStop {
 
@@ -306,7 +307,15 @@ class TrailingStop {
           continue;
         }
 
-        // Verifica stop loss normal (prioridade 3)
+        // Verifica ADX crossover para estratégia PRO_MAX (prioridade 3)
+        const adxCrossoverDecision = await this.checkADXCrossover(position);
+        if (adxCrossoverDecision && adxCrossoverDecision.shouldClose) {
+          console.log(`🔄 [ADX_CROSSOVER] ${position.symbol}: ${adxCrossoverDecision.reason}`);
+          await OrderController.forceClose(position);
+          continue;
+        }
+
+        // Verifica stop loss normal (prioridade 4)
         const decision = this.stopLossStrategy.shouldClosePosition(position, Account);
         
         if (decision && decision.shouldClose) {
@@ -322,6 +331,51 @@ class TrailingStop {
 
     } catch (error) {
       console.error('[TRAILING] Erro no stop loss:', error.message);
+    }
+  }
+
+  /**
+   * Verifica se deve fechar posição baseada no cruzamento do ADX (estratégia PRO_MAX)
+   * @param {object} position - Dados da posição
+   * @returns {Promise<object|null>} - Decisão de fechamento ou null
+   */
+  async checkADXCrossover(position) {
+    try {
+      // Só verifica para estratégia PRO_MAX
+      const strategyType = process.env.TRADING_STRATEGY || 'DEFAULT';
+      if (strategyType !== 'PRO_MAX') {
+        return null;
+      }
+
+      // Obtém dados de mercado para calcular indicadores ADX
+      const timeframe = process.env.TIME || '5m';
+      const candles = await Markets.getKLines(position.symbol, timeframe, 30);
+      
+      if (!candles || candles.length < 20) {
+        return null;
+      }
+
+      // Calcula indicadores incluindo ADX
+      const { calculateIndicators } = await import('../Decision/Indicators.js');
+      const indicators = calculateIndicators(candles);
+      
+      // Verifica se tem dados ADX válidos
+      if (!indicators.adx || !indicators.adx.diPlus || !indicators.adx.diMinus) {
+        return null;
+      }
+
+      // Usa a estratégia PRO_MAX para verificar crossover
+      const { ProMaxStrategy } = await import('../Decision/Strategies/ProMaxStrategy.js');
+      const strategy = new ProMaxStrategy();
+      
+      const data = { ...indicators, market: { symbol: position.symbol } };
+      const crossoverDecision = strategy.shouldClosePositionByADX(position, data);
+      
+      return crossoverDecision;
+
+    } catch (error) {
+      console.error(`[ADX_CROSSOVER] Erro ao verificar crossover para ${position.symbol}:`, error.message);
+      return null;
     }
   }
 }
