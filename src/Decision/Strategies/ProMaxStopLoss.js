@@ -32,24 +32,4 @@ export class ProMaxStopLoss extends BaseStopLoss {
       return null;
     }
   }
-
-  /**
-   * Obtém multiplicador baseado no timeframe
-   * @param {string} timeframe - Timeframe atual
-   * @returns {number} - Multiplicador ajustado
-   */
-  getTimeframeMultiplier(timeframe) {
-    const multipliers = {
-      '1m': 0.5,
-      '3m': 0.7,
-      '5m': 1.0,
-      '15m': 1.2,
-      '30m': 1.5,
-      '1h': 2.0,
-      '2h': 2.5,
-      '4h': 3.0,
-      '1d': 4.0
-    };
-    return multipliers[timeframe] || 1.0;
-  }
 } 

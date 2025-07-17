@@ -84,7 +84,7 @@ class Decision {
         showProgress(progress, bar, percentage);
       } else {
         originalLog.apply(console, args);
-      }
+        }
     };
 
     // Intercepta console.error

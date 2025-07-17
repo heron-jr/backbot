@@ -9,6 +9,9 @@ class OrderController {
   // Armazena ordens de entrada pendentes para monitoramento POR CONTA (apenas estratégia PRO_MAX)
   static pendingEntryOrdersByAccount = {};
 
+  // Contador estático para evitar loop infinito
+  static stopLossAttempts = null;
+
   /**
    * Adiciona ordem de entrada para monitoramento (apenas estratégia PRO_MAX)
    * @param {string} market - Símbolo do mercado
@@ -156,6 +159,8 @@ class OrderController {
           );
           
           if (hasTakeProfitOrders) {
+            // Mesmo com take profits, valida se existe stop loss
+            await OrderController.validateAndCreateStopLoss(position, accountId);
             continue;
           }
           
@@ -277,7 +282,7 @@ class OrderController {
       // Cria ordens de take profit
       for (let i = 0; i < actualTargets; i++) {
         const targetPrice = parseFloat(usedTargets[i]);
-        const takeProfitTriggerPrice = (targetPrice + Number(position.markPrice)) / 2;
+        const takeProfitTriggerPrice = targetPrice;
         const qty = quantities[i];
         const orderBody = {
           symbol: market,
@@ -295,36 +300,37 @@ class OrderController {
           clientId: Math.floor(Math.random() * 1000000) + i
         };
         const result = await Order.executeOrder(orderBody);
-        if (result) {
-          console.log(`✅ [PRO_MAX] ${market}: Take Profit ${i + 1}/${actualTargets} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
+        if (result && !result.error) {
+          console.log(`✅ [PRO_MAX] ${market}: Take Profit ${i + 1}/${actualTargets} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}, OrderID: ${result.orderId || 'N/A'}`);
         } else {
-          console.log(`⚠️ [PRO_MAX] ${market}: Take Profit ${i + 1}/${actualTargets} não criado`);
+          console.log(`❌ [PRO_MAX] ${market}: Take Profit ${i + 1}/${actualTargets} FALHOU - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}, Motivo: ${result?.error || 'desconhecido'}`);
         }
       }
 
-      // Cria ordem de stop loss se necessário
+      // Cria ordem de stop loss simples se necessário
       if (stop !== undefined && !isNaN(parseFloat(stop))) {
-        const stopLossTriggerPrice = (Number(stop) + Number(position.markPrice)) / 2;
         const stopBody = {
           symbol: market,
-          side: isLong ? 'Ask' : 'Bid',
+          side: isLong ? 'Ask' : 'Bid', // Para LONG, vende (Ask) para fechar. Para SHORT, compra (Bid) para fechar
           orderType: 'Limit',
           postOnly: true,
           reduceOnly: true,
           quantity: formatQuantity(totalQuantity),
           price: formatPrice(stop),
-          stopLossTriggerBy: 'LastPrice',
-          stopLossTriggerPrice: formatPrice(stopLossTriggerPrice),
-          stopLossLimitPrice: formatPrice(stop),
           timeInForce: 'GTC',
-          selfTradePrevention: 'RejectTaker',
           clientId: Math.floor(Math.random() * 1000000) + 9999
         };
         const stopResult = await Order.executeOrder(stopBody);
-        if (stopResult) {
-          // console.log(`🛡️ [PRO_MAX] ${market}: Stop loss criado - Preço: ${stop.toFixed(6)}`);
+        
+        if (stopResult && !stopResult.error) {
+          console.log(`🛡️ [PRO_MAX] ${market}: Stop loss criado - Preço: ${stop.toFixed(6)}, Quantidade: ${totalQuantity}`);
+        } else {
+          console.log(`⚠️ [PRO_MAX] ${market}: Não foi possível criar stop loss. Motivo: ${stopResult && stopResult.error ? stopResult.error : 'desconhecido'}`);
         }
       }
+
+      // Valida se existe stop loss e cria se necessário
+      await OrderController.validateAndCreateStopLoss(position, accountId);
     } catch (error) {
       console.error(`❌ [PRO_MAX] Erro ao processar posição aberta para ${market}:`, error.message);
     }
@@ -452,7 +458,7 @@ class OrderController {
       // Cria ordens de take profit
       for (let i = 0; i < actualTargets; i++) {
         const targetPrice = parseFloat(usedTargets[i]);
-        const takeProfitTriggerPrice = (targetPrice + Number(position.markPrice)) / 2;
+        const takeProfitTriggerPrice = targetPrice;
         const qty = quantities[i];
         const orderBody = {
           symbol: position.symbol,
@@ -470,16 +476,16 @@ class OrderController {
           clientId: Math.floor(Math.random() * 1000000) + i
         };
         const result = await Order.executeOrder(orderBody);
-        if (result) {
-          console.log(`✅ [PRO_MAX] ${position.symbol}: Take Profit ${i + 1}/${actualTargets} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
+        if (result && !result.error) {
+          console.log(`✅ [PRO_MAX] ${position.symbol}: Take Profit ${i + 1}/${actualTargets} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}, OrderID: ${result.orderId || 'N/A'}`);
         } else {
-          console.log(`⚠️ [PRO_MAX] ${position.symbol}: Take Profit ${i + 1}/${actualTargets} não criado`);
+          console.log(`❌ [PRO_MAX] ${position.symbol}: Take Profit ${i + 1}/${actualTargets} FALHOU - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}, Motivo: ${result?.error || 'desconhecido'}`);
         }
       }
 
       // Cria ordem de stop loss se necessário
       if (stop !== undefined && !isNaN(parseFloat(stop))) {
-        const stopLossTriggerPrice = (Number(stop) + Number(position.markPrice)) / 2;
+        const stopLossTriggerPrice = Number(stop);
         const stopBody = {
           symbol: position.symbol,
           side: isLong ? 'Ask' : 'Bid',
@@ -501,6 +507,8 @@ class OrderController {
         }
       }
       
+      // Valida se existe stop loss e cria se necessário
+      await OrderController.validateAndCreateStopLoss(position, accountId);
     } catch (error) {
       console.error(`❌ [PRO_MAX] Erro ao forçar criação de alvos para ${position.symbol}:`, error.message);
     }
@@ -705,6 +713,13 @@ class OrderController {
     }
     const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
     const tickSize = currentMarket?.tickSize || 0.0001;
+    
+    // CORREÇÃO: Calcula o valor real da operação considerando a alavancagem
+    const leverage = marketInfo.leverage;
+    const actualVolume = volume * leverage; // Valor real da operação = margem * alavancagem
+    
+    console.log(`💰 [${accountId}] ${market}: Margem: $${volume.toFixed(2)}, Alavancagem: ${leverage}x, Valor da operação: $${actualVolume.toFixed(2)}`);
+    
     // Validação de margem antes de tentar abrir a ordem
     const marginValidation = await this.validateMargin(market, volume, marketInfo);
     if (!marginValidation.isValid) {
@@ -739,7 +754,7 @@ class OrderController {
     } else {
       adjustedPrice = currentMarketPrice + (tickSize * tickMultiplier);
     }
-    const quantity = formatQuantity(Math.floor((volume / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
+    const quantity = formatQuantity(Math.floor((actualVolume / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
     const price = formatPrice(adjustedPrice);
     // Log do ajuste de preço
     // console.log(`💰 [${accountId}] ${market}: Preço estratégia ${entryPrice.toFixed(6)} → Preço mercado ${currentMarketPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'}) [Diff: ${(priceDiff * 100).toFixed(3)}%]`);
@@ -753,7 +768,7 @@ class OrderController {
       timeInForce: "GTC",
       selfTradePrevention: "RejectTaker"
     };
-    const stopLossTriggerPrice = (Number(stop) + Number(price)) / 2 
+    const stopLossTriggerPrice = Number(stop) 
     // Estratégia PRO_MAX: adiciona para monitoramento e cria apenas a ordem de entrada
     // Verifica se é estratégia PRO_MAX baseado no accountId ou configuração da conta
     const isProMaxStrategy = accountId.includes('PRO_MAX') || accountId === 'CONTA2';
@@ -780,6 +795,7 @@ class OrderController {
       body.stopLossTriggerBy = "LastPrice";
       body.stopLossTriggerPrice = formatPrice(stopLossTriggerPrice);
       body.stopLossLimitPrice = formatPrice(stop);
+      console.log(`🔍 [DEBUG] OrderController: stop original=${stop.toFixed(6)}, trigger=${stopLossTriggerPrice.toFixed(6)}, limit=${formatPrice(stop)}`);
     }
     if(body.quantity > 0 && body.price > 0){
       const result = await Order.executeOrder(body);
@@ -925,6 +941,193 @@ class OrderController {
   };
 
   return await Order.executeOrder(body);
+  }
+
+  /**
+   * Valida se existe stop loss para uma posição e cria se não existir
+   * @param {object} position - Dados da posição
+   * @param {string} accountId - ID da conta
+   * @returns {boolean} - True se stop loss foi criado ou já existia
+   */
+  static async validateAndCreateStopLoss(position, accountId) {
+    
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      // Verifica se já existe stop loss para esta posição
+      const existingOrders = await Order.getOpenOrders(position.symbol);
+      
+      const hasStopLoss = existingOrders && existingOrders.some(order => 
+        order.status === 'TriggerPending' && order.reduceOnly
+      );
+
+      if (hasStopLoss) {
+        console.log(`\nℹ️ [${accountId}] ${position.symbol}: Stop loss já existe`);
+        return true;
+      }
+
+      console.log(`⚠️ [${accountId}] ${position.symbol}: Stop loss não encontrado, criando...`);
+
+      // Busca informações do mercado
+      const Account = await AccountController.get();
+      const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+      if (!marketInfo) {
+        console.error(`❌ [${accountId}] Market info não encontrada para ${position.symbol}`);
+        return false;
+      }
+
+      const decimal_quantity = marketInfo.decimal_quantity;
+      const decimal_price = marketInfo.decimal_price;
+
+      // Preço real de entrada
+      const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const totalQuantity = Math.abs(Number(position.netQuantity));
+
+      // Calcula stop loss usando a estratégia apropriada
+      const strategyName = accountId === 'CONTA2' ? 'PRO_MAX' : 'DEFAULT';
+      const { ProMaxStrategy, DefaultStrategy } = await import('../Decision/Strategies/ProMaxStrategy.js');
+      const strategy = strategyName === 'PRO_MAX' ? new ProMaxStrategy() : new DefaultStrategy();
+
+      // Usa timeframe padrão
+      const timeframe = process.env.TIME || '5m';
+      const candles = await Markets.getKLines(position.symbol, timeframe, 30);
+      const { calculateIndicators } = await import('../Decision/Indicators.js');
+      const indicators = calculateIndicators(candles);
+      const data = { ...indicators, market: marketInfo, marketPrice: entryPrice };
+      const action = isLong ? 'long' : 'short';
+
+      let stop;
+      if (strategyName === 'PRO_MAX') {
+        const stopAndTargets = strategy.calculateStopAndMultipleTargets(data, entryPrice, action);
+        if (stopAndTargets && stopAndTargets.stop) {
+          stop = stopAndTargets.stop;
+        }
+      } else {
+        const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong);
+        if (stopAndTarget && stopAndTarget.stop) {
+          stop = stopAndTarget.stop;
+        }
+      }
+
+      // Se não conseguiu calcular o stop, força o cálculo do ATR e recalcula
+      if (!stop || isNaN(parseFloat(stop))) {
+        console.log(`⚠️ [${accountId}] ${position.symbol}: ATR não disponível, calculando manualmente...`);
+        
+        // Calcula ATR manualmente se não estiver disponível
+        if (!data.atr || !data.atr.atr || data.atr.atr <= 0) {
+          const atrValue = this.calculateATR(candles, 14); // ATR de 14 períodos
+          if (atrValue && atrValue > 0) {
+            data.atr = { atr: atrValue };
+            console.log(`📊 [${accountId}] ${position.symbol}: ATR calculado: ${atrValue.toFixed(6)}`);
+            
+            // Recalcula o stop loss com o ATR calculado
+            if (strategyName === 'PRO_MAX') {
+              const stopAndTargets = strategy.calculateStopAndMultipleTargets(data, entryPrice, action);
+              if (stopAndTargets && stopAndTargets.stop) {
+                stop = stopAndTargets.stop;
+              }
+            } else {
+              const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong);
+              if (stopAndTarget && stopAndTarget.stop) {
+                stop = stopAndTarget.stop;
+              }
+            }
+          }
+        }
+      }
+
+      // Se ainda não conseguiu calcular, erro crítico
+      if (!stop || isNaN(parseFloat(stop))) {
+        console.error(`❌ [${accountId}] ${position.symbol}: Falha crítica ao calcular stop loss. ATR e fallback não disponíveis.`);
+        return false;
+      }
+
+      // Cria a ordem de stop loss simples com reduceOnly
+      const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+      const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+      
+      // Ordem simples de limite com reduceOnly para fechar a posição no stop loss
+      const stopBody = {
+        symbol: position.symbol,
+        side: isLong ? 'Ask' : 'Bid', // Para LONG, vende (Ask) para fechar. Para SHORT, compra (Bid) para fechar
+        orderType: 'Limit',
+        postOnly: true,
+        reduceOnly: true,
+        quantity: formatQuantity(totalQuantity),
+        price: formatPrice(stop),
+        timeInForce: 'GTC',
+        clientId: Math.floor(Math.random() * 1000000) + 9999
+      };
+
+      const stopResult = await Order.executeOrder(stopBody);
+      
+      if (stopResult && !stopResult.error) {
+        console.log(`✅ [${accountId}] ${position.symbol}: Stop loss criado - Preço: ${stop.toFixed(6)}, Quantidade: ${totalQuantity}`);
+        return true;
+      } else {
+        console.log(`⚠️ [${accountId}] ${position.symbol}: Não foi possível criar stop loss. Motivo: ${stopResult && stopResult.error ? stopResult.error : 'desconhecido'}`);
+        return false;
+      }
+
+    } catch (error) {
+      console.error(`❌ [${accountId}] Erro ao validar/criar stop loss para ${position.symbol}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Calcula o ATR (Average True Range) manualmente
+   * @param {Array} candles - Array de candles
+   * @param {number} period - Período para o cálculo (padrão 14)
+   * @returns {number|null} - Valor do ATR ou null se não conseguir calcular
+   */
+  static calculateATR(candles, period = 14) {
+    try {
+      if (!candles || candles.length < period + 1) {
+        console.warn(`⚠️ ATR: Dados insuficientes. Necessário: ${period + 1}, Disponível: ${candles?.length || 0}`);
+        return null;
+      }
+
+      // Calcula True Range para cada candle
+      const trueRanges = [];
+      for (let i = 1; i < candles.length; i++) {
+        const current = candles[i];
+        const previous = candles[i - 1];
+        
+        const high = parseFloat(current.high);
+        const low = parseFloat(current.low);
+        const prevClose = parseFloat(previous.close);
+        
+        const tr1 = high - low; // High - Low
+        const tr2 = Math.abs(high - prevClose); // |High - Previous Close|
+        const tr3 = Math.abs(low - prevClose); // |Low - Previous Close|
+        
+        const trueRange = Math.max(tr1, tr2, tr3);
+        trueRanges.push(trueRange);
+      }
+
+      // Calcula ATR como média móvel simples dos True Ranges
+      if (trueRanges.length < period) {
+        return null;
+      }
+
+      const atrValues = trueRanges.slice(-period);
+      const atr = atrValues.reduce((sum, tr) => sum + tr, 0) / period;
+
+      return atr;
+
+    } catch (error) {
+      console.error('❌ Erro ao calcular ATR:', error.message);
+      return null;
+    }
   }
 
 }

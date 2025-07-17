@@ -13,7 +13,8 @@
     "prod": "TRADING_STRATEGY=DEFAULT node bootstrap.js",
     "prod:menu": "node bootstrap.js",
     "prod:skip": "node bootstrap.js -- --skip-selection",
-    "test-auth": "node test-auth.js"
+    "test-auth": "node test-auth.js",
+    "manual-order": "node manual-order.js"
   },
   "keywords": [],
   "author": "@heron_jr",

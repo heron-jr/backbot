@@ -479,17 +479,12 @@ export class ProMaxStrategy extends BaseStrategy {
    */
   calculateStopAndMultipleTargets(data, price, action) {
     try {
-      // Configurações das zonas de objetivo
-      const ATR_ZONE_MULTIPLIER = 3.5;
-      const SL_ATR_MULTIPLIER = 8.0;
+      // Configurações das zonas de objetivo - REDUZIDO para evitar rejeições da exchange
+      const ATR_ZONE_MULTIPLIER = 1.5;
+      const SL_ATR_MULTIPLIER = 6.5;
       const MAX_TARGETS_PER_ORDER = Number(process.env.MAX_TARGETS_PER_ORDER || 20);
       
-      // Obtém o timeframe atual
-      const timeframe = process.env.TIME || '5m';
-      
-      // Ajusta o multiplicador ATR baseado no timeframe
-      const timeframeMultiplier = this.getTimeframeMultiplier(timeframe);
-      const adjustedATRMultiplier = ATR_ZONE_MULTIPLIER * timeframeMultiplier;
+      const adjustedATRMultiplier = ATR_ZONE_MULTIPLIER;
       
       // Usa ATR dos dados ou calcula
       const atr = data.atr?.atr || 0;
@@ -505,23 +500,41 @@ export class ProMaxStrategy extends BaseStrategy {
       const targets = [];
       
       if (action === 'long') {
-        // Stop Loss para LONG
+        // Stop Loss para LONG - mais distante para evitar execução imediata
         stop = price - (atr * SL_ATR_MULTIPLIER);
+        
+        // Garante distância mínima de 2% do preço atual
+        const minDistance = price * 0.02;
+        const calculatedDistance = price - stop;
+        if (calculatedDistance < minDistance) {
+          stop = price - minDistance;
+          console.log(`⚠️ [PRO_MAX] ${data.market.symbol}: Stop loss ajustado para distância mínima de 2% (${minDistance.toFixed(6)})`);
+        }
         
         // Múltiplos targets para LONG (como no PineScript)
         for (let i = 0; i < MAX_TARGETS_PER_ORDER; i++) {
           const targetLevel = price + distance * (i + 1);
+          
           if (targetLevel > 0) {
             targets.push(targetLevel);
           }
         }
       } else {
-        // Stop Loss para SHORT
+        // Stop Loss para SHORT - mais distante para evitar execução imediata
         stop = price + (atr * SL_ATR_MULTIPLIER);
+        
+        // Garante distância mínima de 2% do preço atual
+        const minDistance = price * 0.02;
+        const calculatedDistance = stop - price;
+        if (calculatedDistance < minDistance) {
+          stop = price + minDistance;
+          console.log(`⚠️ [PRO_MAX] ${data.market.symbol}: Stop loss ajustado para distância mínima de 2% (${minDistance.toFixed(6)})`);
+        }
         
         // Múltiplos targets para SHORT (como no PineScript)
         for (let i = 0; i < MAX_TARGETS_PER_ORDER; i++) {
           const targetLevel = price - distance * (i + 1);
+          
           if (targetLevel > 0) {
             targets.push(targetLevel);
           }
@@ -534,7 +547,7 @@ export class ProMaxStrategy extends BaseStrategy {
         return null;
       }
 
-      console.log(`🎯 ${data.market.symbol}: ${action.toUpperCase()} - Stop: ${stop.toFixed(6)} - Targets: ${targets.length} (${targets.slice(0, 3).map(t => t.toFixed(6)).join(', ')}${targets.length > 3 ? '...' : ''}`);
+      console.log(`🎯 ${data.market.symbol}: ${action.toUpperCase()} - Stop: ${stop.toFixed(6)} - Targets: ${targets.length} (${targets.slice(0, 3).map(t => t.toFixed(6)).join(', ')}${targets.length > 3 ? '...' : ''})`);
 
       return { stop, targets };
 
@@ -542,26 +555,5 @@ export class ProMaxStrategy extends BaseStrategy {
       console.error('ProMaxStrategy.calculateStopAndMultipleTargets - Error:', error);
       return null;
     }
-  }
-
-  /**
-   * Obtém multiplicador baseado no timeframe
-   * @param {string} timeframe - Timeframe atual
-   * @returns {number} - Multiplicador ajustado
-   */
-  getTimeframeMultiplier(timeframe) {
-    const multipliers = {
-      '1m': 0.5,    // Timeframes pequenos: multiplicador menor para alvos mais próximos
-      '3m': 0.7,
-      '5m': 1.0,    // Base
-      '15m': 1.2,
-      '30m': 1.5,
-      '1h': 2.0,    // Timeframes maiores: multiplicador maior para alvos mais distantes
-      '2h': 2.5,
-      '4h': 3.0,
-      '1d': 4.0
-    };
-
-    return multipliers[timeframe] || 1.0;
   }
 } 
