@@ -16,17 +16,11 @@ class OrderController {
    * @param {string} accountId - ID da conta (ex: CONTA1, CONTA2)
    */
   static addPendingEntryOrder(market, orderData, accountId = 'DEFAULT') {
-    // Inicializa o objeto da conta se não existir
     if (!OrderController.pendingEntryOrdersByAccount[accountId]) {
       OrderController.pendingEntryOrdersByAccount[accountId] = {};
     }
-    
-    // Remove qualquer campo targets do orderData
-    const { targets, ...cleanOrderData } = orderData;
-    OrderController.pendingEntryOrdersByAccount[accountId][market] = {
-      ...cleanOrderData,
-      addedAt: Date.now()
-    };
+    OrderController.pendingEntryOrdersByAccount[accountId][market] = orderData;
+    console.log(`\n[MONITOR-${accountId}] Ordem registrada para monitoramento: ${market}`);
   }
 
   /**
@@ -45,14 +39,27 @@ class OrderController {
    * @param {string} accountId - ID da conta para monitorar
    */
   static async monitorPendingEntryOrders(accountId = 'DEFAULT') {
-    try {      
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+      
       const accountOrders = OrderController.pendingEntryOrdersByAccount[accountId];
       if (!accountOrders) {
+        // Mesmo sem ordens pendentes, verifica se há posições abertas que precisam de alvos
+        await OrderController.checkForUnmonitoredPositions(accountId);
         return;
       }
       
       const markets = Object.keys(accountOrders);
       if (markets.length === 0) {
+        // Mesmo sem ordens pendentes, verifica se há posições abertas que precisam de alvos
+        await OrderController.checkForUnmonitoredPositions(accountId);
         return;
       }
 
@@ -60,17 +67,28 @@ class OrderController {
       let positions = [];
       try {
         positions = await Futures.getOpenPositions() || [];
+        
+        if (positions.length > 0) {
+          // Verifica se há posições que não estão sendo monitoradas
+          const monitoredMarkets = Object.keys(accountOrders || {});
+          const unmonitoredPositions = positions.filter(pos => !monitoredMarkets.includes(pos.symbol));
+          
+          if (unmonitoredPositions.length > 0) {
+            // Força criação de alvos para posições não monitoradas
+            for (const position of unmonitoredPositions) {
+              await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
+            }
+          }
+        }
       } catch (error) {
         console.warn(`⚠️ [MONITOR-${accountId}] Falha ao obter posições, continuando monitoramento...`);
+        console.error(`❌ [MONITOR-${accountId}] Erro detalhado:`, error.message);
         positions = [];
       }
       
       for (const market of markets) {
         const orderData = accountOrders[market];
         const position = positions.find(p => p.symbol === market && Math.abs(Number(p.netQuantity)) > 0);
-        
-        if (position) {
-        }
         
         if (position) {
           // Posição foi aberta, delega para método dedicado
@@ -80,30 +98,16 @@ class OrderController {
           // Verifica se a ordem ainda existe (não foi cancelada)
           try {
             const openOrders = await Order.getOpenOrders(market);
-            
-            // Verifica se há alguma ordem de entrada pendente (não reduceOnly, Limit, e não é stop loss/take profit)
             const hasEntryOrder = openOrders && openOrders.some(o => {
-              // Deve ser uma ordem de entrada (não reduceOnly)
               const isEntryOrder = !o.reduceOnly;
-              
-              // Deve ser do tipo Limit
               const isLimitOrder = o.orderType === 'Limit';
-              
-              // Deve ser do símbolo correto
               const isCorrectSymbol = o.symbol === market;
-              
-              // NÃO deve ser uma ordem de stop loss ou take profit
               const isNotStopLoss = !o.stopLossTriggerPrice && !o.stopLossLimitPrice;
               const isNotTakeProfit = !o.takeProfitTriggerPrice && !o.takeProfitLimitPrice;
-              
-              // Deve estar pendente
               const isPending = o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled';
-              
               return isEntryOrder && isLimitOrder && isCorrectSymbol && isNotStopLoss && isNotTakeProfit && isPending;
             });
-            
             if (!hasEntryOrder) {
-              // Ordem não existe mais (foi cancelada ou executada sem posição)
               OrderController.removePendingEntryOrder(market, accountId);
             }
           } catch (orderError) {
@@ -114,6 +118,53 @@ class OrderController {
       
     } catch (error) {
       console.error(`❌ [${accountId}] Erro no monitoramento de ordens pendentes:`, error.message);
+    }
+  }
+
+  /**
+   * Verifica se há posições abertas que não estão sendo monitoradas
+   */
+  static async checkForUnmonitoredPositions(accountId) {
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      const positions = await Futures.getOpenPositions() || [];
+      
+      if (positions.length === 0) {
+        return;
+      }
+      
+      // Verifica se há posições que não estão sendo monitoradas
+      const accountOrders = OrderController.pendingEntryOrdersByAccount[accountId] || {};
+      const monitoredMarkets = Object.keys(accountOrders);
+      const unmonitoredPositions = positions.filter(pos => !monitoredMarkets.includes(pos.symbol));
+      
+      if (unmonitoredPositions.length > 0) {
+        // Verifica se já foram criados alvos para essas posições (evita loop infinito)
+        for (const position of unmonitoredPositions) {
+          // Verifica se já existem ordens de take profit para esta posição
+          const existingOrders = await Order.getOpenOrders(position.symbol);
+          const hasTakeProfitOrders = existingOrders && existingOrders.some(order => 
+            order.takeProfitTriggerPrice || order.takeProfitLimitPrice
+          );
+          
+          if (hasTakeProfitOrders) {
+            continue;
+          }
+          
+          await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
+        }
+      }
+      
+    } catch (error) {
+      console.warn(`⚠️ [MONITOR-${accountId}] Falha ao verificar posições não monitoradas:`, error.message);
     }
   }
 
@@ -166,35 +217,50 @@ class OrderController {
       const maxTPs = Math.floor(totalQuantity / stepSize_quantity);
       const nTPs = Math.min(targets.length, maxTPs);
       
-      if (nTPs === 0) {
+      // Limita pelo número máximo de ordens de take profit definido no .env
+      const maxTakeProfitOrders = parseInt(process.env.MAX_TAKE_PROFIT_ORDERS) || 5;
+      const finalTPs = Math.min(nTPs, maxTakeProfitOrders);
+      
+      if (finalTPs === 0) {
         console.error(`❌ [PRO_MAX] Posição muito pequena para criar qualquer TP válido para ${market}`);
         return;
       }
 
       // Log explicativo quando são criadas menos ordens do que o esperado
-      if (nTPs < targets.length) {
+      if (finalTPs < targets.length) {
         console.log(`📊 [PRO_MAX] ${market}: Ajuste de quantidade de TPs:`);
         console.log(`   • Targets calculados: ${targets.length}`);
         console.log(`   • Tamanho da posição: ${totalQuantity}`);
         console.log(`   • Step size mínimo: ${stepSize_quantity}`);
         console.log(`   • Máximo de TPs possíveis: ${maxTPs} (${totalQuantity} ÷ ${stepSize_quantity})`);
-        console.log(`   • TPs que serão criados: ${nTPs}`);
-        console.log(`   • Motivo: Posição pequena não permite dividir em ${targets.length} ordens de ${stepSize_quantity} cada`);
+        console.log(`   • Limite configurado: ${maxTakeProfitOrders} (MAX_TAKE_PROFIT_ORDERS)`);
+        console.log(`   • TPs que serão criados: ${finalTPs}`);
+        if (finalTPs < nTPs) {
+          console.log(`   • Motivo: Limitado pela configuração MAX_TAKE_PROFIT_ORDERS=${maxTakeProfitOrders}`);
+        } else {
+          console.log(`   • Motivo: Posição pequena não permite dividir em ${targets.length} ordens de ${stepSize_quantity} cada`);
+        }
       }
 
       const quantities = [];
       let remaining = totalQuantity;
-      for (let i = 0; i < nTPs; i++) {
+      
+      // Para posições pequenas, tenta criar pelo menos 3 alvos se possível
+      const minTargets = Math.min(3, targets.length);
+      const actualTargets = Math.max(finalTPs, minTargets);
+      
+      for (let i = 0; i < actualTargets; i++) {
         let qty;
-        if (i === nTPs - 1) {
+        if (i === actualTargets - 1) {
           qty = remaining; // tudo que sobrou
         } else {
-          qty = Math.floor((totalQuantity / nTPs) / stepSize_quantity) * stepSize_quantity;
+          // Para posições pequenas, divide igualmente
+          qty = Math.floor((totalQuantity / actualTargets) / stepSize_quantity) * stepSize_quantity;
           if (qty < stepSize_quantity) {
             qty = stepSize_quantity;
             // Log quando a quantidade calculada é menor que o step size
-            if (nTPs < targets.length) {
-              console.log(`   • TP ${i + 1}: Quantidade calculada (${(totalQuantity / nTPs).toFixed(6)}) < step size (${stepSize_quantity}), ajustado para ${stepSize_quantity}`);
+            if (actualTargets < targets.length) {
+              console.log(`   • TP ${i + 1}: Quantidade calculada (${(totalQuantity / actualTargets).toFixed(6)}) < step size (${stepSize_quantity}), ajustado para ${stepSize_quantity}`);
             }
           }
           if (qty > remaining) qty = remaining;
@@ -202,13 +268,14 @@ class OrderController {
         quantities.push(qty);
         remaining -= qty;
       }
+      
       // Ajusta targets para o número real de TPs
-      const usedTargets = targets.slice(0, nTPs);
+      const usedTargets = targets.slice(0, actualTargets);
       const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
       const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
-      console.log(`🎯 [PRO_MAX] ${market}: Criando ${nTPs} take profits. Quantidades: [${quantities.join(', ')}] (total: ${totalQuantity})`);
+      console.log(`🎯 [PRO_MAX] ${market}: Criando ${actualTargets} take profits. Quantidades: [${quantities.join(', ')}] (total: ${totalQuantity})`);
       // Cria ordens de take profit
-      for (let i = 0; i < nTPs; i++) {
+      for (let i = 0; i < actualTargets; i++) {
         const targetPrice = parseFloat(usedTargets[i]);
         const takeProfitTriggerPrice = (targetPrice + Number(position.markPrice)) / 2;
         const qty = quantities[i];
@@ -229,9 +296,9 @@ class OrderController {
         };
         const result = await Order.executeOrder(orderBody);
         if (result) {
-          console.log(`✅ [PRO_MAX] ${market}: Take Profit ${i + 1}/${nTPs} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
+          console.log(`✅ [PRO_MAX] ${market}: Take Profit ${i + 1}/${actualTargets} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
         } else {
-          console.log(`⚠️ [PRO_MAX] ${market}: Take Profit ${i + 1}/${nTPs} não criado`);
+          console.log(`⚠️ [PRO_MAX] ${market}: Take Profit ${i + 1}/${actualTargets} não criado`);
         }
       }
 
@@ -260,6 +327,182 @@ class OrderController {
       }
     } catch (error) {
       console.error(`❌ [PRO_MAX] Erro ao processar posição aberta para ${market}:`, error.message);
+    }
+  }
+
+  /**
+   * Força a criação de alvos para posições já abertas que não foram monitoradas
+   */
+  static async forceCreateTargetsForExistingPosition(position, accountId) {
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+      
+      // Busca informações do mercado
+      const Account = await AccountController.get();
+      const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+      if (!marketInfo) {
+        console.error(`❌ [PRO_MAX] Market info não encontrada para ${position.symbol}`);
+        return;
+      }
+      
+      const decimal_quantity = marketInfo.decimal_quantity;
+      const decimal_price = marketInfo.decimal_price;
+      const stepSize_quantity = marketInfo.stepSize_quantity;
+
+      // Preço real de entrada
+      const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+      const isLong = parseFloat(position.netQuantity) > 0;
+      
+      // Recalcula os targets usando a estratégia PRO_MAX
+      const { ProMaxStrategy } = await import('../Decision/Strategies/ProMaxStrategy.js');
+      const strategy = new ProMaxStrategy();
+      
+      // Usa timeframe padrão
+      const timeframe = process.env.TIME || '5m';
+      const candles = await Markets.getKLines(position.symbol, timeframe, 30);
+      const { calculateIndicators } = await import('../Decision/Indicators.js');
+      const indicators = calculateIndicators(candles);
+      const data = { ...indicators, market: marketInfo, marketPrice: entryPrice };
+      const action = isLong ? 'long' : 'short';
+      
+      const stopAndTargets = strategy.calculateStopAndMultipleTargets(data, entryPrice, action);
+      if (!stopAndTargets) {
+        console.error(`❌ [PRO_MAX] Não foi possível calcular targets para ${position.symbol}`);
+        return;
+      }
+      
+      const { stop, targets } = stopAndTargets;
+      if (!targets || targets.length === 0) {
+        console.error(`❌ [PRO_MAX] Nenhum target calculado para ${position.symbol}`);
+        return;
+      }
+
+      // Quantidade total da posição
+      const totalQuantity = Math.abs(Number(position.netQuantity));
+      // Número máximo de TPs possíveis baseado no step size
+      const maxTPs = Math.floor(totalQuantity / stepSize_quantity);
+      const nTPs = Math.min(targets.length, maxTPs);
+      
+      // Limita pelo número máximo de ordens de take profit definido no .env
+      const maxTakeProfitOrders = parseInt(process.env.MAX_TAKE_PROFIT_ORDERS) || 5;
+      const finalTPs = Math.min(nTPs, maxTakeProfitOrders);
+      
+      if (finalTPs === 0) {
+        console.error(`❌ [PRO_MAX] Posição muito pequena para criar qualquer TP válido para ${position.symbol}`);
+        return;
+      }
+
+      // Log explicativo quando são criadas menos ordens do que o esperado
+      if (finalTPs < targets.length) {
+        console.log(`📊 [PRO_MAX] ${position.symbol}: Ajuste de quantidade de TPs:`);
+        console.log(`   • Targets calculados: ${targets.length}`);
+        console.log(`   • Tamanho da posição: ${totalQuantity}`);
+        console.log(`   • Step size mínimo: ${stepSize_quantity}`);
+        console.log(`   • Máximo de TPs possíveis: ${maxTPs} (${totalQuantity} ÷ ${stepSize_quantity})`);
+        console.log(`   • Limite configurado: ${maxTakeProfitOrders} (MAX_TAKE_PROFIT_ORDERS)`);
+        console.log(`   • TPs que serão criados: ${finalTPs}`);
+        if (finalTPs < nTPs) {
+          console.log(`   • Motivo: Limitado pela configuração MAX_TAKE_PROFIT_ORDERS=${maxTakeProfitOrders}`);
+        } else {
+          console.log(`   • Motivo: Posição pequena não permite dividir em ${targets.length} ordens de ${stepSize_quantity} cada`);
+        }
+      }
+
+      const quantities = [];
+      let remaining = totalQuantity;
+      
+      // Para posições pequenas, tenta criar pelo menos 3 alvos se possível
+      const minTargets = Math.min(3, targets.length);
+      const actualTargets = Math.max(finalTPs, minTargets);
+      
+      for (let i = 0; i < actualTargets; i++) {
+        let qty;
+        if (i === actualTargets - 1) {
+          qty = remaining; // tudo que sobrou
+        } else {
+          // Para posições pequenas, divide igualmente
+          qty = Math.floor((totalQuantity / actualTargets) / stepSize_quantity) * stepSize_quantity;
+          if (qty < stepSize_quantity) {
+            qty = stepSize_quantity;
+            // Log quando a quantidade calculada é menor que o step size
+            if (actualTargets < targets.length) {
+              console.log(`   • TP ${i + 1}: Quantidade calculada (${(totalQuantity / actualTargets).toFixed(6)}) < step size (${stepSize_quantity}), ajustado para ${stepSize_quantity}`);
+            }
+          }
+          if (qty > remaining) qty = remaining;
+        }
+        quantities.push(qty);
+        remaining -= qty;
+      }
+      
+      // Ajusta targets para o número real de TPs
+      const usedTargets = targets.slice(0, actualTargets);
+      const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+      const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+      
+      console.log(`\n🎯 [PRO_MAX] ${position.symbol}: Criando ${actualTargets} take profits. Quantidades: [${quantities.join(', ')}] (total: ${totalQuantity})`);
+      
+      // Cria ordens de take profit
+      for (let i = 0; i < actualTargets; i++) {
+        const targetPrice = parseFloat(usedTargets[i]);
+        const takeProfitTriggerPrice = (targetPrice + Number(position.markPrice)) / 2;
+        const qty = quantities[i];
+        const orderBody = {
+          symbol: position.symbol,
+          side: isLong ? 'Ask' : 'Bid',
+          orderType: 'Limit',
+          postOnly: true,
+          reduceOnly: true,
+          quantity: formatQuantity(qty),
+          price: formatPrice(targetPrice),
+          takeProfitTriggerBy: 'LastPrice',
+          takeProfitTriggerPrice: formatPrice(takeProfitTriggerPrice),
+          takeProfitLimitPrice: formatPrice(targetPrice),
+          timeInForce: 'GTC',
+          selfTradePrevention: 'RejectTaker',
+          clientId: Math.floor(Math.random() * 1000000) + i
+        };
+        const result = await Order.executeOrder(orderBody);
+        if (result) {
+          console.log(`✅ [PRO_MAX] ${position.symbol}: Take Profit ${i + 1}/${actualTargets} criado - Preço: ${targetPrice.toFixed(6)}, Quantidade: ${qty}`);
+        } else {
+          console.log(`⚠️ [PRO_MAX] ${position.symbol}: Take Profit ${i + 1}/${actualTargets} não criado`);
+        }
+      }
+
+      // Cria ordem de stop loss se necessário
+      if (stop !== undefined && !isNaN(parseFloat(stop))) {
+        const stopLossTriggerPrice = (Number(stop) + Number(position.markPrice)) / 2;
+        const stopBody = {
+          symbol: position.symbol,
+          side: isLong ? 'Ask' : 'Bid',
+          orderType: 'Limit',
+          postOnly: true,
+          reduceOnly: true,
+          quantity: formatQuantity(totalQuantity),
+          price: formatPrice(stop),
+          stopLossTriggerBy: 'LastPrice',
+          stopLossTriggerPrice: formatPrice(stopLossTriggerPrice),
+          stopLossLimitPrice: formatPrice(stop),
+          timeInForce: 'GTC',
+          selfTradePrevention: 'RejectTaker',
+          clientId: Math.floor(Math.random() * 1000000) + 9999
+        };
+        const stopResult = await Order.executeOrder(stopBody);
+        if (stopResult) {
+          console.log(`🛡️ [PRO_MAX] ${position.symbol}: Stop loss criado - Preço: ${stop.toFixed(6)}`);
+        }
+      }
+      
+    } catch (error) {
+      console.error(`❌ [PRO_MAX] Erro ao forçar criação de alvos para ${position.symbol}:`, error.message);
     }
   }
 

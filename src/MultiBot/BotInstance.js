@@ -144,7 +144,7 @@ class BotInstance {
       process.env.API_SECRET = this.config.apiSecret;
       
       // Testa conexão
-      const accountData = await AccountController.get();
+      const accountData = await AccountController.get({ strategy: this.strategy });
       
       // Restaura variáveis originais
       process.env.API_KEY = originalApiKey;

@@ -8,6 +8,8 @@
     "start": "TRADING_STRATEGY=DEFAULT nodemon bootstrap.js",
     "menu": "nodemon bootstrap.js",
     "start:skip": "nodemon bootstrap.js -- --skip-selection",
+    "promax": "TRADING_STRATEGY=PRO_MAX nodemon bootstrap.js",
+    "promax:prod": "TRADING_STRATEGY=PRO_MAX node bootstrap.js",
     "prod": "TRADING_STRATEGY=DEFAULT node bootstrap.js",
     "prod:menu": "node bootstrap.js",
     "prod:skip": "node bootstrap.js -- --skip-selection",

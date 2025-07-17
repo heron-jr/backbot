@@ -3,13 +3,14 @@ import { auth } from './Authentication.js';
 
 class Account {
 
-  async getAccount() {
+  async getAccount(strategy = null) {
     const timestamp = Date.now();
 
     const headers = auth({
       instruction: 'accountQuery',
       timestamp,
       params: {},
+      strategy: strategy
     });
 
     try {

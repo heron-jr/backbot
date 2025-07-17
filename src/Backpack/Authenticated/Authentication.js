@@ -11,9 +11,17 @@ export function auth({ instruction, params = {}, timestamp, window = 30000, stra
       apiKey = process.env.ACCOUNT1_API_KEY;
       apiSecret = process.env.ACCOUNT1_API_SECRET;
     } else if (finalStrategy === 'PRO_MAX') {
-      // Para estratégia PRO_MAX, usa credenciais da CONTA2
+      // Para estratégia PRO_MAX, tenta usar credenciais da CONTA2 primeiro
       apiKey = process.env.ACCOUNT2_API_KEY;
       apiSecret = process.env.ACCOUNT2_API_SECRET;
+      
+      // Se CONTA2 não estiver configurada, usa CONTA1 como fallback
+      if (!apiKey || !apiSecret) {
+        console.log(`⚠️ [AUTH] CONTA2 não configurada para estratégia PRO_MAX`);
+        console.log(`   Usando credenciais da CONTA1 como fallback`);
+        apiKey = process.env.ACCOUNT1_API_KEY;
+        apiSecret = process.env.ACCOUNT1_API_SECRET;
+      }
     } else {
       // Fallback para credenciais padrão (compatibilidade)
       apiKey = process.env.API_KEY;

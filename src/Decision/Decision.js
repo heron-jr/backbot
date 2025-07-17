@@ -28,21 +28,13 @@ class Decision {
   }
 
   /**
-   * Re-inicializa a estratégia com um novo tipo
-   * @param {string} strategyType - Novo tipo de estratégia
+   * Re-inicializa a estratégia (útil para mudanças dinâmicas)
+   * @param {string} strategyType - Tipo da estratégia
    */
   reinitializeStrategy(strategyType) {
-    if (!strategyType) {
-      console.log('⚠️ StrategyType não fornecido, mantendo estratégia atual');
-      return;
-    }
-    
     console.log(`🔄 Re-inicializando estratégia: ${strategyType.toUpperCase()}`);
     this.strategy = StrategyFactory.createStrategy(strategyType);
     console.log(`✅ Estratégia re-inicializada: ${strategyType.toUpperCase()}`);
-    
-    // Reseta os logs para a nova sessão
-    this.operationSummaryLogged = false;
   }
 
   /**
@@ -57,30 +49,82 @@ class Decision {
     let isActive = true;
     let timeoutId = null;
     
-    // Função para limpar a linha atual
-    const clearLine = () => {
-      process.stdout.write('\r' + ' '.repeat(80) + '\r');
+    // Função para limpar a linha do progresso
+    const clearProgressLine = () => {
+      process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
     };
     
-    // Intercepta console.log para interromper o loading
+    // Função para mostrar o progresso no rodapé
+    const showProgress = (progress, bar, percentage) => {
+      // Move o cursor para o final da tela
+      process.stdout.write('\x1b[9999;0H');
+      // Limpa a linha atual
+      clearProgressLine();
+      // Mostra o progresso
+      process.stdout.write(`⏳ Aguardando próxima análise... [${bar}] ${percentage}% | Próxima: ${nextTime}`);
+    };
+    
+    // Intercepta console.log para manter o progresso no rodapé
     const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
     console.log = (...args) => {
       if (isActive) {
-        clearLine();
-        isActive = false;
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-        // Garante que o próximo log pule para uma nova linha
-        process.stdout.write('\n');
+        // Limpa a linha do progresso antes de mostrar o log
+        clearProgressLine();
+        // Mostra o log
+        originalLog.apply(console, args);
+        // Restaura o progresso no rodapé
+        const progress = Math.min((currentStep / steps) * 100, 100);
+        const filledBlocks = Math.floor(progress / 2);
+        const emptyBlocks = 50 - filledBlocks;
+        const bar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
+        const percentage = Math.floor(progress);
+        showProgress(progress, bar, percentage);
+      } else {
+        originalLog.apply(console, args);
       }
-      originalLog.apply(console, args);
+    };
+
+    // Intercepta console.error
+    console.error = (...args) => {
+      if (isActive) {
+        clearProgressLine();
+        originalError.apply(console, args);
+        const progress = Math.min((currentStep / steps) * 100, 100);
+        const filledBlocks = Math.floor(progress / 2);
+        const emptyBlocks = 50 - filledBlocks;
+        const bar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
+        const percentage = Math.floor(progress);
+        showProgress(progress, bar, percentage);
+      } else {
+        originalError.apply(console, args);
+      }
+    };
+
+    // Intercepta console.warn
+    console.warn = (...args) => {
+      if (isActive) {
+        clearProgressLine();
+        originalWarn.apply(console, args);
+        const progress = Math.min((currentStep / steps) * 100, 100);
+        const filledBlocks = Math.floor(progress / 2);
+        const emptyBlocks = 50 - filledBlocks;
+        const bar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
+        const percentage = Math.floor(progress);
+        showProgress(progress, bar, percentage);
+      } else {
+        originalWarn.apply(console, args);
+      }
     };
     
     const progressBar = () => {
       if (!isActive) {
         // Restaura console.log original
         console.log = originalLog;
+        console.error = originalError;
+        console.warn = originalWarn;
         return;
       }
       
@@ -91,9 +135,8 @@ class Decision {
       const bar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
       const percentage = Math.floor(progress);
       
-      // Limpa a linha anterior e mostra o progresso
-      process.stdout.write('\r');
-      process.stdout.write(`⏳ Aguardando próxima análise... [${bar}] ${percentage}% | Próxima: ${nextTime}\n`);
+      // Mostra o progresso no rodapé
+      showProgress(progress, bar, percentage);
       
       currentStep++;
       
@@ -101,8 +144,10 @@ class Decision {
         timeoutId = setTimeout(progressBar, interval);
       } else {
         // Limpa a linha quando termina e restaura console.log
-        clearLine();
+        clearProgressLine();
         console.log = originalLog;
+        console.error = originalError;
+        console.warn = originalWarn;
       }
     };
     
@@ -426,7 +471,7 @@ class Decision {
             // Define tendência do BTC baseada no sinal
             btcTrend = btcAnalysis.isLong ? 'BULLISH' : 'BEARISH';
           } else {
-            console.log(`   ⚪ BTC: Sem sinais (NEUTRO - não permite operações em altcoins)`);
+            console.log(`\n⚪ BTC: Sem sinais (NEUTRO - não permite operações em altcoins)`);
             if (btcAnalysis && btcAnalysis.analysisDetails && btcAnalysis.analysisDetails.length > 0) {
               btcAnalysis.analysisDetails.forEach(detail => {
                 console.log(`      • ${detail}`);

@@ -1,6 +1,103 @@
 import { BaseStrategy } from './BaseStrategy.js';
 
 export class ProMaxStrategy extends BaseStrategy {
+  
+  /**
+   * Analisa sinais para compatibilidade com Decision.js
+   * @param {object} data - Dados de mercado
+   * @param {boolean} isBTCAnalysis - Se é análise do BTC
+   * @returns {object} - Objeto com sinais
+   */
+  analyzeSignals(data, isBTCAnalysis = false) {
+    try {
+      // Para estratégia PRO_MAX, usa análise ADX
+      const ADX_LENGTH = Number(process.env.ADX_LENGTH || 14);
+      const ADX_THRESHOLD = Number(process.env.ADX_THRESHOLD || 20);
+      const ADX_AVERAGE_LENGTH = Number(process.env.ADX_AVERAGE_LENGTH || 21);
+      
+      const adxAnalysis = this.analyzeADX(data, ADX_LENGTH, ADX_THRESHOLD, ADX_AVERAGE_LENGTH);
+      
+      if (!adxAnalysis.isValid) {
+        return {
+          hasSignal: false,
+          analysisDetails: ['ADX inválido']
+        };
+      }
+      
+      // Análise de validação de indicadores
+      const validationAnalysis = this.analyzeValidations(data, {
+        useRSI: process.env.USE_RSI_VALIDATION === 'true',
+        useStoch: process.env.USE_STOCH_VALIDATION === 'true',
+        useMACD: process.env.USE_MACD_VALIDATION === 'true',
+        rsiLength: Number(process.env.RSI_LENGTH || 14),
+        rsiAverageLength: Number(process.env.RSI_AVERAGE_LENGTH || 14),
+        rsiBullThreshold: Number(process.env.RSI_BULL_THRESHOLD || 45),
+        rsiBearThreshold: Number(process.env.RSI_BEAR_THRESHOLD || 55),
+        stochKLength: Number(process.env.STOCH_K_LENGTH || 14),
+        stochDLength: Number(process.env.STOCH_D_LENGTH || 3),
+        stochSmooth: Number(process.env.STOCH_SMOOTH || 3),
+        stochBullThreshold: Number(process.env.STOCH_BULL_THRESHOLD || 45),
+        stochBearThreshold: Number(process.env.STOCH_BEAR_THRESHOLD || 55),
+        macdFastLength: Number(process.env.MACD_FAST_LENGTH || 12),
+        macdSlowLength: Number(process.env.MACD_SLOW_LENGTH || 26),
+        macdSignalLength: Number(process.env.MACD_SIGNAL_LENGTH || 9)
+      });
+      
+      // Calcula confluências
+      const bullConfluences = this.calculateBullConfluences(adxAnalysis, validationAnalysis);
+      const bearConfluences = this.calculateBearConfluences(adxAnalysis, validationAnalysis);
+      
+      // Determina nível do sinal
+      const bullSignalLevel = this.getSignalLevel(bullConfluences);
+      const bearSignalLevel = this.getSignalLevel(bearConfluences);
+      
+      // Verifica se deve ignorar sinais BRONZE
+      const IGNORE_BRONZE = process.env.IGNORE_BRONZE_SIGNALS === 'true';
+      const isValidBullSignal = !IGNORE_BRONZE || bullSignalLevel !== 'BRONZE';
+      const isValidBearSignal = !IGNORE_BRONZE || bearSignalLevel !== 'BRONZE';
+      
+      // Determina ação baseada nas confluências
+      let action = null;
+      let signalLevel = null;
+      let analysisDetails = [];
+      
+      if (adxAnalysis.bullishCondition && isValidBullSignal && bullConfluences > 0) {
+        action = 'long';
+        signalLevel = bullSignalLevel;
+        analysisDetails.push(`LONG (${signalLevel}) - Confluências: ${bullConfluences}/4`);
+        analysisDetails.push(`ADX: ${adxAnalysis.adx.toFixed(2)} < ${ADX_THRESHOLD}`);
+        analysisDetails.push(`DI+: ${adxAnalysis.diPlus.toFixed(2)} > DI-: ${adxAnalysis.diMinus.toFixed(2)}`);
+      } else if (adxAnalysis.bearishCondition && isValidBearSignal && bearConfluences > 0) {
+        action = 'short';
+        signalLevel = bearSignalLevel;
+        analysisDetails.push(`SHORT (${signalLevel}) - Confluências: ${bearConfluences}/4`);
+        analysisDetails.push(`ADX: ${adxAnalysis.adx.toFixed(2)} < ${ADX_THRESHOLD}`);
+        analysisDetails.push(`DI-: ${adxAnalysis.diMinus.toFixed(2)} > DI+: ${adxAnalysis.diPlus.toFixed(2)}`);
+      } else {
+        analysisDetails.push('Sem sinais válidos');
+        if (adxAnalysis.adx >= ADX_THRESHOLD) {
+          analysisDetails.push(`ADX alto: ${adxAnalysis.adx.toFixed(2)} >= ${ADX_THRESHOLD}`);
+        }
+        if (bullConfluences === 0 && bearConfluences === 0) {
+          analysisDetails.push('Sem confluências de indicadores');
+        }
+      }
+      
+      return {
+        hasSignal: !!action,
+        isLong: action === 'long',
+        signalType: action ? `${action.toUpperCase()} (${signalLevel})` : 'NEUTRO',
+        analysisDetails: analysisDetails
+      };
+      
+    } catch (error) {
+      console.error('ProMaxStrategy.analyzeSignals - Error:', error);
+      return {
+        hasSignal: false,
+        analysisDetails: [`Erro: ${error.message}`]
+      };
+    }
+  }
       /**
      * Implementação da estratégia PRO_MAX baseada no script PineScript ADX
    * @param {number} fee - Taxa da exchange

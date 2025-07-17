@@ -47,6 +47,69 @@ function showGlobalTimer() {
   console.log('⏰ TIMER GERAL - Próxima análise para todas as contas');
   console.log('='.repeat(60));
 
+  // Intercepta console.log para manter o progresso no rodapé
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  
+  // Função para limpar a linha do progresso
+  const clearProgressLine = () => {
+    process.stdout.write('\r' + ' '.repeat(process.stdout.columns || 80) + '\r');
+  };
+  
+  // Função para mostrar o progresso no rodapé
+  const showProgress = (progress, progressBar, percentage) => {
+    // Move o cursor para o final da tela
+    process.stdout.write('\x1b[9999;0H');
+    // Limpa a linha atual
+    clearProgressLine();
+    // Mostra o progresso
+    process.stdout.write('⏳ Aguardando próxima análise... ');
+    process.stdout.write(`[${progressBar}] ${percentage}% | Próxima: ${timeString}`);
+  };
+
+  // Intercepta console.log para manter o progresso no rodapé
+  console.log = (...args) => {
+    // Limpa a linha do progresso antes de mostrar o log
+    clearProgressLine();
+    // Mostra o log
+    originalLog.apply(console, args);
+    // Restaura o progresso no rodapé
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min((elapsed / durationMs) * 100, 100);
+    const bars = Math.floor(progress / 5);
+    const emptyBars = 20 - bars;
+    const progressBar = '█'.repeat(bars) + '░'.repeat(emptyBars);
+    const percentage = Math.floor(progress);
+    showProgress(progress, progressBar, percentage);
+  };
+
+  // Intercepta console.error
+  console.error = (...args) => {
+    clearProgressLine();
+    originalError.apply(console, args);
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min((elapsed / durationMs) * 100, 100);
+    const bars = Math.floor(progress / 5);
+    const emptyBars = 20 - bars;
+    const progressBar = '█'.repeat(bars) + '░'.repeat(emptyBars);
+    const percentage = Math.floor(progress);
+    showProgress(progress, progressBar, percentage);
+  };
+
+  // Intercepta console.warn
+  console.warn = (...args) => {
+    clearProgressLine();
+    originalWarn.apply(console, args);
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min((elapsed / durationMs) * 100, 100);
+    const bars = Math.floor(progress / 5);
+    const emptyBars = 20 - bars;
+    const progressBar = '█'.repeat(bars) + '░'.repeat(emptyBars);
+    const percentage = Math.floor(progress);
+    showProgress(progress, progressBar, percentage);
+  };
+
   globalTimerInterval = setInterval(() => {
     const elapsed = Date.now() - startTime;
     const progress = Math.min((elapsed / durationMs) * 100, 100);
@@ -56,14 +119,17 @@ function showGlobalTimer() {
     const progressBar = '█'.repeat(bars) + '░'.repeat(emptyBars);
     const percentage = Math.floor(progress);
     
-    // Limpa linha anterior e escreve o timer (sem \n)
-    process.stdout.write('\r');
-    process.stdout.write('⏳ Aguardando próxima análise... ');
-    process.stdout.write(`[${progressBar}] ${percentage}% | Próxima: ${timeString}`);
+    // Mostra o progresso no rodapé
+    showProgress(progress, progressBar, percentage);
     
     if (progress >= 100) {
       clearInterval(globalTimerInterval);
-      process.stdout.write('\n');
+      // Restaura console.log original
+      console.log = originalLog;
+      console.error = originalError;
+      console.warn = originalWarn;
+      // Limpa a linha do progresso
+      clearProgressLine();
       console.log('🔄 Iniciando nova análise...\n');
     }
   }, 1000);

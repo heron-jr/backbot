@@ -8,8 +8,11 @@ class AccountController {
     
     try {
     
-    const Accounts = await Account.getAccount()
-    const Collateral = await Capital.getCollateral()
+    // Determina a estratégia baseada na configuração ou variável de ambiente
+    const strategy = config?.strategy || process.env.TRADING_STRATEGY || 'DEFAULT';
+    
+    const Accounts = await Account.getAccount(strategy)
+    const Collateral = await Capital.getCollateral(strategy)
 
     // Verifica se os dados da conta foram obtidos com sucesso
     if (!Accounts || !Collateral) {
