@@ -28,4 +28,7 @@ pids/
 # coverage
 coverage/
 
+# backtest results
+backtest_results/
+
 docs/

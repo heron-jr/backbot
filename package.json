@@ -17,6 +17,7 @@
     "manual-order": "node manual-order.js",
     "backtest": "node backtest.js",
     "optimize": "node optimize-strategy.js",
+    "optimize-targets": "node optimize-targets.js",
     "test-atr": "node test-atr-config.js"
   },
   "keywords": [],
