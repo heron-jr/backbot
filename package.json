@@ -18,6 +18,7 @@
     "backtest": "node backtest.js",
     "optimize": "node optimize-strategy.js",
     "optimize-targets": "node optimize-targets.js",
+    "optimize-capital": "node optimize-capital-percentage.js",
     "test-atr": "node test-atr-config.js"
   },
   "keywords": [],
