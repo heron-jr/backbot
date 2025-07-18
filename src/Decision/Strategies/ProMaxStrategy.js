@@ -331,7 +331,7 @@ export class ProMaxStrategy extends BaseStrategy {
       const price = parseFloat(data.marketPrice);
       
       // Calcula stop e múltiplos targets usando ATR (como no PineScript)
-      const stopAndTargets = this.calculateStopAndMultipleTargets(data, price, action);
+      const stopAndTargets = this.calculateStopAndMultipleTargets(data, price, action, config);
       if (!stopAndTargets) {
         return null;
       }
@@ -599,14 +599,17 @@ export class ProMaxStrategy extends BaseStrategy {
    * @param {object} data - Dados de mercado
    * @param {number} price - Preço atual
    * @param {string} action - Ação (long/short)
+   * @param {object} config - Configurações (opcional)
    * @returns {object|null} - Stop e array de targets
    */
-  calculateStopAndMultipleTargets(data, price, action) {
+  calculateStopAndMultipleTargets(data, price, action, config = null) {
     try {
-      // Configurações das zonas de objetivo - REDUZIDO para evitar rejeições da exchange
-      const ATR_ZONE_MULTIPLIER = 1.5;
-      const SL_ATR_MULTIPLIER = 6.5;
-      const MAX_TARGETS_PER_ORDER = Number(process.env.MAX_TARGETS_PER_ORDER || 20);
+      // Configurações das zonas de objetivo - Configuráveis via .env
+      const ATR_ZONE_MULTIPLIER = Number(process.env.ATR_ZONE_MULTIPLIER || 1.5);
+      const SL_ATR_MULTIPLIER = Number(process.env.SL_ATR_MULTIPLIER || 6.5);
+      
+      // Usa configuração passada ou do .env
+      const MAX_TARGETS_PER_ORDER = config?.maxTargetsPerOrder || Number(process.env.MAX_TARGETS_PER_ORDER || 20);
       
       const adjustedATRMultiplier = ATR_ZONE_MULTIPLIER;
       

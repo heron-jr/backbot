@@ -80,10 +80,10 @@ function  analyzeEMA(ema9Arr, ema21Arr) {
   const len = ema9Arr.length;
   if (len < 2 || ema21Arr.length < 2) return null;
 
-  const lastEma9  = ema9Arr.at(-1);
-  const lastEma21 = ema21Arr.at(-1);
-  const prevEma9  = ema9Arr.at(-2);
-  const prevEma21 = ema21Arr.at(-2);
+  const lastEma9  = ema9Arr[ema9Arr.length - 1];
+  const lastEma21 = ema21Arr[ema21Arr.length - 1];
+  const prevEma9  = ema9Arr[ema9Arr.length - 2];
+  const prevEma21 = ema21Arr[ema21Arr.length - 2];
 
   if (lastEma9 == null || lastEma21 == null || prevEma9 == null || prevEma21 == null) {
     return null;
@@ -234,23 +234,23 @@ export function calculateIndicators(candles) {
       candlesAgo: emaCrossInfo ? (ema9.length - 1 - emaCrossInfo.index) : null
     },
     rsi: {
-      value: rsi.at(-1) ?? null,
+      value: rsi[rsi.length - 1] ?? null,
       avg: rsi.length >= 14 ? rsi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : null,
-      prev: rsi.at(-2) ?? null,
+      prev: rsi[rsi.length - 2] ?? null,
       avgPrev: rsi.length >= 15 ? rsi.slice(-15, -1).reduce((sum, val) => sum + val, 0) / 14 : null,
       history: rsi
     },
     macd: {
-      MACD: macd.at(-1)?.MACD ?? null,
-      MACD_signal: macd.at(-1)?.signal ?? null,
-      MACD_histogram: macd.at(-1)?.histogram ?? null,
-      histogram: macd.at(-1)?.histogram ?? null,
-      histogramPrev: macd.at(-2)?.histogram ?? null,
+      MACD: macd[macd.length - 1]?.MACD ?? null,
+      MACD_signal: macd[macd.length - 1]?.signal ?? null,
+      MACD_histogram: macd[macd.length - 1]?.histogram ?? null,
+      histogram: macd[macd.length - 1]?.histogram ?? null,
+      histogramPrev: macd[macd.length - 2]?.histogram ?? null,
     },
     bollinger: {
-      BOLL_upper: boll.at(-1)?.upper ?? null,
-      BOLL_middle: boll.at(-1)?.middle ?? null,
-      BOLL_lower: boll.at(-1)?.lower ?? null,
+      BOLL_upper: boll[boll.length - 1]?.upper ?? null,
+      BOLL_middle: boll[boll.length - 1]?.middle ?? null,
+      BOLL_lower: boll[boll.length - 1]?.lower ?? null,
     },
     volume: {
       history: volumesUSD,
@@ -263,29 +263,29 @@ export function calculateIndicators(candles) {
         lowerBands
     },
     atr: {
-      atr: atr.at(-1) ?? null,
-      value: atr.at(-1) ?? null,
+      atr: atr[atr.length - 1] ?? null,
+      value: atr[atr.length - 1] ?? null,
       history: atr
     },
     stoch: {
-      k: slowStoch.at(-1)?.k ?? null,
-      d: slowStoch.at(-1)?.d ?? null,
-      kPrev: slowStoch.at(-2)?.k ?? null,
-      dPrev: slowStoch.at(-2)?.d ?? null,
+      k: slowStoch[slowStoch.length - 1]?.k ?? null,
+      d: slowStoch[slowStoch.length - 1]?.d ?? null,
+      kPrev: slowStoch[slowStoch.length - 2]?.k ?? null,
+      dPrev: slowStoch[slowStoch.length - 2]?.d ?? null,
       history: slowStoch
     },
     slowStochastic: {
-      k: slowStoch.at(-1)?.k ?? null,
-      d: slowStoch.at(-1)?.d ?? null,
+      k: slowStoch[slowStoch.length - 1]?.k ?? null,
+      d: slowStoch[slowStoch.length - 1]?.d ?? null,
       history: slowStoch
     },
     adx: {
-      adx: adx.at(-1)?.adx ?? null,
-      diPlus: adx.at(-1)?.pdi ?? null,
-      diMinus: adx.at(-1)?.mdi ?? null,
-      diPlusPrev: adx.at(-2)?.pdi ?? null,
-      diMinusPrev: adx.at(-2)?.mdi ?? null,
-      adxEma: adxEma.at(-1) ?? null,
+      adx: adx[adx.length - 1]?.adx ?? null,
+      diPlus: adx[adx.length - 1]?.pdi ?? null,
+      diMinus: adx[adx.length - 1]?.mdi ?? null,
+      diPlusPrev: adx[adx.length - 2]?.pdi ?? null,
+      diMinusPrev: adx[adx.length - 2]?.mdi ?? null,
+      adxEma: adxEma[adxEma.length - 1] ?? null,
       history: adx,
       emaHistory: adxEma
     }

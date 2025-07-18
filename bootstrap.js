@@ -1,2 +1,2 @@
 import 'dotenv/config';
-import './app.js'; 
+// Removido import './app.js' para evitar interferência com backtest 
