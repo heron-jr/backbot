@@ -228,8 +228,7 @@ export function calculateIndicators(candles) {
   };
 }
 
-export function analyzeTrade(fee, data, investmentUSD, media_rsi) {
-
+export function analyzeTrade(fee, data, volume, media_rsi) {
   try {
     
   if (!data.vwap?.lowerBands?.length || !data.vwap?.upperBands?.length || data.vwap.vwap == null) return null;
@@ -269,20 +268,20 @@ export function analyzeTrade(fee, data, investmentUSD, media_rsi) {
   const percentVwap = 0.95
 
   if (isLong) {
-    stop = bandBelow[1] 
+    stop = bandBelow[bandBelow.length - 1] 
     target = entry + ((bandAbove[0] - entry) * percentVwap)
   } else {
-    stop = bandAbove[1]
+    stop = bandAbove[bandAbove.length - 1]
     target = entry - ((entry - bandBelow[0]) * percentVwap)
   }
 
   // Cálculo de PnL e risco
-  const units = investmentUSD / entry;
+  const units = volume / entry;
 
   const grossLoss = ((action === 'long') ? entry - stop : stop - entry ) * units
   const grossTarget = ((action === 'long') ? target - entry : entry - target) * units
 
-  const entryFee = investmentUSD * fee;
+  const entryFee = volume * fee;
   const exitFeeTarget = grossTarget * fee;
   const exitFeeLoss = grossLoss * fee;
 
@@ -300,8 +299,8 @@ export function analyzeTrade(fee, data, investmentUSD, media_rsi) {
   };
   
   } catch (error) {
-    return null
     console.log(error)
+    return null
   }
 
 }

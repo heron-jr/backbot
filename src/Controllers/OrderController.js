@@ -1,10 +1,13 @@
 import Order from '../Backpack/Authenticated/Order.js';
 import AccountController from './AccountController.js';
 import Utils from '../Utils/Utils.js';
+const tickSizeMultiply = 5
 
 class OrderController {
 
   async forceClose(position) {
+    try {
+      
     const Account = await AccountController.get()
     const market = Account.markets.find((el) => {
         return el.symbol === position.symbol
@@ -23,9 +26,43 @@ class OrderController {
     };
 
     return await Order.executeOrder(body);
+
+    
+    } catch (error) {
+      console.log(error)
+     return null 
+    }
   }
 
-  async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity }) {
+  async openOrderSpot({ side, symbol, volume, quantity }) {
+
+    
+    
+    try {
+    
+    const body = {
+      symbol: symbol,
+      side,
+      orderType: "Market",
+      timeInForce: "GTC",
+      selfTradePrevention: "RejectTaker"
+    };
+
+    if(quantity) {
+      body.quantity = quantity
+    } else {
+      body.quoteQuantity = volume
+    }
+
+    const resp = await Order.executeOrder(body);
+    return resp 
+
+    } catch (error) {
+      console.log(error)
+    }
+  }
+
+  async openOrder({ entry, stop, target, action, symbol, volume, decimal_quantity, decimal_price, stepSize_quantity, tickSize }) {
     
     try {
     
@@ -41,7 +78,7 @@ class OrderController {
     const price = formatPrice(entryPrice);
 
     const body = {
-      symbol: market,
+      symbol: symbol,
       side,
       orderType: "Limit",
       postOnly: true,  
@@ -51,10 +88,11 @@ class OrderController {
       selfTradePrevention: "RejectTaker"
     };
 
-    const takeProfitTriggerPrice = (Number(target) + Number(price)) / 2 
-    const stopLossTriggerPrice = (Number(stop) + Number(price)) / 2 
+    const space = tickSize * tickSizeMultiply
+    const takeProfitTriggerPrice = isLong ? target - space : target + space;
+    const stopLossTriggerPrice = isLong ? stop + space : stop - space;
 
-    if (target !== undefined && !isNaN(parseFloat(target))) {
+   if (target !== undefined && !isNaN(parseFloat(target))) {
       body.takeProfitTriggerBy = "LastPrice";
       body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
       body.takeProfitLimitPrice =  formatPrice(target);
@@ -77,17 +115,22 @@ class OrderController {
 
   async getRecentOpenOrders(market) {
     const orders = await Order.getOpenOrders(market)
-    const orderShorted = orders.sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-    return orderShorted.map((el) => {
-        return {
-            id: el.id,
-            minutes: Utils.minutesAgo(el.createdAt),
-            triggerPrice: parseFloat(el.triggerPrice),
-            price: parseFloat(el.price)
-        }
-    })
+    if(orders) {
+      const orderShorted = orders.sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      return orderShorted.map((el) => {
+          el.minutes = Utils.minutesAgo(el.createdAt)
+          el.triggerPrice = Number(el.triggerPrice),
+          el.price = Number(el.price)
+          return el
+      })
+    } else {
+      return []
+    }
+    
   }
 
+
+  
   async getAllOrdersSchedule(markets_open) {
     const orders = await Order.getOpenOrders()
     const orderShorted = orders.sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
@@ -113,7 +156,7 @@ class OrderController {
 
   const decimal_quantity = find.decimal_quantity;
   const decimal_price = find.decimal_price;
-  const tickSize = find.tickSize * 10
+  const tickSize = find.tickSize * tickSizeMultiply
 
   if (price <= 0) throw new Error("Invalid price: must be > 0");
 
@@ -137,6 +180,128 @@ class OrderController {
   };
 
   return await Order.executeOrder(body);
+  }
+
+  async createLimitOrder(symbol, side, price, quantity) {
+
+     const body = {
+          symbol,
+          orderType: 'Limit',
+          side,
+          price: price.toString(),
+          quantity: quantity.toString(),
+          postOnly: true,
+          reduceOnly: false,
+          timeInForce: 'GTC',
+        };
+
+      try {
+        await Order.executeOrder(body);
+      } catch (err) {
+        console.error("❌ Erro ao criar ordem:", body , err);
+      }
+  }
+
+  async createLimitOrderGrid(symbol, side, price, quantity, account, clientId) {
+
+    const find = account.markets.find(el => el.symbol === symbol);
+    const {decimal_price, decimal_quantity, stepSize_quantity, tickSize} = find
+
+    const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+    const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+
+    const _quantity = formatQuantity(Math.floor(quantity / stepSize_quantity) * stepSize_quantity);
+
+    const isLong = side === "Ask"
+    const triggerPrice = isLong ? price - tickSize : price + tickSize  
+
+     const body = {
+          symbol,
+          orderType: 'Limit',
+          side,
+          price: formatPrice(price),
+          postOnly: true,
+          reduceOnly: false,
+          quantity : _quantity,
+          timeInForce: 'GTC',
+          clientId
+        };
+
+      try {
+        await Order.executeOrder(body);
+      } catch (err) {
+        console.error("❌ Erro ao criar ordem:", body );
+      }
+  }
+
+  async createLimitStop(symbol, side, price, quantity) {
+      try {
+        const body = {
+          symbol,
+          orderType: 'Limit',
+          side,
+          price: price.toString(),
+          quantity: quantity.toString(),
+          postOnly: true,
+          reduceOnly: true,
+          timeInForce: 'GTC',
+        };
+        await Order.executeOrder(body);
+      } catch (err) {
+        console.error("❌ Erro ao criar ordem:", err.message);
+      }
+  }
+
+   async createLimitTriggerStop(symbol, side, price, quantity, account, markPrice) {
+
+
+      try {
+        const find = account.markets.find(el => el.symbol === symbol);
+        const {decimal_price, decimal_quantity, stepSize_quantity} = find
+        const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+        const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+        const qnt = formatQuantity(Math.floor((quantity) / stepSize_quantity) * stepSize_quantity);
+
+        const tickSize =  Number(find.tickSize) * tickSizeMultiply
+        const isLong = side === "Ask"
+        const triggerPrice = isLong ? price + tickSize : price - tickSize  
+
+         const body = {
+          symbol,
+          orderType: 'Limit',
+          side,
+          price: formatPrice(price),
+          postOnly: true,
+          reduceOnly: true,
+          timeInForce: 'GTC',
+          triggerBy :'LastPrice',
+          triggerPrice : formatPrice(triggerPrice),
+          triggerQuantity : qnt
+        };
+
+
+        await Order.executeOrder(body);
+      } catch (err) {
+        console.error("❌ Erro ao criar ordem:", err.message);
+      }
+  }
+
+  async createMarketStop(symbol, side, price, quantity) {
+      try {
+        const body = {
+          symbol,
+          orderType: 'Market',
+          side,
+          price: price.toString(),
+          quantity: quantity.toString(),
+          reduceOnly: true,
+          postOnly: true,
+          timeInForce: 'GTC',
+        };
+        await Order.executeOrder(body);
+      } catch (err) {
+        console.error("❌ Erro ao criar ordem:", err.message);
+      }
   }
 
 }

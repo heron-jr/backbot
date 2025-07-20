@@ -110,8 +110,8 @@ class Order {
       });
       console.log('✅ executeOrder Success!', data.symbol);
       return data;
-    } catch (err) {
-      console.error('❌ executeOrder - Error!', body, err.response?.data || err.message);
+    } catch (error) {
+      console.error('❌ executeOrder - Error!', error.response?.data || error.message);
       return null;
     }
   }
