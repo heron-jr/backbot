@@ -161,7 +161,7 @@ class Decision {
 
     console.log("open_markers.length", open_markers.length)
 
-    if(this.MAX_ORDER_OPEN < open_markers.length){ 
+    if(this.MAX_ORDER_OPEN > open_markers.length){ 
 
       const VOLUME_ORDER = Number(process.env.VOLUME_ORDER)
 

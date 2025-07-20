@@ -78,6 +78,8 @@ class Grid {
     this.connectPublic();
 
     setInterval(() => {
+      console.log("Runing private", !this.wsPrivate || this.wsPrivate.readyState !== WebSocket.OPEN )
+      console.log("Runing public", !this.wsPublic || this.wsPublic.readyState !== WebSocket.OPEN )
           if (!this.wsPrivate || this.wsPrivate.readyState !== WebSocket.OPEN) {
             console.warn('⚠️ wsPrivate inativo. Reconectando...');
             this.connectPrivate();
@@ -138,6 +140,7 @@ class Grid {
         if (markPrice >= this.upperClose || markPrice <= this.lowerClose || this.gridPnl <= pnl) {
           await OrderController.forceClose(position);
           console.log(`🔒 Position forced to close ${markPrice}`);
+          this.run()
         }
 
       }
@@ -157,7 +160,7 @@ class Grid {
 
       const payload = {
         method: 'SUBSCRIBE',
-        params: ['account.orderUpdate'],
+        params: ['account.positionUpdate', 'account.orderUpdate'],
         signature: [
           headers['X-API-Key'],
           headers['X-Signature'],
@@ -172,12 +175,18 @@ class Grid {
     this.wsPrivate.on('message', async (raw) => {
       try {
         const parsed = JSON.parse(raw);
+      console.log("parsed.stream", parsed.stream)
+        if (parsed.stream === 'account.positionUpdate') {
+          await this.handleOrderFill(parsed.data);
+        }
+
         if (parsed.stream === 'account.orderUpdate') {
           const event = parsed.data;
           if (event.e === 'orderFill' || event.e === 'orderCancel') {
-            await this.handleOrderFill(event);
+            await this.handleOrderFill(parsed.data);
           }
         }
+        
       } catch (err) {
         console.error('❌ Error processing order:', err.message);
       }
@@ -208,6 +217,7 @@ class Grid {
     this.wsPublic.on('message', async (raw) => {
       try {
         const parsed = JSON.parse(raw);
+
         if (parsed.stream === `markPrice.${this.symbol}`) {
           await this.forceClose(this.symbol)
         }
