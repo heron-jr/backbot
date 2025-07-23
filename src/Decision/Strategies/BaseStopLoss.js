@@ -27,10 +27,24 @@ export class BaseStopLoss {
    * @returns {object} - Objeto com pnl e pnlPct
    */
   calculatePnL(position, account) {
-    const fee = Math.abs(position.netCost * account.fee) * 2;
-    const pnl = (Number(position.pnlRealized) + Number(position.pnlUnrealized)) - fee;
-    const marginUsed = Math.abs(position.netCost);
-    const pnlPct = marginUsed > 0 ? ((pnl / marginUsed) * 100) : 0;
+    // Usa pnlUnrealized diretamente (sem subtrair fees para manter consistência)
+    const pnl = Number(position.pnlUnrealized || 0);
+    
+    // Usa o volume (notional) como base para calcular a porcentagem
+    const notional = Number(position.netExposureNotional || 0);
+    const leverage = Number(position.leverage || 1);
+    const marginReal = notional / leverage;
+    const netCost = Math.abs(Number(position.netCost || 0));
+    
+    // Calcula PnL baseado no valor real investido (netCost)
+    let pnlPct;
+    if (netCost > 0) {
+      pnlPct = (pnl / netCost) * 100;
+    } else if (marginReal > 0) {
+      pnlPct = (pnl / marginReal) * 100;
+    } else {
+      pnlPct = (pnl / notional) * 100;
+    }
     
     return { pnl, pnlPct: Number(pnlPct.toFixed(2)) };
   }

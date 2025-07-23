@@ -9,7 +9,9 @@ class TrailingStop {
 
   constructor(strategyType = null) {
     const finalStrategyType = strategyType || 'DEFAULT';
+    console.log(`🔧 [TRAILING_INIT] Inicializando TrailingStop com estratégia: ${finalStrategyType}`);
     this.stopLossStrategy = StopLossFactory.createStopLoss(finalStrategyType);
+    console.log(`🔧 [TRAILING_INIT] Stop loss strategy criada: ${this.stopLossStrategy.constructor.name}`);
     this.lastVolumeCheck = 0;
     this.cachedVolume = null;
     this.volumeCacheTimeout = 24 * 60 * 60 * 1000; // 24 horas em ms
@@ -85,7 +87,7 @@ class TrailingStop {
    * @returns {object} - PnL em USD e porcentagem
    */
   calculatePnL(position, account) {
-    try {
+    try { 
       const notional = parseFloat(position.netExposureNotional || position.notional || 0);
       
       // Tenta diferentes campos para obter o PnL
@@ -121,32 +123,36 @@ class TrailingStop {
           pnl = (entryPrice - markPrice) * size;
         }
         
-        console.log(`🔧 [PNL_CALC] ${position.symbol}: Calculado manualmente`);
-        console.log(`   Entry: $${entryPrice}, Mark: $${markPrice}, Size: ${size}, Side: ${position.side}`);
-        console.log(`   PnL calculado: $${pnl.toFixed(4)}`);
+
       }
       
-      // Log para debug quando PnL é 0 mas deveria ter valor
-      if (pnl === 0 && notional > 0) {
-        console.log(`⚠️ [PNL_DEBUG] ${position.symbol}: PnL zero detectado`);
-        console.log(`   Campos disponíveis:`, {
-          unrealizedPnl: position.unrealizedPnl,
-          pnlUnrealized: position.pnlUnrealized,
-          pnl: position.pnl,
-          pnlRealized: position.pnlRealized,
-          entryPrice: position.entryPrice,
-          markPrice: position.markPrice,
-          size: position.size,
-          side: position.side,
-          notional: notional
-        });
-      }
+
       
       if (notional <= 0) {
         return { pnl: 0, pnlPct: 0 };
       }
       
-      const pnlPct = (pnl / notional) * 100;
+      // Para posições com alavancagem, usar o valor da margem em vez do notional
+      const margin = parseFloat(position.margin || 0);
+      const leverage = parseFloat(position.leverage || 1);
+      
+
+      
+      // Calcula PnL baseado na margem real (mesma base da interface)
+      let pnlPct;
+      
+      // Calcula PnL baseado na margem real (mesma base da interface)
+      const marginReal = notional / leverage;
+      const netCost = Math.abs(parseFloat(position.netCost || 0));
+      
+      // Calcula PnL baseado no valor real investido (netCost)
+      if (netCost > 0) {
+        pnlPct = (pnl / netCost) * 100;
+      } else if (marginReal > 0) {
+        pnlPct = (pnl / marginReal) * 100;
+      } else {
+        pnlPct = (pnl / notional) * 100;
+      }
       
       return {
         pnl: pnl,
@@ -297,12 +303,14 @@ class TrailingStop {
       for (const position of positions) {
         // Verifica se deve fechar por profit mínimo baseado nas taxas (prioridade 1)
         if (await this.shouldCloseForMinimumProfit(position, Account)) {
+          console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
           await OrderController.forceClose(position);
           continue;
         }
 
         // Verifica se deve fechar por profit mínimo configurado (prioridade 2)
         if (await this.shouldCloseForConfiguredProfit(position, Account)) {
+          console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por profit mínimo configurado`);
           await OrderController.forceClose(position);
           continue;
         }
@@ -319,11 +327,13 @@ class TrailingStop {
         const decision = this.stopLossStrategy.shouldClosePosition(position, Account);
         
         if (decision && decision.shouldClose) {
+          console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por stop loss normal`);
           await OrderController.forceClose(position);
           continue;
         }
 
         if (decision && decision.shouldTakePartialProfit) {
+          console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Tomando profit parcial`);
           await OrderController.takePartialProfit(position, decision.partialPercentage);
           continue;
         }

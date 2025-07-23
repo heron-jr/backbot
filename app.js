@@ -27,6 +27,13 @@ let trailingStopMaxInterval = 10000; // máximo 10s
 let trailingStopMinInterval = 500;   // mínimo 0.5s
 let trailingStopLastErrorTime = null;
 
+// Inicializa o TrailingStop com a estratégia correta
+function initializeTrailingStop() {
+  const strategyType = process.env.TRADING_STRATEGY || 'DEFAULT';
+  console.log(`🔧 [APP_INIT] Inicializando TrailingStop com estratégia: ${strategyType}`);
+  TrailingStop.reinitializeStopLoss(strategyType);
+}
+
 // Função para exibir timer geral unificado
 function showGlobalTimer() {
   if (globalTimerInterval) {
@@ -384,6 +391,9 @@ async function startBot() {
       
       // Inicializa a estratégia selecionada
       initializeDecisionStrategy(selectedStrategy);
+      
+      // Inicializa o TrailingStop com a estratégia correta
+      initializeTrailingStop();
       
       // Log da estratégia selecionada
       console.log('🔑 Estratégia VOLUMES: usando credenciais da CONTA1');
