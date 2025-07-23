@@ -45,6 +45,10 @@ class OrderController {
    * @param {string} accountId - ID da conta para monitorar
    */
   static async monitorPendingEntryOrders(accountId = 'DEFAULT') {
+    // Só executa para contas PRO_MAX
+    if (accountId !== 'CONTA2' && !accountId.includes('PRO_MAX')) {
+      return;
+    }
     try {
       // Define as variáveis de ambiente corretas baseado no accountId
       if (accountId === 'CONTA2') {
@@ -97,6 +101,20 @@ class OrderController {
         const position = positions.find(p => p.symbol === market && Math.abs(Number(p.netQuantity)) > 0);
         
         if (position) {
+          // Log detalhado de taxa total e PnL atual
+          const Account = await AccountController.get();
+          const marketInfo = Account.markets.find(m => m.symbol === market);
+          const fee = marketInfo.fee || process.env.FEE || 0.0004;
+          const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+          const currentPrice = parseFloat(position.markPrice);
+          const quantity = Math.abs(Number(position.netQuantity));
+          const orderValue = entryPrice * quantity;
+          const exitValue = currentPrice * quantity;
+          const entryFee = orderValue * fee;
+          const exitFee = exitValue * fee;
+          const totalFee = entryFee + exitFee;
+          const pnlAtual = (currentPrice - entryPrice) * (parseFloat(position.netQuantity));
+          console.log(`[MONITOR][${accountId}] ${market} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} | PnL atual: $${pnlAtual.toFixed(6)}`);
           // Posição foi aberta, delega para método dedicado
           await OrderController.handlePositionOpenedForProMax(market, position, orderData, accountId);
           OrderController.removePendingEntryOrder(market, accountId);
@@ -146,6 +164,23 @@ class OrderController {
       if (positions.length === 0) {
         return;
       }
+      // Logar todas as posições abertas (monitoradas ou não)
+      for (const position of positions) {
+        const Account = await AccountController.get();
+        const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+        const fee = marketInfo.fee || process.env.FEE || 0.0004;
+        const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+        const currentPrice = parseFloat(position.markPrice);
+        const quantity = Math.abs(Number(position.netQuantity));
+        const orderValue = entryPrice * quantity;
+        const exitValue = currentPrice * quantity;
+        const entryFee = orderValue * fee;
+        const exitFee = exitValue * fee;
+        const totalFee = entryFee + exitFee;
+        const pnlAtual = (currentPrice - entryPrice) * (parseFloat(position.netQuantity));
+        const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
+        console.log(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnlAtual.toFixed(6)}`);
+      }
       
       // Verifica se há posições que não estão sendo monitoradas
       const accountOrders = OrderController.pendingEntryOrdersByAccount[accountId] || {};
@@ -184,6 +219,10 @@ class OrderController {
    * Lógica dedicada para tratar a criação dos Take Profits após execução da ordem PRO_MAX
    */
   static async handlePositionOpenedForProMax(market, position, orderData, accountId) {
+    // Só executa para contas PRO_MAX
+    if (accountId !== 'CONTA2' && !accountId.includes('PRO_MAX')) {
+      return;
+    }
     try {
       // Busca informações do mercado
       const Account = await AccountController.get();
@@ -347,6 +386,10 @@ class OrderController {
    * Força a criação de alvos para posições já abertas que não foram monitoradas
    */
   static async forceCreateTargetsForExistingPosition(position, accountId) {
+    // Só executa para contas PRO_MAX
+    if (accountId !== 'CONTA2' && !accountId.includes('PRO_MAX')) {
+      return;
+    }
     try {
       // Define as variáveis de ambiente corretas baseado no accountId
       if (accountId === 'CONTA2') {
@@ -650,7 +693,13 @@ class OrderController {
 
     // Fecha a posição
     const closeResult = await Order.executeOrder(body);
-    
+    // Log detalhado da taxa de fechamento
+    const fee = market.fee || process.env.FEE || 0.0004;
+    // Tente obter o preço de execução real
+    let closePrice = closeResult?.price || position.markPrice || position.entryPrice;
+    const exitValue = parseFloat(body.quantity) * parseFloat(closePrice);
+    const exitFee = exitValue * fee;
+    console.log(`[LOG][FEE] Fechamento: ${position.symbol} | Valor: $${exitValue.toFixed(2)} | Fee saída: $${exitFee.toFixed(6)} (${(fee * 100).toFixed(4)}%)`);
     // Cancela ordens pendentes para este símbolo
     if (closeResult) {
       await this.cancelPendingOrders(position.symbol);
@@ -712,6 +761,14 @@ class OrderController {
     const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
     const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
     const entryPrice = parseFloat(entry);
+    
+    // VALIDAÇÃO: MAX_OPEN_TRADES - Controla quantidade máxima de posições abertas
+    const maxTradesValidation = await this.constructor.validateMaxOpenTrades(accountId);
+    if (!maxTradesValidation.isValid) {
+      console.warn(`🚫 [${accountId}] ${market} ignorado - ${maxTradesValidation.message}`);
+      return false;
+    }
+    
     // Obtém informações da conta e mercado
     const marketInfo = await AccountController.get();
     if (!marketInfo) {
@@ -719,67 +776,58 @@ class OrderController {
       return false;
     }
     const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
-    const tickSize = currentMarket?.tickSize || 0.0001;
     
-    // CORREÇÃO: Calcula o valor real da operação considerando a alavancagem
+    // CORREÇÃO: O volume é o valor da posição (order value), não a margem
+    const orderValue = volume; // volume já é o valor da posição desejada
     const leverage = marketInfo.leverage;
-    const actualVolume = volume * leverage; // Valor real da operação = margem * alavancagem
-    
-    console.log(`💰 [${accountId}] ${market}: Margem: $${volume.toFixed(2)}, Alavancagem: ${leverage}x, Valor da operação: $${actualVolume.toFixed(2)}`);
-    
+    const marginRequired = orderValue / leverage;
+
+    console.log(`💰 [${accountId}] ${market}: Valor da operação: $${orderValue.toFixed(2)}, Alavancagem: ${leverage}x, Margem necessária: $${marginRequired.toFixed(2)}`);
+
     // Validação de margem antes de tentar abrir a ordem
-    const marginValidation = await this.validateMargin(market, volume, marketInfo);
+    const marginValidation = await this.validateMargin(market, marginRequired, marketInfo);
     if (!marginValidation.isValid) {
       console.warn(`⚠️ [${accountId}] MARGEM INSUFICIENTE: ${market} - ${marginValidation.message}`);
       return false;
     }
-    // Obtém o preço atual do mercado para usar como referência
+
+    // Quantidade baseada no valor da posição e preço de entrada
     const markPrices = await Markets.getAllMarkPrices(market);
     const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
-    
-    // Para ordens limit, usa o preço exato que foi passado
-    // Para ordens de mercado automáticas, ajusta o preço para evitar rejeições
+    const tickSize = currentMarket?.tickSize || 0.0001;
     let finalPrice;
     let quantity;
-    
+
     // Verifica se é uma ordem manual (preço específico) ou automática (baseada no mercado)
     const isManualOrder = entryPrice > 0 && Math.abs(entryPrice - currentMarketPrice) > (tickSize * 10);
-    
+
     if (isManualOrder) {
-      // Ordem manual: usa o preço exato que o usuário digitou
       finalPrice = formatPrice(entryPrice);
-      quantity = formatQuantity(Math.floor((actualVolume / entryPrice) / stepSize_quantity) * stepSize_quantity);
+      quantity = formatQuantity(Math.floor((orderValue / entryPrice) / stepSize_quantity) * stepSize_quantity);
       console.log(`💰 [${accountId}] ${market}: Ordem MANUAL - Preço exato: ${entryPrice.toFixed(6)}`);
     } else {
       // Ordem automática: ajusta o preço para evitar rejeições
       const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
-      
-      // Ajusta o multiplicador baseado na volatilidade e no ativo específico
-      let tickMultiplier = 50; // Base
-      
-      // Multiplicadores específicos para ativos de alta volatilidade
+      let tickMultiplier = 50;
       if (market === 'BTC_USDC_PERP') {
-        tickMultiplier = 150; // BTC precisa de margem muito maior
+        tickMultiplier = 150;
       } else if (market === 'ETH_USDC_PERP') {
-        tickMultiplier = 100; // ETH também precisa de margem maior
+        tickMultiplier = 100;
       } else if (priceDiff < 0.001) {
-        tickMultiplier = 80; // Para outros ativos com baixa volatilidade
+        tickMultiplier = 80;
       } else if (priceDiff < 0.005) {
         tickMultiplier = 60;
       } else if (priceDiff < 0.01) {
         tickMultiplier = 40;
       }
-      
-      // Usa o preço de mercado atual como base para evitar rejeições
       let adjustedPrice;
       if (isLong) {
         adjustedPrice = currentMarketPrice - (tickSize * tickMultiplier);
       } else {
         adjustedPrice = currentMarketPrice + (tickSize * tickMultiplier);
       }
-      
       finalPrice = formatPrice(adjustedPrice);
-      quantity = formatQuantity(Math.floor((actualVolume / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
+      quantity = formatQuantity(Math.floor((orderValue / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
       console.log(`💰 [${accountId}] ${market}: Ordem AUTOMÁTICA - Preço ajustado: ${adjustedPrice.toFixed(6)} (original: ${entryPrice.toFixed(6)})`);
     }
     // Log do ajuste de preço
@@ -799,7 +847,7 @@ class OrderController {
     // Verifica se é estratégia PRO_MAX baseado no accountId ou configuração da conta
     const isProMaxStrategy = accountId.includes('PRO_MAX') || accountId === 'CONTA2';
     if (isProMaxStrategy) {
-      OrderController.addPendingEntryOrder(market, {
+      this.constructor.addPendingEntryOrder(market, {
         stop,
         isLong,
         decimal_quantity,
@@ -809,7 +857,7 @@ class OrderController {
       console.log(`📋 [${accountId}] ${market}: Ordem de entrada adicionada ao monitoramento (estratégia PRO_MAX)`);
     } else if (target !== undefined && !isNaN(parseFloat(target))) {
       // Fallback para target único (estratégia DEFAULT)
-      const takeProfitTriggerPrice = (Number(target) + Number(price)) / 2;
+      const takeProfitTriggerPrice = (Number(target) + Number(finalPrice)) / 2;
       body.takeProfitTriggerBy = "LastPrice";
       body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
       body.takeProfitLimitPrice = formatPrice(target);
@@ -825,6 +873,10 @@ class OrderController {
     }
     if(body.quantity > 0 && body.price > 0){
       const result = await Order.executeOrder(body);
+      // Log detalhado da taxa de abertura
+      const fee = marketInfo.fee || process.env.FEE || 0.0004; // 0.04% padrão se não definido
+      const entryFee = orderValue * fee;
+      console.log(`[LOG][FEE] Abertura: ${market} | Valor: $${orderValue.toFixed(2)} | Fee entrada: $${entryFee.toFixed(6)} (${(fee * 100).toFixed(4)}%)`);
       if (!result) {
         // Tenta com preço muito mais conservador para evitar "immediately match"
         let retryMultiplier = tickMultiplier + 50; // Base
@@ -1174,6 +1226,62 @@ class OrderController {
     }
   }
 
+  /**
+   * Valida se o limite de posições abertas foi atingido
+   * @param {string} accountId - ID da conta para logs
+   * @returns {object} - { isValid: boolean, message: string, currentCount: number, maxCount: number }
+   */
+  static async validateMaxOpenTrades(accountId = 'DEFAULT') {
+    try {
+      const positions = await Futures.getOpenPositions();
+      const maxOpenTrades = Number(process.env.MAX_OPEN_TRADES || 5);
+      const currentOpenPositions = positions.filter(p => Math.abs(Number(p.netQuantity)) > 0).length;
+      
+      if (currentOpenPositions >= maxOpenTrades) {
+        return {
+          isValid: false,
+          message: `🚫 MAX_OPEN_TRADES atingido: ${currentOpenPositions}/${maxOpenTrades} posições abertas`,
+          currentCount: currentOpenPositions,
+          maxCount: maxOpenTrades
+        };
+      }
+      
+      return {
+        isValid: true,
+        message: `✅ Posições abertas: ${currentOpenPositions}/${maxOpenTrades}`,
+        currentCount: currentOpenPositions,
+        maxCount: maxOpenTrades
+      };
+    } catch (error) {
+      console.error(`❌ [${accountId}] Erro ao validar MAX_OPEN_TRADES:`, error.message);
+      return {
+        isValid: false,
+        message: `Erro ao validar MAX_OPEN_TRADES: ${error.message}`,
+        currentCount: 0,
+        maxCount: 0
+      };
+    }
+  }
+
+}
+
+// Função utilitária para decidir fechamento seguro
+function shouldCloseByProfitOrFees(entryPrice, currentPrice, quantity, fee, minProfitPct) {
+  const entryValue = entryPrice * quantity;
+  const currentValue = currentPrice * quantity;
+  let pnl = currentValue - entryValue;
+  const entryFee = entryValue * fee;
+  const exitFee = currentValue * fee;
+  const totalFees = entryFee + exitFee;
+  const netProfit = pnl - totalFees;
+  const netProfitPct = entryValue > 0 ? (netProfit / entryValue) * 100 : 0;
+  if (minProfitPct === 0) {
+    // Só fecha se lucro líquido >= taxas totais
+    return netProfit > 0 && netProfit >= totalFees;
+  } else {
+    // Fecha se lucro percentual >= mínimo configurado
+    return netProfit > 0 && netProfitPct >= minProfitPct;
+  }
 }
 
 export default new OrderController();

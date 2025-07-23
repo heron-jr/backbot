@@ -53,7 +53,7 @@ async function optimizeTimeframe() {
     {
       type: 'confirm',
       name: 'includeAllTimeframes',
-      message: 'Testar todos os timeframes disponíveis? (1m, 5m, 15m, 1h, 4h, 1d)',
+      message: 'Testar todos os timeframes disponíveis? (1m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w)',
       default: false
     },
     {
@@ -61,22 +61,55 @@ async function optimizeTimeframe() {
       name: 'selectedTimeframes',
       message: 'Selecione os timeframes para testar:',
       choices: [
-        { name: '1 minuto (1m) - Muito agressivo', value: '1m' },
-        { name: '5 minutos (5m) - Agressivo', value: '5m' },
-        { name: '15 minutos (15m) - Moderado', value: '15m' },
-        { name: '1 hora (1h) - Conservador', value: '1h' },
-        { name: '4 horas (4h) - Muito conservador', value: '4h' },
-        { name: '1 dia (1d) - Extremamente conservador', value: '1d' }
+        // Hold de Longo TF
+        new inquirer.Separator('📈 HOLD DE LONGO TF'),
+        { name: '3 Dias (3d) - Hold de Longo TF', value: '3d' },
+        { name: '1 Dia (1d) - Hold de Longo TF', value: '1d' },
+        { name: '1 Semana (1w) - Hold de Longo TF', value: '1w' },
+        
+        // Hold de Médio TF
+        new inquirer.Separator('📊 HOLD DE MÉDIO TF'),
+        { name: '12 Horas (12h) - Hold de Médio TF', value: '12h' },
+        { name: '8 Horas (8h) - Hold de Médio TF', value: '8h' },
+        { name: '6 Horas (6h) - Hold de Médio TF', value: '6h' },
+        { name: '4 Horas (4h) - Hold de Médio TF', value: '4h' },
+        
+        // Swing Trade TF
+        new inquirer.Separator('🔄 SWING TRADE TF'),
+        { name: '6 Horas (6h) - Swing Trade', value: '6h' },
+        { name: '4 Horas (4h) - Swing Trade', value: '4h' },
+        
+        // Day Trade
+        new inquirer.Separator('📅 DAY TRADE'),
+        { name: '2 Horas (2h) - Day Trade', value: '2h' },
+        { name: '1 Hora (1h) - Day Trade', value: '1h' },
+        
+        // Day Trade Volátil
+        new inquirer.Separator('⚡ DAY TRADE VOLÁTIL'),
+        { name: '1 Hora (1h) - Day Trade Volátil', value: '1h' },
+        
+        // Scalp Trade
+        new inquirer.Separator('🎯 SCALP TRADE'),
+        { name: '30 Minutos (30m) - Scalp Trade', value: '30m' },
+        
+        // Super Scalp Trade
+        new inquirer.Separator('🚨 SUPER SCALP TRADE (EXPERIENTES)'),
+        { name: '15 Minutos (15m) - Super Scalp', value: '15m' },
+        
+        // Micro Scalp
+        new inquirer.Separator('⚡ MICRO SCALP'),
+        { name: '5 Minutos (5m) - Micro Scalp', value: '5m' },
+        { name: '1 Minuto (1m) - Nano Scalp', value: '1m' }
       ],
       when: (answers) => !answers.includeAllTimeframes,
-      default: ['5m', '15m', '1h']
+      default: ['4h', '2h', '1h', '30m']
     }
   ]);
 
   // Define timeframes para testar
   let timeframesToTest;
   if (config.includeAllTimeframes) {
-    timeframesToTest = ['1m', '5m', '15m', '1h', '4h', '1d'];
+    timeframesToTest = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w'];
   } else {
     timeframesToTest = config.selectedTimeframes;
   }
@@ -225,27 +258,27 @@ async function optimizeTimeframe() {
   console.log('\n📈 ANÁLISE DE CARACTERÍSTICAS:');
   console.log('='.repeat(30));
 
-  const highFrequency = results.filter(r => ['1m', '5m'].includes(r.timeframe));
-  const mediumFrequency = results.filter(r => ['15m', '1h'].includes(r.timeframe));
-  const lowFrequency = results.filter(r => ['4h', '1d'].includes(r.timeframe));
+  const highFrequency = results.filter(r => ['1m', '5m', '15m', '30m'].includes(r.timeframe));
+  const mediumFrequency = results.filter(r => ['1h', '2h', '4h', '6h'].includes(r.timeframe));
+  const lowFrequency = results.filter(r => ['8h', '12h', '1d', '3d', '1w'].includes(r.timeframe));
 
   if (highFrequency.length > 0) {
     const avgHighFreq = highFrequency.reduce((sum, r) => sum + r.compositeScore, 0) / highFrequency.length;
-    console.log(`\n⚡ Alta Frequência (1m-5m): Score médio ${avgHighFreq.toFixed(2)}`);
+    console.log(`\n⚡ Alta Frequência (1m-30m): Score médio ${avgHighFreq.toFixed(2)}`);
     console.log(`   • Vantagens: Mais oportunidades, resposta rápida`);
     console.log(`   • Desvantagens: Mais ruído, taxas mais altas`);
   }
 
   if (mediumFrequency.length > 0) {
     const avgMediumFreq = mediumFrequency.reduce((sum, r) => sum + r.compositeScore, 0) / mediumFrequency.length;
-    console.log(`\n⚖️  Frequência Média (15m-1h): Score médio ${avgMediumFreq.toFixed(2)}`);
+    console.log(`\n⚖️  Frequência Média (1h-6h): Score médio ${avgMediumFreq.toFixed(2)}`);
     console.log(`   • Vantagens: Equilíbrio entre oportunidade e qualidade`);
     console.log(`   • Desvantagens: Menos trades, resposta mais lenta`);
   }
 
   if (lowFrequency.length > 0) {
     const avgLowFreq = lowFrequency.reduce((sum, r) => sum + r.compositeScore, 0) / lowFrequency.length;
-    console.log(`\n🐌 Baixa Frequência (4h-1d): Score médio ${avgLowFreq.toFixed(2)}`);
+    console.log(`\n🐌 Baixa Frequência (8h-1w): Score médio ${avgLowFreq.toFixed(2)}`);
     console.log(`   • Vantagens: Sinais mais confiáveis, menos taxas`);
     console.log(`   • Desvantagens: Poucas oportunidades, resposta muito lenta`);
   }

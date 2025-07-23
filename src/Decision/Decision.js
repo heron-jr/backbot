@@ -1,6 +1,6 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
 import Order from '../Backpack/Authenticated/Order.js';
-import OrderController from '../Controllers/OrderController.js';
+import OrderController, { OrderController as OrderControllerClass } from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import { calculateIndicators } from './Indicators.js';
@@ -426,6 +426,26 @@ class Decision {
     const positions = await Futures.getOpenPositions()
     const closed_markets = positions.map((el) => el.symbol)
 
+    // VALIDAÇÃO: MAX_OPEN_TRADES - Controla quantidade máxima de posições abertas
+    const maxTradesValidation = await OrderControllerClass.validateMaxOpenTrades();
+    if (!maxTradesValidation.isValid) {
+      const maxTradesMsg = maxTradesValidation.message;
+      if (logger) {
+        logger.warn(maxTradesMsg);
+      } else {
+        console.log(maxTradesMsg);
+      }
+      return;
+    } else {
+      // Log informativo do status das posições abertas
+      const statusMsg = maxTradesValidation.message;
+      if (logger) {
+        logger.info(statusMsg);
+      } else {
+        console.log(statusMsg);
+      }
+    }
+
     if(positions.length >= Number(Account.maxOpenOrders)){
       const maxOrdersMsg = `Maximum number of orders reached ${positions.length}`;
       if (logger) {
@@ -538,13 +558,15 @@ class Decision {
     if (!this.operationSummaryLogged) {
       const equityAvailable = Account.capitalAvailable / Account.leverage;
       const availableToTrade = Account.capitalAvailable;
+      const maxOpenTrades = Number(process.env.MAX_OPEN_TRADES || 5);
       
       const capitalExplanation = `\n💰 RESUMO DA OPERAÇÃO:
    • Capital Disponível: $${equityAvailable.toFixed(2)}
    • Alavancagem: ${Account.leverage}x
    • Disponível para Negociação: $${availableToTrade.toFixed(2)}
    • Volume por operação: $${investmentUSD.toFixed(2)}
-   • Máximo de ordens: ${Account.maxOpenOrders}`;
+   • Máximo de ordens: ${Account.maxOpenOrders} (LIMIT_ORDER)
+   • Máximo de posições abertas: ${maxOpenTrades} (MAX_OPEN_TRADES)`;
       
       if (logger) {
         logger.capital(capitalExplanation);
@@ -702,18 +724,18 @@ class Decision {
     // Monitoramento de ordens pendentes agora é feito a cada 5 segundos em app.js
     // para resposta mais rápida na criação de take profits
 
+    // Após toda a análise, logar monitoramento de todas as posições abertas
+    await OrderControllerClass.checkForUnmonitoredPositions('DEFAULT');
+
     } catch (error) {
       const errorMsg = `❌ Erro na análise: ${error.message}`;
       if (logger) {
         logger.error(errorMsg);
       } else {
-        console.log(error);
+        console.error(errorMsg);
       }
     }
-
-  } 
-
+  }
 }
 
-// Exporta a classe ao invés de uma instância
 export default Decision;

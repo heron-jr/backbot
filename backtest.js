@@ -9,6 +9,92 @@ import inquirer from 'inquirer';
 const logger = new ColorLogger('BACKTEST', 'CLI');
 
 /**
+ * Calcula o timeframe ACTION baseado no AMBIENT
+ * @param {string} ambientTimeframe - Timeframe AMBIENT
+ * @returns {string} - Timeframe ACTION
+ */
+function getActionTimeframe(ambientTimeframe) {
+  const timeframePairs = {
+    // Hold de Longo TF
+    '1w': '1d',    // Hold de Longo TF - 1 Semana → 1 Dia
+    '3d': '12h',   // Hold de Longo TF - 3 Dias → 12 Horas
+    '1d': '4h',    // Hold de Longo TF - 1 Dia → 4 Horas
+    
+    // Hold de Médio TF
+    '12h': '2h',   // Hold de Médio TF - 12 Horas → 2 Horas
+    '8h': '1h',    // Hold de Médio TF - 8 Horas → 1 Hora
+    '6h': '30m',   // Hold de Médio TF - 6 Horas → 30 Minutos
+    '4h': '20m',   // Hold de Médio TF - 4 Horas → 20 Minutos
+    
+    // Swing Trade TF
+    '6h': '30m',   // Swing Trade - 6 Horas → 30 Minutos
+    '4h': '20m',   // Swing Trade - 4 Horas → 20 Minutos
+    
+    // Day Trade
+    '2h': '10m',   // Day Trade - 2 Horas → 10 Minutos
+    '1h': '5m',    // Day Trade - 1 Hora → 5 Minutos
+    
+    // Day Trade Volátil
+    '1h': '5m',    // Day Trade Volátil - 1 Hora → 5 Minutos
+    
+    // Scalp Trade
+    '30m': '3m',   // Scalp Trade - 30 Minutos → 3 Minutos
+    
+    // Super Scalp Trade
+    '15m': '1m',   // Super Scalp Trade - 15 Minutos → 1 Minuto
+    
+    // Fallbacks para timeframes antigos
+    '5m': '1m',    // Micro Scalp
+    '1m': '1m'     // Nano Scalp
+  };
+  
+  return timeframePairs[ambientTimeframe] || '5m'; // Fallback para 5m
+}
+
+/**
+ * Obtém o tipo de trading baseado no timeframe AMBIENT
+ * @param {string} ambientTimeframe - Timeframe AMBIENT
+ * @returns {string} - Tipo de trading
+ */
+function getTradingType(ambientTimeframe) {
+  const tradingTypes = {
+    // Hold de Longo TF
+    '1w': 'Hold de Longo TF',
+    '3d': 'Hold de Longo TF',
+    '1d': 'Hold de Longo TF',
+    
+    // Hold de Médio TF
+    '12h': 'Hold de Médio TF',
+    '8h': 'Hold de Médio TF',
+    '6h': 'Hold de Médio TF',
+    '4h': 'Hold de Médio TF',
+    
+    // Swing Trade TF
+    '6h': 'Swing Trade TF',
+    '4h': 'Swing Trade TF',
+    
+    // Day Trade
+    '2h': 'Day Trade',
+    '1h': 'Day Trade',
+    
+    // Day Trade Volátil
+    '1h': 'Day Trade Volátil',
+    
+    // Scalp Trade
+    '30m': 'Scalp Trade',
+    
+    // Super Scalp Trade
+    '15m': 'Super Scalp Trade (EXPERIENTES)',
+    
+    // Fallbacks
+    '5m': 'Micro Scalp',
+    '1m': 'Nano Scalp'
+  };
+  
+  return tradingTypes[ambientTimeframe] || 'Trading';
+}
+
+/**
  * Menu principal do backtest
  */
 async function showMainMenu() {
@@ -43,16 +129,22 @@ async function runRealBacktest() {
   logger.info('\n📊 CONFIGURAÇÃO DO BACKTEST COM DADOS REAIS');
   logger.info('-'.repeat(40));
   
-  const config = await inquirer.prompt([
+  // Primeiro, perguntar a estratégia para determinar se precisa do investimento por trade
+  const strategyChoice = await inquirer.prompt([
     {
       type: 'list',
       name: 'strategy',
       message: 'Escolha a estratégia:',
       choices: [
         { name: 'DEFAULT - Farm de Volume', value: 'DEFAULT' },
-        { name: 'PRO_MAX - Estratégia Avançada', value: 'PRO_MAX' }
+        { name: 'PRO_MAX - Estratégia Avançada', value: 'PRO_MAX' },
+        { name: 'CYPHERPUNK - Sistema AMBIENT + ACTION', value: 'CYPHERPUNK' }
       ]
-    },
+    }
+  ]);
+
+  // Configurações base
+  const baseConfig = await inquirer.prompt([
     {
       type: 'input',
       name: 'symbols',
@@ -78,16 +170,43 @@ async function runRealBacktest() {
     {
       type: 'list',
       name: 'interval',
-      message: 'Intervalo dos candles:',
+      message: 'Intervalo dos candles (AMBIENT):',
       choices: [
-        { name: '1 hora (recomendado)', value: '1h' },
-        { name: '4 horas', value: '4h' },
-        { name: '1 dia', value: '1d' },
-        { name: '15 minutos', value: '15m' },
-        { name: '5 minutos', value: '5m' },
-        { name: '1 minuto', value: '1m' }
+        // Hold de Longo TF
+        new inquirer.Separator('📈 HOLD DE LONGO TF'),
+        { name: '3 Dias (Recomendado)', value: '3d' },
+        { name: '1 Dia', value: '1d' },
+        { name: '1 Semana', value: '1w' },
+        
+        // Hold de Médio TF
+        new inquirer.Separator('📊 HOLD DE MÉDIO TF'),
+        { name: '8 Horas (Recomendado)', value: '8h' },
+        { name: '12 Horas (Recomendado)', value: '12h' },
+        { name: '4 Horas', value: '4h' },
+        
+        // Swing Trade TF
+        new inquirer.Separator('🔄 SWING TRADE TF'),
+        { name: '4 Horas (Recomendado)', value: '4h' },
+        { name: '6 Horas', value: '6h' },
+        
+        // Day Trade
+        new inquirer.Separator('📅 DAY TRADE'),
+        { name: '2 Horas (Recomendado)', value: '2h' },
+        { name: '1 Hora', value: '1h' },
+        
+        // Day Trade Volátil
+        new inquirer.Separator('⚡ DAY TRADE VOLÁTIL'),
+        { name: '1 Hora (Recomendado)', value: '1h' },
+        
+        // Scalp Trade
+        new inquirer.Separator('🎯 SCALP TRADE'),
+        { name: '30 Minutos (Recomendado)', value: '30m' },
+        
+        // Super Scalp Trade
+        new inquirer.Separator('🚨 SUPER SCALP TRADE (EXPERIENTES)'),
+        { name: '15 Minutos (MUITO CUIDADO)', value: '15m' }
       ],
-      default: '1h'
+      default: '4h'
     },
     {
       type: 'number',
@@ -95,14 +214,37 @@ async function runRealBacktest() {
       message: 'Saldo inicial (USD):',
       default: 1000,
       validate: (value) => value > 0 ? true : 'Saldo deve ser maior que zero'
-    },
-    {
-      type: 'number',
-      name: 'investmentPerTrade',
-      message: 'Investimento por trade (USD):',
-      default: 100,
-      validate: (value) => value > 0 ? true : 'Investimento deve ser maior que zero'
-    },
+    }
+  ]);
+
+  // Perguntar investimento por trade apenas para estratégias que não gerenciam isso internamente
+  let investmentPerTrade = null;
+  if (strategyChoice.strategy !== 'CYPHERPUNK') {
+    const investmentConfig = await inquirer.prompt([
+      {
+        type: 'number',
+        name: 'investmentPerTrade',
+        message: 'Investimento por trade (USD):',
+        default: 100,
+        validate: (value) => value > 0 ? true : 'Investimento deve ser maior que zero'
+      }
+    ]);
+    investmentPerTrade = investmentConfig.investmentPerTrade;
+  } else {
+    // Para CypherPunk, usar 10% do saldo inicial como padrão (será gerenciado pela estratégia)
+    investmentPerTrade = Math.round(baseConfig.initialBalance * 0.1);
+    logger.info(`💰 CypherPunk: Usando ${investmentPerTrade} USD por trade (10% do saldo - gerenciado pela estratégia)`);
+  }
+
+  // Configuração final
+  const config = {
+    ...strategyChoice,
+    ...baseConfig,
+    investmentPerTrade
+  };
+
+  // Configurações adicionais
+  const additionalConfig = await inquirer.prompt([
     {
       type: 'confirm',
       name: 'saveResults',
@@ -110,6 +252,8 @@ async function runRealBacktest() {
       default: true
     }
   ]);
+
+  Object.assign(config, additionalConfig);
   
   // Configurações adicionais para dados reais
   config.useSyntheticData = false; // SEMPRE dados reais
@@ -131,6 +275,24 @@ async function runRealBacktest() {
       useMacdValidation: 'true',
       ignoreBronzeSignals: 'false'
     };
+  } else if (config.strategy === 'CYPHERPUNK') {
+    config.strategyConfig = {
+      // Trade System CypherPunk
+      targets: 3, // 3 pontos de entrada
+      stopLossPercentage: 2, // 2% stop loss
+      takeProfitPercentage: 10, // 10% take profit
+      // Sistema AMBIENT + ACTION
+      ambientTimeframe: config.interval, // Usa o timeframe selecionado como AMBIENT
+      actionTimeframe: getActionTimeframe(config.interval), // Calcula ACTION automaticamente
+      // Configurações dos indicadores
+      vwapThreshold: 0.5, // Sensibilidade VWAP
+      momentumThreshold: 0.3, // Sensibilidade MOMENTUM
+      moneyFlowThreshold: 0.7, // Sensibilidade MONEY FLOW (mais importante)
+      // Filtros
+      enableDivergence: true,
+      enableExhaustionLines: true,
+      minDays: 10 // Mínimo de dias para análise
+    };
   }
   
   try {
@@ -138,6 +300,27 @@ async function runRealBacktest() {
     logger.info(`📅 Período: ${config.days} dias`);
     logger.info(`📊 Símbolos: ${config.symbols.join(', ')}`);
     logger.info(`⏱️ Intervalo: ${config.interval}`);
+    
+    // Informações específicas do CypherPunk
+    if (config.strategy === 'CYPHERPUNK') {
+      const tradingType = getTradingType(config.interval);
+      logger.info(`🎯 Estratégia: CYPHERPUNK - Sistema AMBIENT + ACTION`);
+      logger.info(`📈 Tipo: ${tradingType}`);
+      logger.info(`🌍 AMBIENT: ${config.interval} (Visão MACRO)`);
+      logger.info(`⚡ ACTION: ${config.strategyConfig.actionTimeframe} (Pontos de Entrada)`);
+      logger.info(`📊 Trade System: 3 entradas, 10% lucro, 2% stop loss`);
+      logger.info(`🔍 Análise: VWAP → MOMENTUM → MONEY FLOW (ordem obrigatória)`);
+      
+      // Avisos específicos para timeframes de alto risco
+      if (config.interval === '15m') {
+        logger.warn('🚨 ATENÇÃO: Super Scalp Trade - APENAS para traders EXPERIENTES!');
+        logger.warn('   Alto risco - Requer conhecimento profundo do CypherPunk');
+      } else if (config.interval === '30m') {
+        logger.info('🎯 Scalp Trade - Requer atenção constante');
+      } else if (config.interval === '1h') {
+        logger.info('⚡ Day Trade Volátil - Mercados em movimento');
+      }
+    }
     
     const runner = new BacktestRunner();
     await runner.runBacktest(config);
@@ -206,14 +389,43 @@ async function runComparativeBacktest() {
     {
       type: 'list',
       name: 'interval',
-      message: 'Intervalo dos candles:',
+      message: 'Intervalo dos candles (AMBIENT):',
       choices: [
-        { name: '1 hora (recomendado)', value: '1h' },
-        { name: '4 horas', value: '4h' },
-        { name: '1 dia', value: '1d' },
-        { name: '15 minutos', value: '15m' }
+        // Hold de Longo TF
+        new inquirer.Separator('📈 HOLD DE LONGO TF'),
+        { name: '3 Dias (Recomendado)', value: '3d' },
+        { name: '1 Dia', value: '1d' },
+        { name: '1 Semana', value: '1w' },
+        
+        // Hold de Médio TF
+        new inquirer.Separator('📊 HOLD DE MÉDIO TF'),
+        { name: '8 Horas (Recomendado)', value: '8h' },
+        { name: '12 Horas (Recomendado)', value: '12h' },
+        { name: '4 Horas', value: '4h' },
+        
+        // Swing Trade TF
+        new inquirer.Separator('🔄 SWING TRADE TF'),
+        { name: '4 Horas (Recomendado)', value: '4h' },
+        { name: '6 Horas', value: '6h' },
+        
+        // Day Trade
+        new inquirer.Separator('📅 DAY TRADE'),
+        { name: '2 Horas (Recomendado)', value: '2h' },
+        { name: '1 Hora', value: '1h' },
+        
+        // Day Trade Volátil
+        new inquirer.Separator('⚡ DAY TRADE VOLÁTIL'),
+        { name: '1 Hora (Recomendado)', value: '1h' },
+        
+        // Scalp Trade
+        new inquirer.Separator('🎯 SCALP TRADE'),
+        { name: '30 Minutos (Recomendado)', value: '30m' },
+        
+        // Super Scalp Trade
+        new inquirer.Separator('🚨 SUPER SCALP TRADE (EXPERIENTES)'),
+        { name: '15 Minutos (MUITO CUIDADO)', value: '15m' }
       ],
-      default: '1h'
+      default: '4h'
     },
     {
       type: 'number',
@@ -221,13 +433,6 @@ async function runComparativeBacktest() {
       message: 'Saldo inicial (USD):',
       default: 1000,
       validate: (value) => value > 0 ? true : 'Saldo deve ser maior que zero'
-    },
-    {
-      type: 'number',
-      name: 'investmentPerTrade',
-      message: 'Investimento por trade (USD):',
-      default: 100,
-      validate: (value) => value > 0 ? true : 'Investimento deve ser maior que zero'
     }
   ]);
   
@@ -246,11 +451,13 @@ async function runComparativeBacktest() {
     {
       ...baseConfig,
       strategy: 'DEFAULT',
+      investmentPerTrade: Math.round(baseConfig.initialBalance * 0.1), // 10% do saldo
       strategyConfig: {}
     },
     {
       ...baseConfig,
       strategy: 'PRO_MAX',
+      investmentPerTrade: Math.round(baseConfig.initialBalance * 0.1), // 10% do saldo
       strategyConfig: {
         adxLength: 14,
         adxThreshold: 20,
@@ -260,6 +467,28 @@ async function runComparativeBacktest() {
         useMacdValidation: 'true',
         ignoreBronzeSignals: 'false'
       }
+    },
+    {
+      ...baseConfig,
+      strategy: 'CYPHERPUNK',
+      investmentPerTrade: Math.round(baseConfig.initialBalance * 0.1), // 10% do saldo (gerenciado pela estratégia)
+      strategyConfig: {
+        // Trade System CypherPunk
+        targets: 3, // 3 pontos de entrada
+        stopLossPercentage: 2, // 2% stop loss
+        takeProfitPercentage: 10, // 10% take profit
+        // Sistema AMBIENT + ACTION
+        ambientTimeframe: baseConfig.interval, // Usa o timeframe selecionado como AMBIENT
+        actionTimeframe: getActionTimeframe(baseConfig.interval), // Calcula ACTION automaticamente
+        // Configurações dos indicadores
+        vwapThreshold: 0.5, // Sensibilidade VWAP
+        momentumThreshold: 0.3, // Sensibilidade MOMENTUM
+        moneyFlowThreshold: 0.7, // Sensibilidade MONEY FLOW (mais importante)
+        // Filtros
+        enableDivergence: true,
+        enableExhaustionLines: true,
+        minDays: 10 // Mínimo de dias para análise
+      }
     }
   ];
   
@@ -267,6 +496,10 @@ async function runComparativeBacktest() {
     logger.info('\n🚀 Iniciando backtest comparativo com dados REAIS...');
     logger.info(`📅 Período: ${baseConfig.days} dias`);
     logger.info(`📊 Símbolos: ${baseConfig.symbols.join(', ')}`);
+    logger.info(`⏱️ Intervalo: ${baseConfig.interval}`);
+    logger.info(`💰 Saldo inicial: $${baseConfig.initialBalance}`);
+    logger.info(`📈 Estratégias: DEFAULT, PRO_MAX, CYPHERPUNK`);
+    logger.info(`💡 Investimento por trade: 10% do saldo (${Math.round(baseConfig.initialBalance * 0.1)} USD)`);
     
     const runner = new BacktestRunner();
     await runner.runComparativeBacktest(configs);
@@ -350,17 +583,45 @@ async function showLiquidSymbols() {
       const topSymbols = symbols.slice(0, 5); // Top 5 mais líquidos
       logger.info(`\n🎯 Usando top 5 símbolos: ${topSymbols.join(', ')}`);
       
-      // Executa backtest com símbolos líquidos
-      const config = {
-        strategy: 'DEFAULT',
+      // Perguntar estratégia para determinar investimento por trade
+      const strategyChoice = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'strategy',
+          message: 'Escolha a estratégia para o teste:',
+          choices: [
+            { name: 'DEFAULT - Farm de Volume', value: 'DEFAULT' },
+            { name: 'PRO_MAX - Estratégia Avançada', value: 'PRO_MAX' },
+            { name: 'CYPHERPUNK - Sistema AMBIENT + ACTION', value: 'CYPHERPUNK' }
+          ]
+        }
+      ]);
+
+      // Configuração base
+      const baseConfig = {
+        strategy: strategyChoice.strategy,
         symbols: topSymbols,
         days: 90,
         interval: '1h',
         initialBalance: 1000,
-        investmentPerTrade: 100,
         useSyntheticData: false,
         allowSyntheticFallback: false,
         saveResults: true
+      };
+
+      // Determinar investimento por trade
+      let investmentPerTrade;
+      if (strategyChoice.strategy === 'CYPHERPUNK') {
+        investmentPerTrade = Math.round(baseConfig.initialBalance * 0.1);
+        logger.info(`💰 CypherPunk: Usando ${investmentPerTrade} USD por trade (10% do saldo - gerenciado pela estratégia)`);
+      } else {
+        investmentPerTrade = 100; // Valor padrão para outras estratégias
+      }
+
+      // Configuração final
+      const config = {
+        ...baseConfig,
+        investmentPerTrade
       };
       
       const runner = new BacktestRunner();

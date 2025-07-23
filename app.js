@@ -396,6 +396,10 @@ async function startBot() {
       startDecision();
       startStops();
       startPendingOrdersMonitor();
+      // Monitoramento em tempo real das posições abertas a cada 5 segundos
+      setInterval(() => {
+        OrderController.checkForUnmonitoredPositions('DEFAULT');
+      }, 5000);
     }
 
   } catch (error) {

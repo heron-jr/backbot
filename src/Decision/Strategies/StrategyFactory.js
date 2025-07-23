@@ -1,10 +1,11 @@
 import { DefaultStrategy } from './DefaultStrategy.js';
 import { ProMaxStrategy } from './ProMaxStrategy.js';
+import { CypherPunkStrategy } from './CypherPunkStrategy.js';
 
 export class StrategyFactory {
   /**
    * Cria uma instância da estratégia baseada no tipo especificado
-   * @param {string} strategyType - Tipo da estratégia ('DEFAULT', 'PRO_MAX')
+   * @param {string} strategyType - Tipo da estratégia ('DEFAULT', 'PRO_MAX', 'CYPHERPUNK')
    * @returns {BaseStrategy} - Instância da estratégia
    */
   static createStrategy(strategyType) {
@@ -20,6 +21,9 @@ export class StrategyFactory {
           case 'PRO_MAX':
       console.log(`✅ StrategyFactory: Criando estratégia PRO_MAX`);
       return new ProMaxStrategy();
+      case 'CYPHERPUNK':
+        console.log(`✅ StrategyFactory: Criando estratégia CYPHERPUNK`);
+        return new CypherPunkStrategy();
       default:
         console.log(`⚠️ Estratégia "${strategy}" não encontrada, usando DEFAULT`);
         return new DefaultStrategy();
@@ -31,7 +35,7 @@ export class StrategyFactory {
    * @returns {string[]} - Array com nomes das estratégias
    */
   static getAvailableStrategies() {
-    return ['DEFAULT', 'PRO_MAX'];
+    return ['DEFAULT', 'PRO_MAX', 'CYPHERPUNK'];
   }
 
   /**

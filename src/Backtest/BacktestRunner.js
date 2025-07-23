@@ -70,7 +70,7 @@ export class BacktestRunner {
     }
     
     // Valida estratégia
-    const validStrategies = ['DEFAULT', 'PRO_MAX'];
+    const validStrategies = ['DEFAULT', 'PRO_MAX', 'CYPHERPUNK'];
     if (!validStrategies.includes(config.strategy)) {
       throw new Error(`Estratégia inválida: ${config.strategy}. Válidas: ${validStrategies.join(', ')}`);
     }
