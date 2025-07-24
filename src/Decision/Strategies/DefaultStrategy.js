@@ -119,6 +119,7 @@ export class DefaultStrategy extends BaseStrategy {
 
     // Validação dos indicadores essenciais (mais flexível para indicadores opcionais)
     const hasEssentialIndicators = rsi?.value !== null && rsi?.value !== undefined;
+    const hasMomentum = data.momentum?.rsi !== null && data.momentum?.rsi !== undefined;
     const hasStoch = stoch?.k !== null && stoch?.k !== undefined && stoch?.d !== null && stoch?.d !== undefined;
     const hasMacd = macd?.MACD !== null && macd?.MACD !== undefined;
     const hasAdx = adx?.adx !== null && adx?.adx !== undefined && adx?.diPlus !== null && adx?.diPlus !== undefined && adx?.diMinus !== null && adx?.diMinus !== undefined;
@@ -133,6 +134,7 @@ export class DefaultStrategy extends BaseStrategy {
     // Log de indicadores opcionais faltando
     if (isBTCAnalysis) {
       const missingIndicators = [];
+      if (!hasMomentum) missingIndicators.push('Momentum');
       if (!hasStoch) missingIndicators.push('StochK/StochD');
       if (!hasMacd) missingIndicators.push('MACD');
       if (!hasAdx) missingIndicators.push('ADX/D+/D-');
@@ -147,33 +149,57 @@ export class DefaultStrategy extends BaseStrategy {
     let signalType = '';
     let analysisDetails = [];
 
-    // 1. RSI com validação de cruzamento
-    const rsiValue = rsi.value;
-    const rsiPrev = rsi.prev;
+    // 1. ANÁLISE DE MOMENTUM (RSI Avançado) - SUBSTITUI RSI SIMPLES
+    const momentum = data.momentum;
     
-    // RSI Sobrevendido para LONG (com validação de reversão)
-    if (rsiValue <= 30) {
-      // Verifica se RSI está subindo (reversão de sobrevendido)
-      if (rsiPrev !== null && rsiPrev !== undefined && rsiValue > rsiPrev) {
-        isLong = true;
-        signalType = 'RSI Sobrevendido + Reversão';
-        analysisDetails.push(`RSI: ${(rsiValue || 0).toFixed(1)} > ${(rsiPrev || 0).toFixed(1)} (sobrevendido + subindo)`);
-      } else {
-        analysisDetails.push(`RSI: ${(rsiValue || 0).toFixed(1)} (sobrevendido, mas não subindo)`);
+    if (momentum && momentum.rsi !== null && momentum.rsi !== undefined) {
+      const momentumRsi = momentum.rsi;
+      const momentumValue = momentum.momentumValue;
+      const isBullish = momentum.isBullish;
+      const isBearish = momentum.isBearish;
+      const reversal = momentum.reversal;
+      
+      // Log detalhado do Momentum para debug
+      if (isBTCAnalysis) {
+        console.log(`      • Momentum Debug: RSI=${(momentumRsi || 0).toFixed(1)}, Value=${(momentumValue || 0).toFixed(3)}, Bullish=${isBullish}, Bearish=${isBearish}, Reversal=${reversal?.type || 'NONE'}`);
       }
-    } 
-    // RSI Sobrecomprado para SHORT (com validação de reversão)
-    else if (rsiValue >= 70) {
-      // Verifica se RSI está caindo (reversão de sobrecomprado)
-      if (rsiPrev !== null && rsiPrev !== undefined && rsiValue < rsiPrev) {
+      
+      // SINAL DE LONG (Compra) - NOVA LÓGICA AVANÇADA
+      // Condição A (Cruzamento - Sinal Forte): momentum.reversal.type === 'GREEN'
+      // Condição B (Sobrevenda com Confirmação): momentum.rsi <= 30 && momentum.isBullish
+      if (reversal && reversal.type === 'GREEN') {
+        isLong = true;
+        signalType = 'Momentum Cruzamento GREEN';
+        analysisDetails.push(`Momentum: Cruzamento GREEN (RSI=${(momentumRsi || 0).toFixed(1)}, Value=${(momentumValue || 0).toFixed(3)}) - Sinal Forte`);
+      } else if (momentumRsi <= 30 && isBullish) {
+        isLong = true;
+        signalType = 'Momentum Sobrevenda + Confirmação';
+        analysisDetails.push(`Momentum: RSI=${(momentumRsi || 0).toFixed(1)} <= 30 + Bullish=${isBullish} (sobrevenda com confirmação)`);
+      } else if (momentumRsi <= 30) {
+        analysisDetails.push(`Momentum: RSI=${(momentumRsi || 0).toFixed(1)} <= 30 (sobrevenda, mas sem confirmação bullish)`);
+      }
+      
+      // SINAL DE SHORT (Venda) - NOVA LÓGICA AVANÇADA
+      // Condição A (Cruzamento - Sinal Forte): momentum.reversal.type === 'RED'
+      // Condição B (Sobrecompra com Confirmação): momentum.rsi >= 70 && momentum.isBearish
+      else if (reversal && reversal.type === 'RED') {
         isShort = true;
-        signalType = 'RSI Sobrecomprado + Reversão';
-        analysisDetails.push(`RSI: ${(rsiValue || 0).toFixed(1)} < ${(rsiPrev || 0).toFixed(1)} (sobrecomprado + caindo)`);
-      } else {
-        analysisDetails.push(`RSI: ${(rsiValue || 0).toFixed(1)} (sobrecomprado, mas não caindo)`);
+        signalType = 'Momentum Cruzamento RED';
+        analysisDetails.push(`Momentum: Cruzamento RED (RSI=${(momentumRsi || 0).toFixed(1)}, Value=${(momentumValue || 0).toFixed(3)}) - Sinal Forte`);
+      } else if (momentumRsi >= 70 && isBearish) {
+        isShort = true;
+        signalType = 'Momentum Sobrecompra + Confirmação';
+        analysisDetails.push(`Momentum: RSI=${(momentumRsi || 0).toFixed(1)} >= 70 + Bearish=${isBearish} (sobrecompra com confirmação)`);
+      } else if (momentumRsi >= 70) {
+        analysisDetails.push(`Momentum: RSI=${(momentumRsi || 0).toFixed(1)} >= 70 (sobrecompra, mas sem confirmação bearish)`);
+      }
+      
+      // CASO NEUTRO
+      else {
+        analysisDetails.push(`Momentum: RSI=${(momentumRsi || 0).toFixed(1)}, Value=${(momentumValue || 0).toFixed(3)} (neutro)`);
       }
     } else {
-      analysisDetails.push(`RSI: ${(rsiValue || 0).toFixed(1)} (neutro)`);
+      analysisDetails.push(`Momentum: Não disponível`);
     }
 
     // 2. Slow Stochastic com validação de cruzamentos (se disponível)
@@ -212,7 +238,7 @@ export class DefaultStrategy extends BaseStrategy {
         analysisDetails.push(`Stoch: K=${(stochK || 0).toFixed(1)}, D=${(stochD || 0).toFixed(1)} (neutro)`);
       }
     } else if (hasStoch) {
-      analysisDetails.push(`Stoch: K=${(stoch.k || 0).toFixed(1)}, D=${(stoch.d || 0).toFixed(1)} (já definido por RSI)`);
+      analysisDetails.push(`Stoch: K=${(stoch.k || 0).toFixed(1)}, D=${(stoch.d || 0).toFixed(1)} (já definido por Momentum)`);
     } else {
       analysisDetails.push(`Stoch: Não disponível`);
     }
