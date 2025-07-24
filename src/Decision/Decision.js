@@ -513,10 +513,27 @@ class Decision {
     // Otimiza o cálculo da média RSI
     const media_rsi = dataset.reduce((sum, row) => sum + row.rsi.value, 0) / dataset.length;
 
+    // Log de resumo das validações implementadas
+    const validationSummary = `\n🔍 RESUMO DAS VALIDAÇÕES IMPLEMENTADAS:
+   • 📊 Momentum (RSI Avançado): Primeira prioridade - Cruzamentos GREEN/RED + Sobrevenda/Sobrecompra
+   • 🎯 Stochastic: Segunda prioridade - Cruzamentos K/D em zonas extremas
+   • 📈 MACD: Terceira prioridade - Momentum e tendência (histograma + cruzamentos)
+   • 📊 ADX: Quarta prioridade - Força e direção da tendência
+   • 💰 Money Flow: Filtro de confirmação - MFI > 50 (LONG) / < 50 (SHORT) + mfiValue
+   • 📊 VWAP: Filtro de tendência intradiária - Preço > VWAP (LONG) / < VWAP (SHORT)
+   • 🏛️ BTC Trend: Filtro macro - Correlação com tendência do Bitcoin
+   • 🎯 Stop/Target: Cálculo baseado em VWAP + StdDev`;
+
+    if (logger) {
+      logger.info(validationSummary);
+    } else {
+      console.log(validationSummary);
+    }
+
     // Só loga a média RSI se não for estratégia PRO_MAX
     // Verifica a estratégia atual da instância ao invés da variável de ambiente
     if (this.strategy.constructor.name !== 'ProMaxStrategy') {
-      const rsiMsg = `Média do RSI ${media_rsi}`;
+      const rsiMsg = `📊 Média do RSI: ${media_rsi.toFixed(2)}`;
       if (logger) {
         logger.info(rsiMsg);
       } else {
