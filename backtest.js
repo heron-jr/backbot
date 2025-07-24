@@ -214,33 +214,81 @@ async function runRealBacktest() {
       message: 'Saldo inicial (USD):',
       default: 1000,
       validate: (value) => value > 0 ? true : 'Saldo deve ser maior que zero'
+    },
+    {
+      type: 'list',
+      name: 'leverage',
+      message: 'Alavancagem:',
+      choices: [
+        { name: '1x - Sem alavancagem (Spot)', value: 1 },
+        { name: '2x - Baixa alavancagem', value: 2 },
+        { name: '5x - Alavancagem moderada', value: 5 },
+        { name: '10x - Alavancagem alta', value: 10 },
+        { name: '20x - Alavancagem muito alta', value: 20 },
+        { name: '50x - Alavancagem extrema (CUIDADO)', value: 50 },
+        { name: '100x - Alavancagem máxima (MUITO RISCO)', value: 100 }
+      ],
+      default: 1
     }
   ]);
 
   // Perguntar investimento por trade apenas para estratégias que não gerenciam isso internamente
   let investmentPerTrade = null;
+  let capitalPercentage = null;
   if (strategyChoice.strategy !== 'CYPHERPUNK') {
     const investmentConfig = await inquirer.prompt([
       {
-        type: 'number',
-        name: 'investmentPerTrade',
-        message: 'Investimento por trade (USD):',
+        type: 'list',
+        name: 'investmentType',
+        message: 'Tipo de investimento por trade:',
+        choices: [
+          { name: '💰 Valor fixo em USD', value: 'fixed' },
+          { name: '📊 Porcentagem do capital disponível', value: 'percentage' }
+        ],
+        default: 'fixed'
+      }
+    ]);
+
+    if (investmentConfig.investmentType === 'fixed') {
+      const fixedConfig = await inquirer.prompt([
+        {
+          type: 'number',
+          name: 'investmentPerTrade',
+          message: 'Investimento por trade (USD):',
         default: 100,
         validate: (value) => value > 0 ? true : 'Investimento deve ser maior que zero'
       }
     ]);
-    investmentPerTrade = investmentConfig.investmentPerTrade;
+    investmentPerTrade = fixedConfig.investmentPerTrade;
   } else {
-    // Para CypherPunk, usar 10% do saldo inicial como padrão (será gerenciado pela estratégia)
-    investmentPerTrade = Math.round(baseConfig.initialBalance * 0.1);
-    logger.info(`💰 CypherPunk: Usando ${investmentPerTrade} USD por trade (10% do saldo - gerenciado pela estratégia)`);
+    const percentageConfig = await inquirer.prompt([
+      {
+        type: 'number',
+        name: 'capitalPercentage',
+        message: 'Porcentagem do capital por trade (%):',
+        default: 10,
+        validate: (value) => {
+          if (value <= 0 || value > 100) {
+            return 'Porcentagem deve estar entre 0.1% e 100%';
+          }
+          return true;
+        }
+      }
+    ]);
+    capitalPercentage = percentageConfig.capitalPercentage;
   }
+} else {
+  // Para CypherPunk, usar 10% do saldo inicial como padrão (será gerenciado pela estratégia)
+  investmentPerTrade = Math.round(baseConfig.initialBalance * 0.1);
+  logger.info(`💰 CypherPunk: Usando ${investmentPerTrade} USD por trade (10% do saldo - gerenciado pela estratégia)`);
+}
 
   // Configuração final
   const config = {
     ...strategyChoice,
     ...baseConfig,
-    investmentPerTrade
+    investmentPerTrade,
+    capitalPercentage
   };
 
   // Configurações adicionais
@@ -263,6 +311,8 @@ async function runRealBacktest() {
   config.maxConcurrentTrades = 5;
   config.enableStopLoss = true;
   config.enableTakeProfit = true;
+  config.leverage = baseConfig.leverage; // Alavancagem selecionada
+  config.minProfitPercentage = 0; // Profit mínimo: 0% = apenas vs taxas (como o bot real)
   
   // Configurações específicas da estratégia
   if (config.strategy === 'PRO_MAX') {
@@ -300,6 +350,22 @@ async function runRealBacktest() {
     logger.info(`📅 Período: ${config.days} dias`);
     logger.info(`📊 Símbolos: ${config.symbols.join(', ')}`);
     logger.info(`⏱️ Intervalo: ${config.interval}`);
+    logger.info(`⚡ Alavancagem: ${config.leverage}x`);
+    logger.info(`💰 Capital efetivo: $${(config.initialBalance * config.leverage).toFixed(2)}`);
+    
+    // Log da configuração de volume
+    if (config.capitalPercentage > 0) {
+      logger.info(`📈 Volume por operação: ${config.capitalPercentage}% do capital disponível`);
+    } else {
+      logger.info(`📈 Volume por operação: $${config.investmentPerTrade.toFixed(2)} (valor fixo)`);
+    }
+    
+    // Log da configuração de profit mínimo
+    if (config.minProfitPercentage > 0) {
+      logger.info(`🎯 Profit mínimo: ${config.minProfitPercentage}%`);
+    } else {
+      logger.info(`🎯 Profit mínimo: Apenas vs taxas (lucro líquido > 0)`);
+    }
     
     // Informações específicas do CypherPunk
     if (config.strategy === 'CYPHERPUNK') {

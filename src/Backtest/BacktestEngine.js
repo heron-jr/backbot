@@ -7,11 +7,14 @@ export class BacktestEngine {
     this.config = {
       initialBalance: config.initialBalance || 1000, // USD
       fee: config.fee || 0.0004, // 0.04% por operação
-      investmentPerTrade: config.investmentPerTrade || 100, // USD por operação
+      investmentPerTrade: config.investmentPerTrade || 100, // USD por operação (fallback)
+      capitalPercentage: config.capitalPercentage || 0, // Porcentagem do capital (prioridade)
       maxConcurrentTrades: config.maxConcurrentTrades || 5,
       enableStopLoss: config.enableStopLoss !== false,
       enableTakeProfit: config.enableTakeProfit !== false,
       slippage: config.slippage || 0.0001, // 0.01% slippage
+      leverage: config.leverage || 1, // Alavancagem (1x = sem alavancagem)
+      minProfitPercentage: config.minProfitPercentage || 0, // Profit mínimo em % (0 = apenas vs taxas)
       ...config
     };
     
@@ -52,6 +55,15 @@ export class BacktestEngine {
       this.logger.info(`🚀 Iniciando backtest da estratégia: ${strategyName}`);
       this.logger.info(`💰 Saldo inicial: $${this.config.initialBalance.toFixed(2)}`);
       this.logger.info(`📊 Dados históricos: ${Object.keys(historicalData).length} símbolos`);
+      this.logger.info(`⚡ Alavancagem: ${this.config.leverage}x`);
+      this.logger.info(`💸 Capital efetivo: $${(this.config.initialBalance * this.config.leverage).toFixed(2)}`);
+      
+      // Log da configuração de volume
+      if (this.config.capitalPercentage > 0) {
+        this.logger.info(`📈 Volume por operação: ${this.config.capitalPercentage}% do capital disponível`);
+      } else {
+        this.logger.info(`📈 Volume por operação: $${this.config.investmentPerTrade.toFixed(2)} (valor fixo)`);
+      }
       
       // Inicializa estratégia
       const strategy = StrategyFactory.createStrategy(strategyName);
@@ -247,7 +259,28 @@ export class BacktestEngine {
   async openPosition(symbol, decision, timestamp) {
     try {
       const entryPrice = parseFloat(decision.entry);
-      const units = this.config.investmentPerTrade / entryPrice;
+      
+      // Calcula volume baseado na configuração (igual ao bot real)
+      let investmentUSD;
+      if (this.config.capitalPercentage > 0) {
+        // Usa porcentagem do capital disponível
+        const availableCapital = this.results.balance;
+        investmentUSD = (availableCapital * this.config.capitalPercentage) / 100;
+      } else {
+        // Usa valor fixo
+        investmentUSD = this.config.investmentPerTrade;
+      }
+      
+      // Calcula volume com alavancagem (volume efetivo = margem × alavancagem)
+      let effectiveInvestment = investmentUSD * this.config.leverage;
+      
+      // Validação para evitar valores extremos
+      if (effectiveInvestment > 1000000) { // Limite de $1M por operação
+        this.logger.warn(`⚠️ Volume muito alto: $${effectiveInvestment.toFixed(2)} - Limitando a $1,000,000`);
+        effectiveInvestment = 1000000;
+      }
+      
+      const units = effectiveInvestment / entryPrice;
       
       // Aplica slippage
       const actualEntryPrice = decision.action === 'long' 
@@ -285,6 +318,7 @@ export class BacktestEngine {
       } else {
         this.logger.info(`📈 ABERTO ${symbol} ${decision.action.toUpperCase()} @ $${actualEntryPrice.toFixed(6)}`);
         this.logger.info(`   Stop: $${decision.stop.toFixed(6)} | Targets: ${position.targets.length} (${position.targets.slice(0, 3).map(t => t.toFixed(6)).join(', ')}${position.targets.length > 3 ? '...' : ''})`);
+        this.logger.info(`   💰 Volume: $${effectiveInvestment.toFixed(2)} | Alavancagem: ${this.config.leverage}x | Margem: $${investmentUSD.toFixed(2)}`);
       }
       
     } catch (error) {
@@ -346,7 +380,7 @@ export class BacktestEngine {
       }
       
       // Verifica profit mínimo vs taxas (estratégia DEFAULT) - PRIORIDADE 1
-      const minProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE || 10);
+      const minProfitPct = this.config.minProfitPercentage || 0; // Usa configuração do backtest
       if (!shouldClose && this.strategyName === 'DEFAULT') {
         if (minProfitPct === 0) {
           if (this.shouldCloseForMinimumProfit(position, currentPrice)) {
@@ -358,14 +392,6 @@ export class BacktestEngine {
             shouldClose = true;
             closeReason = 'Profit Mínimo Configurado';
           }
-        }
-      }
-      
-      // Verifica profit mínimo configurado (estratégia DEFAULT) - PRIORIDADE 2
-      if (!shouldClose && this.strategyName === 'DEFAULT') {
-        if (this.shouldCloseForConfiguredProfit(position, currentPrice)) {
-          shouldClose = true;
-          closeReason = 'Profit Mínimo Configurado';
         }
       }
       
@@ -542,8 +568,9 @@ export class BacktestEngine {
       
       // Log
       const pnlColor = finalPnl >= 0 ? '🟢' : '🔴';
+      const pnlPercentage = (finalPnl / (entryValue / this.config.leverage)) * 100;
       this.logger.info(`${pnlColor} FECHADO FINAL ${symbol} ${position.action.toUpperCase()} @ $${actualExitPrice.toFixed(6)}`);
-      this.logger.info(`   ${reason} | PnL Final: $${finalPnl.toFixed(2)} | Saldo: $${this.results.balance.toFixed(2)}`);
+      this.logger.info(`   ${reason} | PnL: $${finalPnl.toFixed(2)} (${pnlPercentage.toFixed(2)}%) | Alavancagem: ${this.config.leverage}x | Saldo: $${this.results.balance.toFixed(2)}`);
       
     } else {
       // Fechamento tradicional (sem targets múltiplos)
@@ -730,6 +757,12 @@ export class BacktestEngine {
     const days = this.config.days || 365;
     this.results.annualizedReturn = this.results.totalReturn * (365 / days);
     
+    // Métricas de alavancagem
+    this.results.leverage = this.config.leverage;
+    this.results.effectiveCapital = this.config.initialBalance * this.config.leverage;
+    this.results.leverageAdjustedReturn = this.results.totalReturn * this.config.leverage;
+    this.results.leverageAdjustedPnL = this.results.totalPnL * this.config.leverage;
+    
     // Adiciona informações sobre targets múltiplos
     this.results.partialTrades = this.results.trades.filter(t => t.isPartial).length;
     this.results.completeTrades = completeTrades.length;
@@ -746,7 +779,9 @@ export class BacktestEngine {
         initialBalance: this.config.initialBalance,
         finalBalance: this.results.balance,
         totalReturn: this.results.totalReturn,
-        totalPnL: this.results.totalPnL
+        totalPnL: this.results.totalPnL,
+        leverage: this.config.leverage,
+        effectiveCapital: this.config.initialBalance * this.config.leverage
       },
       performance: {
         totalTrades: this.results.totalTrades,
@@ -756,7 +791,10 @@ export class BacktestEngine {
         averageWin: this.results.averageWin,
         averageLoss: this.results.averageLoss,
         profitFactor: this.results.profitFactor,
-        sharpeRatio: this.results.sharpeRatio
+        sharpeRatio: this.results.sharpeRatio,
+        leverage: this.results.leverage,
+        leverageAdjustedReturn: this.results.leverageAdjustedReturn,
+        leverageAdjustedPnL: this.results.leverageAdjustedPnL
       },
       risk: {
         maxDrawdown: this.results.maxDrawdown * 100,
@@ -793,9 +831,9 @@ export class BacktestEngine {
       // Lucro líquido (após taxas)
       const netProfit = pnl - totalFees;
       
-      // Só fecha se há lucro líquido E ele cobre as taxas
-      if (netProfit > 0 && netProfit >= totalFees) {
-        this.logger.info(`✅ [PROFIT_CHECK] ${position.symbol}: Fechando por lucro $${netProfit.toFixed(4)} >= mínimo $${totalFees.toFixed(4)}`);
+      // Só fecha se há lucro líquido (após taxas)
+      if (netProfit > 0) {
+        this.logger.info(`✅ [PROFIT_CHECK] ${position.symbol}: Fechando por lucro $${netProfit.toFixed(4)} > 0 (após taxas)`);
         return true;
       }
       
@@ -832,7 +870,7 @@ export class BacktestEngine {
       const netProfitPct = entryValue > 0 ? (netProfit / entryValue) * 100 : 0;
       
       // Configuração de profit mínimo (apenas porcentagem)
-      const minProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE || 10);
+      const minProfitPct = this.config.minProfitPercentage || 0;
       
       // Só fecha se há lucro líquido E atende ao critério configurado
       if (netProfit > 0 && netProfitPct >= minProfitPct) {
