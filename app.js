@@ -5,7 +5,7 @@ import Decision from './src/Decision/Decision.js';
 import { StrategyFactory } from './src/Decision/Strategies/StrategyFactory.js';
 import TrailingStop from './src/TrailingStop/TrailingStop.js';
 import PnlController from './src/Controllers/PnlController.js';
-import { OrderController } from './src/Controllers/OrderController.js';
+import OrderController from './src/Controllers/OrderController.js';
 import { StrategySelector } from './src/Utils/StrategySelector.js';
 import MultiBotManager from './src/MultiBot/MultiBotManager.js';
 import AccountConfig from './src/Config/AccountConfig.js';

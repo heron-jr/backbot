@@ -1,6 +1,7 @@
 import { BaseStrategy } from './BaseStrategy.js';
 import Markets from '../../Backpack/Public/Markets.js';
 import { calculateIndicators } from '../Indicators.js';
+import OrderController from '../../Controllers/OrderController.js';
 
 export class DefaultStrategy extends BaseStrategy {
   /**
@@ -102,6 +103,20 @@ export class DefaultStrategy extends BaseStrategy {
       
       console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - Tendência: ${btcTrendMsg} - Sinal: ${signals.signalType} - Money Flow: ${moneyFlowValidation.reason} - VWAP: ${vwapValidation.reason}`);
 
+      // NOVO: Chamada do fluxo híbrido de execução de ordem
+      const orderResult = await OrderController.openHybridOrder({
+        entry,
+        stop,
+        target,
+        action,
+        market: data.market.symbol,
+        volume: investmentUSD,
+        decimal_quantity: data.market.decimal_quantity,
+        decimal_price: data.market.decimal_price,
+        stepSize_quantity: data.market.stepSize_quantity,
+        accountId: data.accountId || 'DEFAULT',
+        originalSignalData: { signals, moneyFlowValidation, vwapValidation, btcTrend, data }
+      });
       return {
         market: data.market.symbol,
         entry: Number(entry.toFixed(data.market.decimal_price)),
@@ -109,7 +124,8 @@ export class DefaultStrategy extends BaseStrategy {
         target: Number(target.toFixed(data.market.decimal_price)),
         action,
         pnl,
-        risk
+        risk,
+        orderResult
       };
 
     } catch (error) {

@@ -3,7 +3,6 @@ import AccountConfig from '../Config/AccountConfig.js';
 import Decision from '../Decision/Decision.js';
 import AccountController from '../Controllers/AccountController.js';
 import OrderController from '../Controllers/OrderController.js';
-import { OrderController as OrderControllerClass } from '../Controllers/OrderController.js';
 
 /**
  * Instância individual do bot para cada conta
@@ -289,7 +288,7 @@ class BotInstance {
         this.setEnvironmentVariables();
         
         // Executa monitoramento APENAS para esta conta
-        await OrderControllerClass.monitorPendingEntryOrders(this.accountId);
+        await OrderController.monitorPendingEntryOrders(this.accountId);
         
         // Restaura variáveis originais
         this.restoreEnvironmentVariables();

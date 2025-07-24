@@ -1,6 +1,6 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
 import Order from '../Backpack/Authenticated/Order.js';
-import OrderController, { OrderController as OrderControllerClass } from '../Controllers/OrderController.js';
+import OrderController from '../Controllers/OrderController.js';
 import AccountController from '../Controllers/AccountController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import { calculateIndicators } from './Indicators.js';
@@ -427,7 +427,7 @@ class Decision {
     const closed_markets = positions.map((el) => el.symbol)
 
     // VALIDAÇÃO: MAX_OPEN_TRADES - Controla quantidade máxima de posições abertas
-    const maxTradesValidation = await OrderControllerClass.validateMaxOpenTrades();
+    const maxTradesValidation = await OrderController.validateMaxOpenTrades();
     if (!maxTradesValidation.isValid) {
       const maxTradesMsg = maxTradesValidation.message;
       if (logger) {
@@ -655,10 +655,11 @@ class Decision {
     orderResults.sort((a, b) => a.index - b.index);
     
     orderResults.forEach(({ market, result }) => {
-      if (result && !result.error) {
+      if (result && result.success) {
         console.log(`   ✅ ${market}: Executada`);
       } else if (result && result.error) {
         console.log(`   ❌ ${market}: Falhou - ${result.error}`);
+        console.log(`[DEBUG][ORDER_FAIL] Detalhes do result para ${market}:`, JSON.stringify(result, null, 2));
       } else {
         console.log(`   ⏸️ ${market}: Pulado (ordem recente)`);
       }
@@ -742,7 +743,7 @@ class Decision {
     // para resposta mais rápida na criação de take profits
 
     // Após toda a análise, logar monitoramento de todas as posições abertas
-    await OrderControllerClass.checkForUnmonitoredPositions('DEFAULT');
+    await OrderController.checkForUnmonitoredPositions('DEFAULT');
 
     } catch (error) {
       const errorMsg = `❌ Erro na análise: ${error.message}`;

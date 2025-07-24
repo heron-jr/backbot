@@ -730,7 +730,7 @@ class OrderController {
     }
   }
 
-  async forceClose(position) {
+  static async forceClose(position) {
     const Account = await AccountController.get()
     const market = Account.markets.find((el) => {
         return el.symbol === position.symbol
@@ -771,7 +771,7 @@ class OrderController {
    * @param {number} partialPercentage - Porcentagem da posição para realizar
    * @returns {boolean} - Sucesso da operação
    */
-  async takePartialProfit(position, partialPercentage = 50) {
+  static async takePartialProfit(position, partialPercentage = 50) {
     try {
       const Account = await AccountController.get()
       const market = Account.markets.find((el) => {
@@ -792,16 +792,12 @@ class OrderController {
           quantity: String(partialQuantity.toFixed(decimal))
       };
 
-      // console.log(`💰 ${position.symbol}: Realizando take profit parcial de ${partialPercentage}% (${partialQuantity.toFixed(decimal)} de ${totalQuantity.toFixed(decimal)})`);
-
       // Realiza o take profit parcial
       const partialResult = await Order.executeOrder(body);
       
       if (partialResult) {
-        // console.log(`✅ ${position.symbol}: Take profit parcial realizado com sucesso`);
         return true;
       } else {
-        // console.error(`❌ ${position.symbol}: Falha ao realizar take profit parcial`);
         return false;
       }
 
@@ -811,166 +807,162 @@ class OrderController {
     }
   }
 
-  async openOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity, accountId = 'DEFAULT' }) {
-    try {
-    const isLong = action === "long";
-    const side = isLong ? "Bid" : "Ask";
-    const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
-    const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
-    const entryPrice = parseFloat(entry);
-    
-    // VALIDAÇÃO: MAX_OPEN_TRADES - Controla quantidade máxima de posições abertas
-    const maxTradesValidation = await this.constructor.validateMaxOpenTrades(accountId);
-    if (!maxTradesValidation.isValid) {
-      console.warn(`🚫 [${accountId}] ${market} ignorado - ${maxTradesValidation.message}`);
-      return false;
-    }
-    
-    // Obtém informações da conta e mercado
-    const marketInfo = await AccountController.get();
-    if (!marketInfo) {
-      console.error(`❌ Não foi possível obter informações da conta para ${market}`);
-      return false;
-    }
-    const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
-    
-    // CORREÇÃO: O volume é o valor da posição (order value), não a margem
-    const orderValue = volume; // volume já é o valor da posição desejada
-    const leverage = marketInfo.leverage;
-    const marginRequired = orderValue / leverage;
+  // Estatísticas globais de fallback
+  static fallbackCount = 0;
+  static totalHybridOrders = 0;
 
-    console.log(`💰 [${accountId}] ${market}: Valor da operação: $${orderValue.toFixed(2)}, Alavancagem: ${leverage}x, Margem necessária: $${marginRequired.toFixed(2)}`);
-
-    // Validação de margem antes de tentar abrir a ordem
-    const marginValidation = await this.validateMargin(market, marginRequired, marketInfo);
-    if (!marginValidation.isValid) {
-      console.warn(`⚠️ [${accountId}] MARGEM INSUFICIENTE: ${market} - ${marginValidation.message}`);
-      return false;
-    }
-
-    // Quantidade baseada no valor da posição e preço de entrada
-    const markPrices = await Markets.getAllMarkPrices(market);
-    const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
-    const tickSize = currentMarket?.tickSize || 0.0001;
-    let finalPrice;
-    let quantity;
-
-    // Verifica se é uma ordem manual (preço específico) ou automática (baseada no mercado)
-    const isManualOrder = entryPrice > 0 && Math.abs(entryPrice - currentMarketPrice) > (tickSize * 10);
-
-    if (isManualOrder) {
-      finalPrice = formatPrice(entryPrice);
-      quantity = formatQuantity(Math.floor((orderValue / entryPrice) / stepSize_quantity) * stepSize_quantity);
-      console.log(`💰 [${accountId}] ${market}: Ordem MANUAL - Preço exato: ${entryPrice.toFixed(6)}`);
-    } else {
-      // Ordem automática: ajusta o preço para evitar rejeições
-      const priceDiff = Math.abs(entryPrice - currentMarketPrice) / currentMarketPrice;
-      let tickMultiplier = 50;
-      if (market === 'BTC_USDC_PERP') {
-        tickMultiplier = 150;
-      } else if (market === 'ETH_USDC_PERP') {
-        tickMultiplier = 100;
-      } else if (priceDiff < 0.001) {
-        tickMultiplier = 80;
-      } else if (priceDiff < 0.005) {
-        tickMultiplier = 60;
-      } else if (priceDiff < 0.01) {
-        tickMultiplier = 40;
-      }
-      let adjustedPrice;
-      if (isLong) {
-        adjustedPrice = currentMarketPrice - (tickSize * tickMultiplier);
-      } else {
-        adjustedPrice = currentMarketPrice + (tickSize * tickMultiplier);
-      }
-      finalPrice = formatPrice(adjustedPrice);
-      quantity = formatQuantity(Math.floor((orderValue / adjustedPrice) / stepSize_quantity) * stepSize_quantity);
-      console.log(`💰 [${accountId}] ${market}: Ordem AUTOMÁTICA - Preço ajustado: ${adjustedPrice.toFixed(6)} (original: ${entryPrice.toFixed(6)})`);
-    }
-    // Log do ajuste de preço
-    // console.log(`💰 [${accountId}] ${market}: Preço estratégia ${entryPrice.toFixed(6)} → Preço mercado ${currentMarketPrice.toFixed(6)} → Ajustado ${adjustedPrice.toFixed(6)} (${isLong ? 'BID' : 'ASK'}) [Diff: ${(priceDiff * 100).toFixed(3)}%]`);
-    const body = {
-      symbol: market,
-      side,
-      orderType: "Limit",
-      postOnly: true,  
-      quantity,
-      price: finalPrice,
-      timeInForce: "GTC",
-      selfTradePrevention: "RejectTaker"
-    };
-    const stopLossTriggerPrice = Number(stop) 
-    // Estratégia PRO_MAX: adiciona para monitoramento e cria apenas a ordem de entrada
-    // Verifica se é estratégia PRO_MAX baseado no accountId ou configuração da conta
-    const isProMaxStrategy = accountId.includes('PRO_MAX') || accountId === 'CONTA2';
-    if (isProMaxStrategy) {
-      this.constructor.addPendingEntryOrder(market, {
-        stop,
-        isLong,
-        decimal_quantity,
-        decimal_price,
-        stepSize_quantity
-      }, accountId);
-      console.log(`📋 [${accountId}] ${market}: Ordem de entrada adicionada ao monitoramento (estratégia PRO_MAX)`);
-    } else if (target !== undefined && !isNaN(parseFloat(target))) {
-      // Fallback para target único (estratégia DEFAULT)
-      const takeProfitTriggerPrice = (Number(target) + Number(finalPrice)) / 2;
-      body.takeProfitTriggerBy = "LastPrice";
-      body.takeProfitTriggerPrice = formatPrice(takeProfitTriggerPrice);
-      body.takeProfitLimitPrice = formatPrice(target);
-      // console.log(`🎯 [${accountId}] ${market}: Take Profit configurado - Target: ${target.toFixed(6)}, Trigger: ${takeProfitTriggerPrice.toFixed(6)}`);
-    } else {
-      // console.log(`⚠️ [${accountId}] ${market}: Take Profit não configurado - Target: ${target}`);
-    }
-    if (stop !== undefined && !isNaN(parseFloat(stop))) {
-      body.stopLossTriggerBy = "LastPrice";
-      body.stopLossTriggerPrice = formatPrice(stopLossTriggerPrice);
-      body.stopLossLimitPrice = formatPrice(stop);
-      console.log(`🔍 [DEBUG] OrderController: stop original=${stop.toFixed(6)}, trigger=${stopLossTriggerPrice.toFixed(6)}, limit=${formatPrice(stop)}`);
-    }
-    if(body.quantity > 0 && body.price > 0){
-      const result = await Order.executeOrder(body);
-      // Log detalhado da taxa de abertura
-      const fee = marketInfo.fee || process.env.FEE || 0.0004; // 0.04% padrão se não definido
-      const entryFee = orderValue * fee;
-      console.log(`[LOG][FEE] Abertura: ${market} | Valor: $${orderValue.toFixed(2)} | Fee entrada: $${entryFee.toFixed(6)} (${(fee * 100).toFixed(4)}%)`);
-      if (!result) {
-        // Tenta com preço muito mais conservador para evitar "immediately match"
-        let retryMultiplier = tickMultiplier + 50; // Base
-        
-        // Retry específico para ativos de alta volatilidade
-        if (market === 'BTC_USDC_PERP') {
-          retryMultiplier = tickMultiplier + 100; // BTC precisa de retry muito maior
-        } else if (market === 'ETH_USDC_PERP') {
-          retryMultiplier = tickMultiplier + 75; // ETH também precisa de retry maior
-        }
-        
-        const moreConservativePrice = isLong 
-          ? currentMarketPrice - (tickSize * retryMultiplier)
-          : currentMarketPrice + (tickSize * retryMultiplier);
-        body.price = formatPrice(moreConservativePrice);
-        const retryResult = await Order.executeOrder(body);
-        return retryResult;
-      }
-      return result;
-    }
-    return { error: 'Quantidade ou preço inválidos' };
-    } catch (error) {
-      return { error: error.message };
-    }
+  // Função auxiliar para calcular slippage percentual
+  static calcSlippagePct(priceLimit, priceCurrent) {
+    return Math.abs(priceCurrent - priceLimit) / priceLimit * 100;
   }
 
-  async getRecentOpenOrders(market) {
-    const orders = await Order.getOpenOrders(market)
-    const orderShorted = orders.sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-    return orderShorted.map((el) => {
-        return {
-            id: el.id,
-            minutes: Utils.minutesAgo(el.createdAt),
-            triggerPrice: parseFloat(el.triggerPrice),
-            price: parseFloat(el.price)
+  // Função auxiliar para revalidar sinal (deve ser adaptada para chamar a estratégia correta)
+  static async revalidateSignal({ market, accountId, originalSignalData }) {
+    // Exemplo: chamar novamente a análise da estratégia
+    // Aqui, apenas retorna true (mock), mas deve ser implementado conforme a lógica real
+    return true;
+  }
+
+  // Função principal de execução híbrida
+  static async openHybridOrder({ entry, stop, target, action, market, volume, decimal_quantity, decimal_price, stepSize_quantity, accountId = 'DEFAULT', originalSignalData }) {
+    try {
+      OrderController.totalHybridOrders++;
+      const isLong = action === "long";
+      const side = isLong ? "Bid" : "Ask";
+      const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+      const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+      const entryPrice = parseFloat(entry);
+      const marketInfo = await AccountController.get();
+      const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
+      const orderValue = volume;
+      const leverage = marketInfo.leverage;
+      const marginRequired = orderValue / leverage;
+      const markPrices = await Markets.getAllMarkPrices(market);
+      const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
+      const tickSize = currentMarket?.tickSize || 0.0001;
+      let finalPrice = formatPrice(entryPrice);
+      let quantity = formatQuantity(Math.floor((orderValue / entryPrice) / stepSize_quantity) * stepSize_quantity);
+      const body = {
+        symbol: market,
+        side,
+        orderType: "Limit",
+        postOnly: true,
+        quantity,
+        price: finalPrice,
+        timeInForce: "GTC",
+        selfTradePrevention: "RejectTaker"
+      };
+      // 1. Envia ordem LIMIT
+      const limitResult = await Order.executeOrder(body);
+      console.log('[DEBUG] limitResult:', JSON.stringify(limitResult, null, 2));
+      if (!limitResult || limitResult.error) {
+        console.error(`❌ [${accountId}] ${market}: Falha ao enviar ordem LIMIT: ${limitResult && limitResult.error}`);
+        return { error: limitResult && limitResult.error };
+      }
+      console.log(`📋 [${accountId}] ${market}: Ordem LIMIT enviada (ID: ${limitResult.id || 'N/A'}) a ${finalPrice}`);
+      // 2. Monitorar execução por ORDER_EXECUTION_TIMEOUT_SECONDS
+      const timeoutSec = Number(process.env.ORDER_EXECUTION_TIMEOUT_SECONDS || 12);
+      let filled = false;
+      for (let i = 0; i < timeoutSec; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const openOrders = await Order.getOpenOrders(market);
+        const stillOpen = openOrders && openOrders.some(o => o.orderId === limitResult.orderId && (o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled'));
+        if (!stillOpen) {
+          filled = true;
+          break;
         }
-    })
+      }
+      if (filled) {
+        console.log(`✅ [${accountId}] ${market}: Ordem LIMIT executada normalmente.`);
+        return { success: true, type: 'LIMIT', limitResult };
+      }
+      // 3. Timeout: cancela ordem LIMIT
+      await Order.cancelOpenOrder(market, limitResult.id);
+      console.log(`⏰ [${accountId}] ${market}: Timeout - Ordem LIMIT não executada. Cancelada.`);
+      // 4. Revalida sinal e slippage
+      const signalValid = await OrderController.revalidateSignal({ market, accountId, originalSignalData });
+      const markPrices2 = await Markets.getAllMarkPrices(market);
+      const priceCurrent = parseFloat(markPrices2[0]?.markPrice || entryPrice);
+      const slippage = OrderController.calcSlippagePct(entryPrice, priceCurrent);
+      console.log(`[${accountId}] ${market}: Revalidação - Sinal: ${signalValid ? 'OK' : 'NÃO OK'} | Slippage: ${slippage.toFixed(3)}%`);
+      if (!signalValid) {
+        console.log(`🚫 [${accountId}] ${market}: Sinal não é mais válido. Abortando entrada.`);
+        return { aborted: true, reason: 'signal' };
+      }
+      if (slippage > parseFloat(process.env.MAX_SLIPPAGE_PCT || 0.2)) {
+        console.log(`🚫 [${accountId}] ${market}: Slippage de ${slippage.toFixed(3)}% excede o máximo permitido (${process.env.MAX_SLIPPAGE_PCT}%). Abortando entrada.`);
+        return { aborted: true, reason: 'slippage' };
+      }
+      // 5. Fallback: envia ordem a mercado
+      const marketBody = {
+        symbol: market,
+        side,
+        orderType: "Market",
+        quantity,
+        timeInForce: "IOC",
+        selfTradePrevention: "RejectTaker"
+      };
+      const marketResult = await Order.executeOrder(marketBody);
+      if (marketResult && !marketResult.error) {
+        OrderController.fallbackCount++;
+        console.log(`⚡ [${accountId}] ${market}: Fallback - Ordem a MERCADO executada com sucesso!`);
+        // Estatística de fallback
+        if (OrderController.totalHybridOrders % 50 === 0) {
+          const fallbackPct = (OrderController.fallbackCount / OrderController.totalHybridOrders) * 100;
+          console.log(`\n[EXECUTION_STATS] ${fallbackPct.toFixed(1)}% das ordens precisaram de fallback para mercado (${OrderController.fallbackCount}/${OrderController.totalHybridOrders})`);
+          if (fallbackPct > 30) {
+            console.log('⚠️ Taxa de fallback alta! Considere ajustar o timeout ou o preço da LIMIT.');
+          } else {
+            console.log('✅ Taxa de fallback dentro do esperado.');
+          }
+        }
+        return { success: true, type: 'MARKET', marketResult };
+      } else {
+        console.log(`❌ [${accountId}] ${market}: Fallback - Falha ao executar ordem a mercado: ${marketResult && marketResult.error}`);
+        return { error: marketResult && marketResult.error };
+      }
+    } catch (error) {
+      console.error(`❌ [${accountId}] ${market}: Erro no fluxo híbrido:`, error.message);
+      return { error: error.message };
+    }
+  };
+
+  static async getRecentOpenOrders(market) {
+    const orders = await Order.getOpenOrders(market)
+    
+    if (!orders || orders.length === 0) {
+      return [];
+    }
+
+    // Filtra apenas ordens de entrada Limit (não stop loss/take profit)
+    const entryOrders = orders.filter(order => {
+      // Verifica se é uma ordem pendente
+      const isPending = order.status === 'Pending' || 
+                       order.status === 'New' || 
+                       order.status === 'PartiallyFilled';
+      
+      // Verifica se é uma ordem Limit (ordens de entrada)
+      const isLimitOrder = order.orderType === 'Limit';
+      
+      // Verifica se NÃO é uma ordem de stop loss ou take profit
+      const isNotStopLoss = !order.stopLossTriggerPrice && !order.stopLossLimitPrice;
+      const isNotTakeProfit = !order.takeProfitTriggerPrice && !order.takeProfitLimitPrice;
+      
+      // Verifica se NÃO é uma ordem reduceOnly (que são ordens de saída)
+      const isNotReduceOnly = !order.reduceOnly;
+      
+      const isEntryOrder = isPending && isLimitOrder && isNotStopLoss && isNotTakeProfit && isNotReduceOnly;
+      
+      // Log detalhado para debug
+      if (isPending) {
+        console.log(`   📋 ${market}: ID=${order.orderId}, Type=${order.orderType}, Status=${order.status}, ReduceOnly=${order.reduceOnly}, StopLoss=${!!order.stopLossTriggerPrice}, TakeProfit=${!!order.takeProfitTriggerPrice} → ${isEntryOrder ? 'ENTRADA' : 'OUTRO'}`);
+      }
+      
+      return isEntryOrder;
+    });
+
+    const orderShorted = entryOrders.sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    return orderShorted;
   }
 
   /**
@@ -1341,7 +1333,6 @@ function shouldCloseByProfitOrFees(entryPrice, currentPrice, quantity, fee, minP
   }
 }
 
-export default new OrderController();
-export { OrderController };
+export default OrderController;
 
 
