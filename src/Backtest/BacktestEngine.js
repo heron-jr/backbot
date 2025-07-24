@@ -836,7 +836,7 @@ export class BacktestEngine {
       
       // Só fecha se há lucro líquido E atende ao critério configurado
       if (netProfit > 0 && netProfitPct >= minProfitPct) {
-        this.logger.info(`✅ [CONFIG_PROFIT] ${position.symbol}: Fechando por lucro ${netProfitPct.toFixed(2)}% >= mínimo ${minProfitPct}%`);
+        this.logger.info(`✅ [CONFIG_PROFIT] ${position.symbol}: Fechando por lucro ${netProfitPct.toFixed(3)}% >= mínimo ${minProfitPct.toFixed(3)}%`);
         return true;
       }
       

@@ -172,7 +172,7 @@ class TrailingStop {
         
         // Verifica se deve fechar por stop loss baseado no pnlPct
         if (pnlPct <= maxNegativePnlStopPct) {
-          console.log(`🚨 [PROFIT_CHECK] ${position.symbol}: Fechando por stop loss - PnL ${pnlPct.toFixed(2)}% <= limite ${maxNegativePnlStopPct}%`);
+          console.log(`🚨 [PROFIT_CHECK] ${position.symbol}: Fechando por stop loss - PnL ${pnlPct.toFixed(3)}% <= limite ${maxNegativePnlStopPct.toFixed(3)}%`);
           return true;
         }
       }
@@ -238,13 +238,13 @@ class TrailingStop {
       
       // Só fecha se há lucro líquido E atende ao critério configurado
       if (netProfit > 0 && netProfitPct >= minProfitPct) {
-        console.log(`\n✅ [CONFIG_PROFIT] ${position.symbol}: Fechando por lucro ${netProfitPct.toFixed(2)}% >= mínimo ${minProfitPct}%`);
+        console.log(`\n✅ [CONFIG_PROFIT] ${position.symbol}: Fechando por lucro ${netProfitPct.toFixed(3)}% >= mínimo ${minProfitPct.toFixed(3)}%`);
         return true;
       }
       
       // Só mostra logs se há lucro significativo mas não suficiente
       if (netProfit > 0.01 && netProfitPct < minProfitPct) {
-        console.log(`\n⚠️ [CONFIG_PROFIT] ${position.symbol}: Lucro ${netProfitPct.toFixed(2)}% < mínimo ${minProfitPct}%`);
+        console.log(`\n⚠️ [CONFIG_PROFIT] ${position.symbol}: Lucro ${netProfitPct.toFixed(3)}% < mínimo ${minProfitPct.toFixed(3)}%`);
       }
       
       return false;
