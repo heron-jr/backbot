@@ -854,7 +854,6 @@ class OrderController {
       };
       // 1. Envia ordem LIMIT
       const limitResult = await Order.executeOrder(body);
-      console.log('[DEBUG] limitResult:', JSON.stringify(limitResult, null, 2));
       if (!limitResult || limitResult.error) {
         console.error(`❌ [${accountId}] ${market}: Falha ao enviar ordem LIMIT: ${limitResult && limitResult.error}`);
         return { error: limitResult && limitResult.error };

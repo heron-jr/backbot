@@ -12,7 +12,7 @@ export class BacktestRunner {
   }
 
   /**
-   * Executa backtest completo
+   * REFATORADO: Executa backtest completo com suporte a dados duplos
    * @param {object} config - Configuração do backtest
    * @returns {object} - Resultados do backtest
    */
@@ -23,6 +23,7 @@ export class BacktestRunner {
       // Valida configuração
       this.validateConfig(config);
       
+<<<<<<< Updated upstream
       // Obtém dados históricos
       const historicalData = await this.getHistoricalData(config);
       
@@ -30,12 +31,43 @@ export class BacktestRunner {
       this.engine = new BacktestEngine({
         ...config,
         strategyName: config.strategy
+=======
+      // Determina modo de simulação se não especificado
+      if (!config.simulationMode) {
+        config.simulationMode = this.determineSimulationMode(config.interval || config.ambientTimeframe);
+      }
+      
+      // Determina timeframes se não especificados
+      if (!config.ambientTimeframe) {
+        config.ambientTimeframe = config.interval;
+      }
+      if (!config.actionTimeframe) {
+        config.actionTimeframe = this.getActionTimeframe(config.ambientTimeframe);
+      }
+      
+      // Exibe informações do modo de simulação
+      this.logger.info(`🎯 Modo de Simulação: ${config.simulationMode}`);
+      this.logger.info(`📊 Timeframe AMBIENT: ${config.ambientTimeframe}`);
+      this.logger.info(`⚡ Timeframe ACTION: ${config.actionTimeframe}`);
+      
+      // Obtém dados históricos com suporte ao novo formato
+      const historicalDataResult = await this.getHistoricalData(config);
+      
+      // REFATORADO: Passa informações sobre o formato dos dados para o engine
+      this.engine = new BacktestEngine({
+        ...config,
+        strategyName: config.strategy,
+        simulationMode: config.simulationMode,
+        ambientTimeframe: config.ambientTimeframe,
+        actionTimeframe: config.actionTimeframe,
+        dataFormat: historicalDataResult.format // NOVO: Informa o formato dos dados
+>>>>>>> Stashed changes
       });
       
-      // Executa backtest
+      // Executa backtest passando os dados no formato correto
       const results = await this.engine.runBacktest(
         config.strategy,
-        historicalData,
+        historicalDataResult.data, // Dados no formato detectado
         config.strategyConfig || {}
       );
       
@@ -103,12 +135,19 @@ export class BacktestRunner {
   }
 
   /**
+<<<<<<< Updated upstream
    * Obtém dados históricos baseado na configuração
+=======
+   * REFATORADO: Obtém dados históricos com suporte ao novo formato de dados duplos
+   * @param {object} config - Configuração do backtest
+   * @returns {object} - Dados históricos no formato apropriado
+>>>>>>> Stashed changes
    */
   async getHistoricalData(config) {
     try {
       let historicalData;
       
+<<<<<<< Updated upstream
       if (config.useSyntheticData) {
         // Usa dados sintéticos apenas se explicitamente solicitado
         this.logger.warn('🔧 Usando dados sintéticos (NÃO recomendado para análise real)...');
@@ -150,9 +189,73 @@ export class BacktestRunner {
           } else {
             throw new Error('Falha ao obter dados da API e fallback sintético desabilitado');
           }
-        }
+=======
+      // Valida símbolos
+      if (!config.symbols || !Array.isArray(config.symbols) || config.symbols.length === 0) {
+        throw new Error('Lista de símbolos é obrigatória e deve conter pelo menos um símbolo');
       }
       
+      // Calcula período
+      const days = config.days || 30;
+      const startTime = config.startTime ? new Date(config.startTime) : new Date(this.calculateStartTime(days));
+      const endTime = config.endTime ? new Date(config.endTime) : new Date();
+      
+      // CORREÇÃO: Valida se as datas são válidas
+      if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+        throw new Error('Datas de início ou fim inválidas');
+      }
+      
+      this.logger.info(`📅 Período: ${days} dias (${startTime.toISOString()} até ${endTime.toISOString()})`);
+      this.logger.info(`🎯 Símbolos: ${config.symbols.join(', ')}`);
+      
+      // Obtém dados do DataProvider (pode retornar formato duplo para HIGH_FIDELITY)
+      const historicalData = await this.dataProvider.getHistoricalData(
+        config.symbols,
+        config.ambientTimeframe,
+        days,
+        config.simulationMode,
+        startTime,
+        endTime
+      );
+      
+      // REFATORADO: Detecta e valida o formato dos dados retornados
+      if (this.isHighFidelityDataFormat(historicalData)) {
+        this.logger.info('🔬 Dados em formato HIGH_FIDELITY detectados (1m + ambient candles)');
+        
+        // Valida dados duplos
+        for (const [symbol, data] of Object.entries(historicalData)) {
+          if (!data.oneMinuteCandles || !data.ambientCandles) {
+            throw new Error(`Dados HIGH_FIDELITY inválidos para ${symbol}: faltam oneMinuteCandles ou ambientCandles`);
+          }
+          
+          this.logger.info(`✅ ${symbol}: ${data.oneMinuteCandles.length} candles 1m + ${data.ambientCandles.length} candles ${config.ambientTimeframe}`);
+>>>>>>> Stashed changes
+        }
+        
+        return {
+          format: 'HIGH_FIDELITY',
+          data: historicalData
+        };
+        
+      } else {
+        this.logger.info('📈 Dados em formato STANDARD detectados (apenas ambient candles)');
+        
+        // Valida dados padrão
+        for (const [symbol, candles] of Object.entries(historicalData)) {
+          if (!Array.isArray(candles) || candles.length === 0) {
+            throw new Error(`Dados STANDARD inválidos para ${symbol}: array vazio ou inválido`);
+          }
+          
+          this.logger.info(`✅ ${symbol}: ${candles.length} candles ${config.ambientTimeframe}`);
+        }
+        
+        return {
+          format: 'STANDARD',
+          data: historicalData
+        };
+      }
+      
+<<<<<<< Updated upstream
       // Valida dados
       if (!this.dataProvider.validateData(historicalData, config.interval || '1h')) {
         this.logger.warn('⚠️ Problemas encontrados nos dados, mas continuando...');
@@ -175,10 +278,35 @@ export class BacktestRunner {
       
       return historicalData;
       
+=======
+>>>>>>> Stashed changes
     } catch (error) {
       this.logger.error(`❌ Erro ao obter dados históricos: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * NOVO: Detecta se os dados estão no formato HIGH_FIDELITY
+   * @param {object} data - Dados retornados pelo DataProvider
+   * @returns {boolean} - True se for formato HIGH_FIDELITY
+   */
+  isHighFidelityDataFormat(data) {
+    if (!data || typeof data !== 'object') {
+      return false;
+    }
+    
+    // Verifica se pelo menos um símbolo tem o formato HIGH_FIDELITY
+    for (const [symbol, symbolData] of Object.entries(data)) {
+      if (symbolData && 
+          typeof symbolData === 'object' && 
+          symbolData.oneMinuteCandles && 
+          symbolData.ambientCandles) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   /**
@@ -197,6 +325,7 @@ export class BacktestRunner {
         timestamp: new Date().toISOString(),
         strategy: config.strategy,
         symbols: config.symbols,
+<<<<<<< Updated upstream
         period: {
           days: config.days || 30,
           interval: config.interval || '1h',
@@ -231,6 +360,42 @@ export class BacktestRunner {
         losingTrades: results.losingTrades || 0,
         maxConsecutiveLosses: results.maxConsecutiveLosses || 0
       }
+=======
+        period: config.days,
+        interval: config.ambientTimeframe || config.interval,
+        simulationMode: config.simulationMode,
+        ambientTimeframe: config.ambientTimeframe,
+        actionTimeframe: config.actionTimeframe,
+        initialBalance: config.initialBalance,
+        finalBalance: results.balance || config.initialBalance,
+        totalReturn: results.balance ? ((results.balance - config.initialBalance) / config.initialBalance) * 100 : 0,
+        totalTrades: results.totalTrades || 0,
+        winRate: results.winRate || 0,
+        profitFactor: results.profitFactor || 0,
+        maxDrawdown: (results.maxDrawdown || 0) * 100,
+        sharpeRatio: results.sharpeRatio || 0,
+        leverage: config.leverage || 1
+      },
+      performance: {
+        totalTrades: results.totalTrades || 0,
+        winningTrades: results.winningTrades || 0,
+        losingTrades: results.losingTrades || 0,
+        winRate: results.winRate || 0,
+        averageWin: results.averageWin || 0,
+        averageLoss: results.averageLoss || 0,
+        profitFactor: results.profitFactor || 0,
+        sharpeRatio: results.sharpeRatio || 0,
+        maxDrawdown: (results.maxDrawdown || 0) * 100,
+        maxConsecutiveLosses: results.maxConsecutiveLosses || 0
+      },
+      configuration: {
+        ...config,
+        simulationMode: config.simulationMode,
+        ambientTimeframe: config.ambientTimeframe,
+        actionTimeframe: config.actionTimeframe
+      },
+      trades: results.trades || []
+>>>>>>> Stashed changes
     };
     
     return report;
@@ -290,6 +455,7 @@ export class BacktestRunner {
     this.logger.info(`📈 Retorno Total: ${results.totalReturn.toFixed(2)}%`);
     this.logger.info(`📈 Retorno Anualizado: ${results.annualizedReturn.toFixed(2)}%`);
     
+<<<<<<< Updated upstream
     // Performance
     this.logger.info('\n📊 PERFORMANCE:');
     this.logger.info(`🎯 Win Rate: ${performance.winRate.toFixed(2)}%`);
@@ -322,6 +488,68 @@ export class BacktestRunner {
     }
     
     this.logger.info('\n' + '='.repeat(60));
+=======
+    // Performance financeira
+    this.logger.info('\n💰 PERFORMANCE FINANCEIRA');
+    this.logger.info('-'.repeat(40));
+    this.logger.info(`�� Saldo inicial: $${(summary.initialBalance || 0).toFixed(2)}`);
+    this.logger.info(`💰 Saldo final: $${(summary.finalBalance || 0).toFixed(2)}`);
+    this.logger.info(`📈 Retorno total: ${(summary.totalReturn || 0).toFixed(2)}%`);
+    this.logger.info(`⚡ Alavancagem: ${summary.leverage || 1}x`);
+    this.logger.info(`📊 Retorno ajustado: ${((summary.totalReturn || 0) * (summary.leverage || 1)).toFixed(2)}%`);
+    
+    // Estatísticas de trading
+    this.logger.info('\n📊 ESTATÍSTICAS DE TRADING');
+    this.logger.info('-'.repeat(40));
+    this.logger.info(`📊 Total de trades: ${performance.totalTrades || 0}`);
+    this.logger.info(`✅ Trades vencedores: ${performance.winningTrades || 0}`);
+    this.logger.info(`❌ Trades perdedores: ${performance.losingTrades || 0}`);
+    this.logger.info(`🎯 Win rate: ${(performance.winRate || 0).toFixed(2)}%`);
+    this.logger.info(`📊 Profit factor: ${(performance.profitFactor || 0).toFixed(2)}`);
+    this.logger.info(`📈 Média de ganho: $${(performance.averageWin || 0).toFixed(2)}`);
+    this.logger.info(`📉 Média de perda: $${(performance.averageLoss || 0).toFixed(2)}`);
+    
+    // Métricas de risco
+    this.logger.info('\n🛡️ MÉTRICAS DE RISCO');
+    this.logger.info('-'.repeat(40));
+    this.logger.info(`📉 Máximo drawdown: ${(performance.maxDrawdown || 0).toFixed(2)}%`);
+    this.logger.info(`📈 Sharpe ratio: ${(performance.sharpeRatio || 0).toFixed(2)}`);
+    this.logger.info(`🔴 Máximo de perdas consecutivas: ${performance.maxConsecutiveLosses || 0}`);
+    
+    // Avaliação geral
+    this.logger.info('\n🎯 AVALIAÇÃO GERAL');
+    this.logger.info('-'.repeat(40));
+    
+    const profitFactor = performance.profitFactor || 0;
+    const maxDrawdown = performance.maxDrawdown || 0;
+    const winRate = performance.winRate || 0;
+    
+    if (profitFactor > 2) {
+      this.logger.info('🟢 EXCELENTE: Profit factor > 2.0');
+    } else if (profitFactor > 1.5) {
+      this.logger.info('🟡 BOM: Profit factor > 1.5');
+    } else if (profitFactor > 1.2) {
+      this.logger.info('🟠 REGULAR: Profit factor > 1.2');
+    } else {
+      this.logger.info('🔴 RUIM: Profit factor <= 1.2');
+    }
+    
+    if (maxDrawdown < 10) {
+      this.logger.info('🟢 BAIXO RISCO: Drawdown < 10%');
+    } else if (maxDrawdown < 20) {
+      this.logger.info('🟡 RISCO MODERADO: Drawdown < 20%');
+    } else {
+      this.logger.info('🔴 ALTO RISCO: Drawdown >= 20%');
+    }
+    
+    if (winRate > 60) {
+      this.logger.info('🟢 ALTA PRECISÃO: Win rate > 60%');
+    } else if (winRate > 50) {
+      this.logger.info('🟡 PRECISÃO MÉDIA: Win rate > 50%');
+    } else {
+      this.logger.info('🔴 BAIXA PRECISÃO: Win rate <= 50%');
+    }
+>>>>>>> Stashed changes
   }
 
   /**

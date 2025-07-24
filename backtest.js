@@ -95,40 +95,43 @@ function getTradingType(ambientTimeframe) {
 }
 
 /**
- * Menu principal do backtest
+ * NOVO: Determina o modo de simulação baseado no timeframe
+ * @param {string} ambientTimeframe - Timeframe AMBIENT
+ * @returns {string} - Modo de simulação
  */
-async function showMainMenu() {
-  console.clear();
-  logger.info('🚀 BACKBOT BACKTEST SYSTEM - DADOS REAIS');
-  logger.info('='.repeat(50));
+function determineSimulationMode(ambientTimeframe) {
+  // Timeframes que usam High-Fidelity (intra-vela)
+  const highFidelityTimeframes = ['30m', '15m', '5m', '1m'];
   
-  const { action } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'action',
-      message: 'Escolha uma opção:',
-      choices: [
-        { name: '📊 Executar Backtest com Dados Reais', value: 'real' },
-        { name: '🔄 Executar Backtest Comparativo', value: 'comparative' },
-        { name: '📋 Ver Símbolos Mais Líquidos', value: 'liquid' },
-        { name: '📋 Ver Todos os Símbolos', value: 'symbols' },
-        { name: '⚙️ Configurações Avançadas', value: 'advanced' },
-        { name: '🔧 Teste Rápido (Dados Sintéticos)', value: 'synthetic' },
-        { name: '❌ Sair', value: 'exit' }
-      ]
-    }
-  ]);
+  if (highFidelityTimeframes.includes(ambientTimeframe)) {
+    return 'HIGH_FIDELITY';
+  }
   
-  return action;
+  return 'STANDARD';
 }
 
 /**
- * Executa backtest com dados reais
+ * NOVO: Obtém descrição do modo de simulação
+ * @param {string} simulationMode - Modo de simulação
+ * @param {string} ambientTimeframe - Timeframe AMBIENT
+ * @returns {string} - Descrição do modo
  */
-async function runRealBacktest() {
+function getSimulationModeDescription(simulationMode, ambientTimeframe) {
+  if (simulationMode === 'HIGH_FIDELITY') {
+    return `🔬 Alta Fidelidade (intra-vela) - Simula movimento dentro das velas ${ambientTimeframe} usando dados de 1m`;
+  } else {
+    return `📈 Padrão (velas fechadas) - Analisa apenas no fechamento das velas ${ambientTimeframe}`;
+  }
+}
+
+/**
+ * CORREÇÃO: Backtest com dados reais usando FONTE ÚNICA DA VERDADE (.env)
+ */
+async function runRealBacktest(strategy) {
   logger.info('\n📊 CONFIGURAÇÃO DO BACKTEST COM DADOS REAIS');
   logger.info('-'.repeat(40));
   
+<<<<<<< Updated upstream
   // Primeiro, perguntar a estratégia para determinar se precisa do investimento por trade
   const strategyChoice = await inquirer.prompt([
     {
@@ -146,6 +149,11 @@ async function runRealBacktest() {
   // Configurações base
   const baseConfig = await inquirer.prompt([
     {
+=======
+  // CORREÇÃO: Perguntas limitadas apenas aos parâmetros de simulação (estratégia já selecionada)
+  const simulationConfig = await inquirer.prompt([
+    {
+>>>>>>> Stashed changes
       type: 'input',
       name: 'symbols',
       message: 'Símbolos para testar (separados por vírgula):',
@@ -400,8 +408,123 @@ async function runRealBacktest() {
       }
     ]);
     
+<<<<<<< Updated upstream
     if (continueTest) {
       await runRealBacktest();
+=======
+    finalSimulationMode = customSimulationMode;
+    logger.info(`✅ Modo de simulação alterado para: ${finalSimulationMode}`);
+  }
+
+  // CORREÇÃO: Carregar TODAS as configurações de estratégia do .env (FONTE ÚNICA DA VERDADE)
+  const config = {
+    // Parâmetros de simulação (do usuário)
+    ...simulationConfig,
+    
+    // NOVO: Estratégia selecionada no menu anterior
+    strategy: strategy,
+    
+    // NOVO: Configurações de modo de simulação
+    simulationMode: finalSimulationMode,
+    ambientTimeframe: ambientTimeframe,
+    actionTimeframe: actionTimeframe,
+    
+    // CORREÇÃO: Parâmetros de estratégia carregados do .env
+    // Stop Loss e Take Profit
+    maxNegativePnlStopPct: Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4),
+    minTakeProfitPct: Number(process.env.MIN_TAKE_PROFIT_PCT || 0.5),
+    minProfitPercentage: Number(process.env.MIN_PROFIT_PERCENTAGE || 0),
+    
+    // Configurações de volume
+    capitalPercentage: Number(process.env.ACCOUNT1_CAPITAL_PERCENTAGE || 10),
+    investmentPerTrade: Number(process.env.INVESTMENT_PER_TRADE || 100),
+    
+    // Configurações de execução
+    fee: Number(process.env.FEE || 0.0004),
+    slippage: Number(process.env.SLIPPAGE || 0.0001),
+    maxConcurrentTrades: Number(process.env.MAX_OPEN_TRADES || 5),
+    enableStopLoss: process.env.ENABLE_STOP_LOSS !== 'false',
+    enableTakeProfit: process.env.ENABLE_TAKE_PROFIT !== 'false',
+    
+    // Configurações de trailing stop
+    enableTrailingStop: process.env.ENABLE_TRAILING_STOP === 'true',
+    trailingStopDistance: Number(process.env.TRAILING_STOP_DISTANCE || 0.01),
+    
+    // CORREÇÃO: Dados SEMPRE reais (sem dados sintéticos)
+    useSyntheticData: false,
+    allowSyntheticFallback: false,
+    
+    // Configurações específicas da estratégia do .env
+    strategyConfig: {
+      // DEFAULT
+      defaultStopLoss: Number(process.env.DEFAULT_STOP_LOSS || 0.02),
+      defaultTakeProfit: Number(process.env.DEFAULT_TAKE_PROFIT || 0.04),
+      
+      // PRO_MAX
+      proMaxStopLoss: Number(process.env.PRO_MAX_STOP_LOSS || 0.015),
+      proMaxTakeProfit: Number(process.env.PRO_MAX_TAKE_PROFIT || 0.03),
+      proMaxTrailingStop: Number(process.env.PRO_MAX_TRAILING_STOP || 0.01),
+      
+      // CYPHERPUNK
+      cypherpunkAmbientTimeframe: process.env.CYPHERPUNK_AMBIENT_TIMEFRAME || ambientTimeframe,
+      cypherpunkActionTimeframe: process.env.CYPHERPUNK_ACTION_TIMEFRAME || actionTimeframe,
+      cypherpunkRiskRewardRatio: Number(process.env.CYPHERPUNK_RISK_REWARD_RATIO || 2.5),
+      cypherpunkMaxRiskPerTrade: Number(process.env.CYPHERPUNK_MAX_RISK_PER_TRADE || 2)
+    }
+  };
+
+  // Exibe resumo da configuração
+  logger.info('\n📋 RESUMO DA CONFIGURAÇÃO');
+  logger.info('-'.repeat(40));
+  logger.info(`🎯 Estratégia: ${config.strategy}`);
+  logger.info(`📊 Símbolos: ${config.symbols.join(', ')}`);
+  logger.info(`📅 Período: ${config.days} dias`);
+  logger.info(`⏰ Timeframe AMBIENT: ${config.ambientTimeframe}`);
+  logger.info(`⚡ Timeframe ACTION: ${config.actionTimeframe}`);
+  logger.info(`🔬 Modo de Simulação: ${config.simulationMode}`);
+  logger.info(`💰 Saldo inicial: $${config.initialBalance}`);
+  logger.info(`⚡ Alavancagem: ${config.leverage}x`);
+  logger.info(`💸 Capital efetivo: $${(config.initialBalance * config.leverage).toFixed(2)}`);
+
+  // Confirma execução
+  const { confirm } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'confirm',
+      message: 'Executar backtest com essas configurações?',
+      default: true
+    }
+  ]);
+
+  if (!confirm) {
+    logger.info('❌ Backtest cancelado pelo usuário');
+    return;
+  }
+
+  try {
+    // Executa backtest
+    const runner = new BacktestRunner();
+    const results = await runner.runBacktest(config);
+    
+    // Exibe resultados
+    logger.info('\n📊 RESULTADOS DO BACKTEST');
+    logger.info('-'.repeat(40));
+    logger.info(`💰 Saldo final: $${safeFixed(results.balance)}`);
+    logger.info(`📈 Retorno total: ${safeFixed((results.balance - config.initialBalance) / config.initialBalance * 100)}%`);
+    logger.info(`📊 Total de trades: ${results.totalTrades}`);
+    logger.info(`✅ Trades vencedores: ${results.winningTrades}`);
+    logger.info(`❌ Trades perdedores: ${results.losingTrades}`);
+    logger.info(`🎯 Win rate: ${safeFixed(results.winRate)}%`);
+    logger.info(`📊 Profit factor: ${safeFixed(results.profitFactor)}`);
+    logger.info(`📉 Máximo drawdown: ${safeFixed(results.maxDrawdown * 100)}%`);
+    logger.info(`📈 Sharpe ratio: ${safeFixed(results.sharpeRatio)}`);
+    
+    // Salva resultados se solicitado
+    if (config.saveResults) {
+      const filename = `backtest_${config.strategy}_${config.ambientTimeframe}_${new Date().toISOString().split('T')[0]}.json`;
+      await runner.saveResults(results, filename);
+      logger.info(`💾 Resultados salvos em: ${filename}`);
+>>>>>>> Stashed changes
     }
     
   } catch (error) {
@@ -995,11 +1118,37 @@ async function showPerformanceSettings() {
   ]);
 }
 
+// NOVO: Menu de seleção de estratégias
+async function showStrategyMenu() {
+  const { strategy } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'strategy',
+      message: '🎯 BACKTEST - Escolha a estratégia:',
+      choices: [
+        { name: '📊 DEFAULT - Farm de Volume (Recomendado)', value: 'DEFAULT' },
+        { name: '🚧 PRO_MAX - Estratégia Avançada (Em desenvolvimento)', value: 'PRO_MAX', disabled: 'Em desenvolvimento' },
+        { name: '🚧 CYPHERPUNK - Sistema AMBIENT + ACTION (Em desenvolvimento)', value: 'CYPHERPUNK', disabled: 'Em desenvolvimento' },
+        { name: '❌ Sair', value: 'exit' }
+      ]
+    }
+  ]);
+
+  if (strategy === 'exit') {
+    logger.info('👋 Saindo do sistema de backtest...');
+    process.exit(0);
+  }
+
+  // Executa o backtest com a estratégia selecionada
+  await runRealBacktest(strategy);
+}
+
 /**
  * Função principal
  */
 async function main() {
   try {
+<<<<<<< Updated upstream
     while (true) {
       const action = await showMainMenu();
       
@@ -1027,10 +1176,21 @@ async function main() {
           process.exit(0);
       }
     }
+=======
+    logger.info('🚀 BACKTEST - Sistema de Teste de Estratégias');
+    logger.info('='.repeat(50));
+    // MODIFICADO: Vai direto para o menu de seleção de estratégias
+    await showStrategyMenu();
+>>>>>>> Stashed changes
   } catch (error) {
     logger.error(`❌ Erro fatal: ${error.message}`);
     process.exit(1);
   }
+}
+
+// Função utilitária para evitar erro ao chamar .toFixed em valores undefined/NaN
+function safeFixed(val, digits = 2) {
+  return typeof val === 'number' && isFinite(val) ? val.toFixed(digits) : 'N/A';
 }
 
 // Executa se for o arquivo principal

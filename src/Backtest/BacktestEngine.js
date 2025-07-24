@@ -15,6 +15,17 @@ export class BacktestEngine {
       slippage: config.slippage || 0.0001, // 0.01% slippage
       leverage: config.leverage || 1, // Alavancagem (1x = sem alavancagem)
       minProfitPercentage: config.minProfitPercentage || 0, // Profit mínimo em % (0 = apenas vs taxas)
+      // FIX: Configurações do bot real sincronizadas
+      maxNegativePnlStopPct: Number(config.maxNegativePnlStopPct || process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4),
+      minTakeProfitPct: Number(config.minTakeProfitPct || process.env.MIN_TAKE_PROFIT_PCT || 0.5),
+      enableTrailingStop: config.enableTrailingStop !== false,
+      trailingStopDistance: config.trailingStopDistance || 0.01, // 1% por padrão
+      
+      // NOVO: Configurações de modo de simulação
+      simulationMode: config.simulationMode || 'AUTO', // AUTO, HIGH_FIDELITY, STANDARD
+      ambientTimeframe: config.ambientTimeframe || '1h', // Timeframe da estratégia
+      actionTimeframe: config.actionTimeframe || '5m', // Timeframe de ação
+      dataFormat: config.dataFormat || 'STANDARD', // NOVO: Formato dos dados recebidos
       ...config
     };
     
@@ -41,81 +52,397 @@ export class BacktestEngine {
     
     this.openPositions = new Map(); // symbol -> position
     this.candleHistory = new Map(); // symbol -> candles[]
+    this.strategyName = null; // Será definido em runBacktest
+    
+    // CORREÇÃO: Instanciar classes de stop loss do bot real
+    this.stopLossStrategies = new Map(); // strategyName -> stopLossInstance
+    
+    // REFATORADO: Dados para modo High-Fidelity
+    this.highFidelityData = new Map(); // symbol -> { oneMinuteCandles: [], ambientCandles: [] }
+    this.currentAmbientCandles = new Map(); // symbol -> current ambient candle in formation
+    this.lastAmbientTimestamp = new Map(); // symbol -> last ambient candle timestamp
+    
+    // Determinar modo de simulação
+    this.determineSimulationMode();
   }
 
   /**
-   * Executa backtest completo para uma estratégia
-   * @param {string} strategyName - Nome da estratégia (DEFAULT, PRO_MAX)
-   * @param {Array} historicalData - Dados históricos por símbolo
-   * @param {object} strategyConfig - Configurações específicas da estratégia
+   * NOVO: Determina o modo de simulação baseado na configuração e timeframe
+   */
+  determineSimulationMode() {
+    const { simulationMode, ambientTimeframe } = this.config;
+    
+    // Se modo for AUTO, determina automaticamente baseado no timeframe
+    if (simulationMode === 'AUTO') {
+      const highFidelityTimeframes = ['30m', '15m', '5m', '1m'];
+      this.config.simulationMode = highFidelityTimeframes.includes(ambientTimeframe) ? 'HIGH_FIDELITY' : 'STANDARD';
+    }
+    
+    this.logger.info(`🎯 Modo de Simulação: ${this.config.simulationMode}`);
+    this.logger.info(`📊 Timeframe AMBIENT: ${this.config.ambientTimeframe}`);
+    this.logger.info(`⚡ Timeframe ACTION: ${this.config.actionTimeframe}`);
+    
+    if (this.config.simulationMode === 'HIGH_FIDELITY') {
+      this.logger.info(`🔬 Alta Fidelidade: Simulação intra-vela com dados de 1m`);
+    } else {
+      this.logger.info(`📈 Padrão: Simulação em velas fechadas`);
+    }
+  }
+
+  /**
+   * NOVO: Converte timeframe para milissegundos
+   */
+  timeframeToMs(timeframe) {
+    const unit = timeframe.slice(-1);
+    const value = parseInt(timeframe.slice(0, -1));
+    
+    switch (unit) {
+      case 'm': return value * 60 * 1000; // minutos
+      case 'h': return value * 60 * 60 * 1000; // horas
+      case 'd': return value * 24 * 60 * 60 * 1000; // dias
+      case 'w': return value * 7 * 24 * 60 * 60 * 1000; // semanas
+      default: return 60 * 1000; // fallback para 1 minuto
+    }
+  }
+
+  /**
+   * REFATORADO: Executa backtest com suporte a dados duplos
+   * @param {string} strategyName - Nome da estratégia
+   * @param {object} historicalData - Dados históricos (formato varia conforme dataFormat)
+   * @param {object} strategyConfig - Configuração da estratégia
    * @returns {object} - Resultados do backtest
    */
   async runBacktest(strategyName, historicalData, strategyConfig = {}) {
     try {
-      this.logger.info(`🚀 Iniciando backtest da estratégia: ${strategyName}`);
-      this.logger.info(`💰 Saldo inicial: $${this.config.initialBalance.toFixed(2)}`);
-      this.logger.info(`📊 Dados históricos: ${Object.keys(historicalData).length} símbolos`);
-      this.logger.info(`⚡ Alavancagem: ${this.config.leverage}x`);
-      this.logger.info(`💸 Capital efetivo: $${(this.config.initialBalance * this.config.leverage).toFixed(2)}`);
+      this.strategyName = strategyName;
+      this.logger.info(`🚀 Iniciando Backtest Engine para estratégia: ${strategyName}`);
       
-      // Log da configuração de volume
-      if (this.config.capitalPercentage > 0) {
-        this.logger.info(`📈 Volume por operação: ${this.config.capitalPercentage}% do capital disponível`);
+      // REFATORADO: Detecta e processa dados no formato correto
+      if (this.config.dataFormat === 'HIGH_FIDELITY' || this.isHighFidelityDataFormat(historicalData)) {
+        this.logger.info('🔬 Modo HIGH_FIDELITY detectado - Processando dados duplos');
+        return await this.runHighFidelityBacktest(strategyName, historicalData, strategyConfig);
       } else {
-        this.logger.info(`📈 Volume por operação: $${this.config.investmentPerTrade.toFixed(2)} (valor fixo)`);
+        this.logger.info('📈 Modo STANDARD detectado - Processando dados simples');
+        return await this.runStandardBacktest(strategyName, historicalData, strategyConfig);
       }
-      
-      // Inicializa estratégia
-      const strategy = StrategyFactory.createStrategy(strategyName);
-      if (!strategy) {
-        throw new Error(`Estratégia ${strategyName} não encontrada`);
-      }
-
-      // Processa dados históricos cronologicamente
-      const allTimestamps = this.extractAllTimestamps(historicalData);
-      const sortedTimestamps = [...new Set(allTimestamps)].sort((a, b) => a - b);
-      
-      this.logger.info(`📅 Período: ${new Date(sortedTimestamps[0]).toLocaleString()} - ${new Date(sortedTimestamps[sortedTimestamps.length - 1]).toLocaleString()}`);
-      this.logger.info(`⏱️ Total de candles: ${sortedTimestamps.length}`);
-      
-      // Processa cada timestamp
-      for (let i = 0; i < sortedTimestamps.length; i++) {
-        const timestamp = sortedTimestamps[i];
-        const currentData = this.getDataForTimestamp(historicalData, timestamp);
-        
-        // Atualiza preços das posições abertas
-        this.updateOpenPositions(currentData);
-        
-        // Verifica stop loss e take profit
-        this.checkStopLossAndTakeProfit(currentData);
-        
-        // Analisa novos sinais apenas se não atingiu limite de posições
-        if (this.openPositions.size < this.config.maxConcurrentTrades) {
-          await this.analyzeSignals(strategy, currentData, strategyConfig, timestamp);
-        }
-        
-        // Atualiza métricas a cada 100 candles
-        if (i % 100 === 0) {
-          this.updateMetrics();
-          this.logger.info(`📈 Progresso: ${((i / sortedTimestamps.length) * 100).toFixed(1)}% - Saldo: $${this.results.balance.toFixed(2)}`);
-        }
-      }
-      
-      // Fecha todas as posições abertas no final
-      this.closeAllPositions(sortedTimestamps[sortedTimestamps.length - 1]);
-      
-      // Calcula métricas finais
-      this.calculateFinalMetrics();
-      
-      return this.results;
       
     } catch (error) {
-      this.logger.error(`❌ Erro no backtest: ${error.message}`);
+      this.logger.error(`❌ Erro no Backtest Engine: ${error.message}`);
       throw error;
     }
   }
 
   /**
+   * NOVO: Detecta se os dados estão no formato HIGH_FIDELITY
+   * @param {object} data - Dados históricos
+   * @returns {boolean} - True se for formato HIGH_FIDELITY
+   */
+  isHighFidelityDataFormat(data) {
+    if (!data || typeof data !== 'object') {
+      return false;
+    }
+    
+    // Verifica se pelo menos um símbolo tem o formato HIGH_FIDELITY
+    for (const [symbol, symbolData] of Object.entries(data)) {
+      if (symbolData && 
+          typeof symbolData === 'object' && 
+          symbolData.oneMinuteCandles && 
+          symbolData.ambientCandles) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * REFATORADO: Executa backtest de alta fidelidade com dados duplos
+   * @param {string} strategyName - Nome da estratégia
+   * @param {object} historicalData - Dados no formato { symbol: { oneMinuteCandles: [], ambientCandles: [] } }
+   * @param {object} strategyConfig - Configuração da estratégia
+   * @returns {object} - Resultados do backtest
+   */
+  async runHighFidelityBacktest(strategyName, historicalData, strategyConfig) {
+    try {
+      this.logger.info('🔬 Iniciando Backtest de Alta Fidelidade...');
+      
+      // Inicializa estratégia e stop loss
+      const strategy = StrategyFactory.createStrategy(strategyName);
+      await this.initializeStopLossStrategies();
+      
+      // REFATORADO: Processa dados duplos
+      this.processHighFidelityData(historicalData);
+      
+      // Extrai todos os timestamps de 1m para simulação
+      const allTimestamps = this.extractAllOneMinuteTimestamps(historicalData);
+      this.logger.info(`⏰ Simulação com ${allTimestamps.length} timestamps de 1m`);
+      
+      // Loop principal de simulação minuto a minuto
+      for (let i = 0; i < allTimestamps.length; i++) {
+        const timestamp = allTimestamps[i];
+        const currentData = this.getDataForOneMinuteTimestamp(historicalData, timestamp);
+        
+        // Atualiza posições abertas
+        this.updateOpenPositions(currentData);
+        this.updateTrailingStops(currentData);
+        this.checkStopLossAndTakeProfit(currentData);
+        
+        // Analisa sinais com dados de alta fidelidade
+        await this.analyzeSignalsHighFidelity(strategy, currentData, strategyConfig, timestamp);
+        
+        // Atualiza métricas a cada 1000 timestamps
+        if (i % 1000 === 0) {
+          this.updateMetrics();
+          this.logger.info(`📊 Progresso: ${i}/${allTimestamps.length} timestamps processados`);
+        }
+      }
+      
+      // Fecha todas as posições no final
+      const finalTimestamp = allTimestamps[allTimestamps.length - 1];
+      this.closeAllPositions(finalTimestamp);
+      
+      // Calcula métricas finais
+      this.calculateFinalMetrics();
+      
+      this.logger.info('✅ Backtest de Alta Fidelidade concluído');
+      return this.generateReport();
+      
+    } catch (error) {
+      this.logger.error(`❌ Erro no Backtest de Alta Fidelidade: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * NOVO: Processa dados duplos para modo HIGH_FIDELITY
+   * @param {object} historicalData - Dados no formato duplo
+   */
+  processHighFidelityData(historicalData) {
+    this.highFidelityData.clear();
+    this.currentAmbientCandles.clear();
+    this.lastAmbientTimestamp.clear();
+    
+    for (const [symbol, data] of Object.entries(historicalData)) {
+      if (data.oneMinuteCandles && data.ambientCandles) {
+        this.highFidelityData.set(symbol, {
+          oneMinuteCandles: data.oneMinuteCandles,
+          ambientCandles: data.ambientCandles
+        });
+        
+        // Inicializa candle atual em formação
+        this.currentAmbientCandles.set(symbol, null);
+        this.lastAmbientTimestamp.set(symbol, 0);
+        
+        this.logger.info(`🔬 ${symbol}: ${data.oneMinuteCandles.length} candles 1m + ${data.ambientCandles.length} candles ${this.config.ambientTimeframe}`);
+      }
+    }
+  }
+
+  /**
+   * NOVO: Extrai todos os timestamps de 1m para simulação
+   * @param {object} historicalData - Dados duplos
+   * @returns {Array} - Array de timestamps únicos ordenados
+   */
+  extractAllOneMinuteTimestamps(historicalData) {
+    const allTimestamps = new Set();
+    
+    for (const [symbol, data] of Object.entries(historicalData)) {
+      if (data.oneMinuteCandles) {
+        for (const candle of data.oneMinuteCandles) {
+          allTimestamps.add(candle.timestamp);
+        }
+      }
+    }
+    
+    return Array.from(allTimestamps).sort((a, b) => a - b);
+  }
+
+  /**
+   * NOVO: Obtém dados para um timestamp específico de 1m
+   * @param {object} historicalData - Dados duplos
+   * @param {number} timestamp - Timestamp de 1m
+   * @returns {object} - Dados para o timestamp
+   */
+  getDataForOneMinuteTimestamp(historicalData, timestamp) {
+    const currentData = {};
+    
+    for (const [symbol, data] of Object.entries(historicalData)) {
+      if (data.oneMinuteCandles) {
+        // Encontra o candle de 1m para este timestamp
+        const oneMinuteCandle = data.oneMinuteCandles.find(c => c.timestamp === timestamp);
+        
+        if (oneMinuteCandle) {
+          // Atualiza candle atual em formação
+          this.updateCurrentAmbientCandle(symbol, oneMinuteCandle);
+          
+          // Obtém histórico de candles AMBIENT fechados
+          const ambientHistory = this.getAmbientCandleHistory(symbol, timestamp);
+          
+          currentData[symbol] = {
+            current: oneMinuteCandle,
+            ambient: this.currentAmbientCandles.get(symbol),
+            history: ambientHistory
+          };
+        }
+      }
+    }
+    
+    return currentData;
+  }
+
+  /**
+   * REFATORADO: Atualiza candle AMBIENT em formação com novo candle de 1m
+   * @param {string} symbol - Símbolo
+   * @param {object} oneMinuteCandle - Candle de 1m
+   */
+  updateCurrentAmbientCandle(symbol, oneMinuteCandle) {
+    const ambientMs = this.timeframeToMs(this.config.ambientTimeframe);
+    const ambientStart = Math.floor(oneMinuteCandle.timestamp / ambientMs) * ambientMs;
+    
+    let currentAmbient = this.currentAmbientCandles.get(symbol);
+    
+    // Se é um novo período AMBIENT, inicia novo candle
+    if (!currentAmbient || currentAmbient.start !== ambientStart) {
+      currentAmbient = {
+        timestamp: ambientStart,
+        start: ambientStart,
+        end: ambientStart + ambientMs - 1,
+        open: oneMinuteCandle.open,
+        high: oneMinuteCandle.high,
+        low: oneMinuteCandle.low,
+        close: oneMinuteCandle.close,
+        volume: oneMinuteCandle.volume,
+        quoteVolume: oneMinuteCandle.quoteVolume,
+        trades: oneMinuteCandle.trades
+      };
+    } else {
+      // Atualiza candle existente
+      currentAmbient.high = Math.max(currentAmbient.high, oneMinuteCandle.high);
+      currentAmbient.low = Math.min(currentAmbient.low, oneMinuteCandle.low);
+      currentAmbient.close = oneMinuteCandle.close;
+      currentAmbient.volume += oneMinuteCandle.volume;
+      currentAmbient.quoteVolume += oneMinuteCandle.quoteVolume;
+      currentAmbient.trades += oneMinuteCandle.trades;
+    }
+    
+    this.currentAmbientCandles.set(symbol, currentAmbient);
+  }
+
+  /**
+   * REFATORADO: Obtém histórico de candles AMBIENT fechados
+   * @param {string} symbol - Símbolo
+   * @param {number} currentTimestamp - Timestamp atual
+   * @returns {Array} - Array de candles AMBIENT fechados
+   */
+  getAmbientCandleHistory(symbol, currentTimestamp) {
+    const data = this.highFidelityData.get(symbol);
+    if (!data || !data.ambientCandles) {
+      return [];
+    }
+    
+    // Retorna candles AMBIENT que já fecharam (antes do timestamp atual)
+    return data.ambientCandles.filter(candle => candle.end < currentTimestamp);
+  }
+
+  /**
+   * NOVO: Executa backtest em modo Standard (velas fechadas)
+   */
+  async runStandardBacktest(strategy, historicalData, strategyConfig) {
+    this.logger.info(`📈 Executando backtest em modo Standard (velas fechadas)`);
+    
+    // Processa dados históricos cronologicamente
+    const allTimestamps = this.extractAllTimestamps(historicalData);
+    const sortedTimestamps = [...new Set(allTimestamps)].sort((a, b) => a - b);
+    
+    this.logger.info(`📅 Período: ${new Date(sortedTimestamps[0]).toLocaleString()} - ${new Date(sortedTimestamps[sortedTimestamps.length - 1]).toLocaleString()}`);
+    this.logger.info(`⏱️ Total de candles: ${sortedTimestamps.length}`);
+    
+    // Processa cada timestamp
+    for (let i = 0; i < sortedTimestamps.length; i++) {
+      const timestamp = sortedTimestamps[i];
+      const currentData = this.getDataForTimestamp(historicalData, timestamp);
+      
+      // Atualiza preços das posições abertas
+      this.updateOpenPositions(currentData);
+      
+      // CORREÇÃO: Atualiza trailing stop antes de verificar saídas
+      if (this.config.enableTrailingStop) {
+        this.updateTrailingStops(currentData);
+      }
+      
+      // Verifica stop loss e take profit (agora com lógica dinâmica de PnL)
+      this.checkStopLossAndTakeProfit(currentData);
+      
+      // Analisa novos sinais apenas se não atingiu limite de posições
+      if (this.openPositions.size < this.config.maxConcurrentTrades) {
+        await this.analyzeSignals(strategy, currentData, strategyConfig, timestamp);
+      }
+      
+      // Atualiza métricas a cada 100 candles
+      if (i % 100 === 0) {
+        this.updateMetrics();
+        this.logger.info(`📈 Progresso: ${((i / sortedTimestamps.length) * 100).toFixed(1)}% - Saldo: $${this.results.balance.toFixed(2)}`);
+      }
+    }
+    
+    // Fecha todas as posições abertas no final
+    this.closeAllPositions(sortedTimestamps[sortedTimestamps.length - 1]);
+    
+    // Calcula métricas finais
+    this.calculateFinalMetrics();
+    
+    this.logger.info('✅ Backtest Standard concluído');
+    return this.generateReport();
+  }
+
+  /**
+   * NOVO: Analisa sinais em modo High-Fidelity
+   */
+  async analyzeSignalsHighFidelity(strategy, currentData, strategyConfig, timestamp) {
+    for (const [symbol, data] of Object.entries(currentData)) {
+      // Constrói vela AMBIENT atual baseada em dados de 1m
+      const currentAmbientCandle = this.currentAmbientCandles.get(symbol);
+      
+      // Obtém histórico de velas AMBIENT para análise
+      const ambientCandleHistory = this.getAmbientCandleHistory(symbol, timestamp);
+      
+      // Verifica se tem dados suficientes para análise
+      if (ambientCandleHistory.length < 50) {
+        continue; // Aguarda mais dados
+      }
+      
+      // Cria dados no formato esperado pela estratégia
+      const ambientData = {
+        [symbol]: ambientCandleHistory
+      };
+      
+      // Analisa sinais usando velas AMBIENT
+      await this.analyzeSignals(strategy, ambientData, strategyConfig, timestamp);
+    }
+  }
+
+  /**
+   * CORREÇÃO: Inicializar estratégias de stop loss do bot real
+   */
+  async initializeStopLossStrategies() {
+    try {
+      // Importa as classes de stop loss do bot real
+      const { DefaultStopLoss } = await import('../Decision/Strategies/DefaultStopLoss.js');
+      const { ProMaxStopLoss } = await import('../Decision/Strategies/ProMaxStopLoss.js');
+      
+      // Instancia as estratégias de stop loss
+      this.stopLossStrategies.set('DEFAULT', new DefaultStopLoss());
+      this.stopLossStrategies.set('PRO_MAX', new ProMaxStopLoss());
+      
+      this.logger.info('✅ Estratégias de stop loss do bot real inicializadas');
+    } catch (error) {
+      this.logger.error(`❌ Erro ao inicializar estratégias de stop loss: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+>>>>>>> Stashed changes
    * Extrai todos os timestamps únicos dos dados históricos
    */
   extractAllTimestamps(historicalData) {
@@ -186,7 +513,7 @@ export class BacktestEngine {
     }
     
     for (const [symbol, data] of Object.entries(currentData)) {
-      // Pula se já tem posição aberta neste símbolo
+      // Verifica se já tem posição aberta neste símbolo
       if (this.openPositions.has(symbol)) {
         continue;
       }
@@ -250,6 +577,7 @@ export class BacktestEngine {
       } catch (error) {
         this.logger.error(`❌ Erro ao analisar ${symbol}: ${error.message}`);
       }
+    }
     }
   }
 

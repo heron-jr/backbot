@@ -10,6 +10,7 @@ export class DataProvider {
   }
 
   /**
+<<<<<<< Updated upstream
    * Obtém dados históricos de múltiplos símbolos com suporte a períodos longos
    * @param {Array} symbols - Lista de símbolos para buscar
    * @param {string} interval - Intervalo dos candles (1m, 5m, 15m, 1h, 4h, 1d)
@@ -17,11 +18,30 @@ export class DataProvider {
    * @param {number} startTime - Timestamp de início (opcional)
    * @param {number} endTime - Timestamp de fim (opcional)
    * @returns {object} - Dados históricos organizados por símbolo
+=======
+   * REFATORADO: Obtém dados históricos com suporte a modo High-Fidelity
+   * @param {Array} symbols - Lista de símbolos
+   * @param {string} interval - Timeframe da estratégia (AMBIENT)
+   * @param {number} days - Período em dias
+   * @param {string} simulationMode - Modo de simulação (AUTO, HIGH_FIDELITY, STANDARD)
+   * @param {Date} startTime - Data de início (opcional)
+   * @param {Date} endTime - Data de fim (opcional)
+   * @returns {object} - Dados históricos por símbolo (formato varia conforme modo)
+>>>>>>> Stashed changes
    */
   async getHistoricalData(symbols, interval = '1h', days = 30, startTime = null, endTime = null) {
     try {
+<<<<<<< Updated upstream
       this.logger.info(`📊 Obtendo dados históricos REAIS para ${symbols.length} símbolos...`);
       this.logger.info(`📅 Período: ${days} dias | Intervalo: ${interval}`);
+=======
+      this.logger.info(`📊 Obtendo dados históricos para ${symbols.length} símbolos`);
+      this.logger.info(`⏰ Timeframe: ${interval} | Período: ${days} dias | Modo: ${simulationMode}`);
+      
+      // Determina o timeframe de dados baseado no modo de simulação
+      const dataTimeframe = this.determineDataTimeframe(interval, simulationMode);
+      this.logger.info(`🔍 Timeframe de dados: ${dataTimeframe}`);
+>>>>>>> Stashed changes
       
       const historicalData = {};
       const promises = symbols.map(symbol => 
@@ -35,21 +55,70 @@ export class DataProvider {
         const symbol = symbols[i];
         const result = results[i];
         
+<<<<<<< Updated upstream
         if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
           historicalData[symbol] = result.value;
           successCount++;
           this.logger.info(`✅ ${symbol}: ${result.value.length} candles (${this.formatPeriod(result.value)})`);
         } else {
           this.logger.error(`❌ ${symbol}: Erro ao obter dados`);
+=======
+        this.logger.info(`📈 [${progressBar}] ${progress}% - Obtendo dados para ${symbol} (${currentSymbolIndex}/${totalSymbols})...`);
+        
+        try {
+          // Obtém dados no timeframe apropriado
+          const symbolData = await this.getSymbolDataExtended(symbol, dataTimeframe, days, startTime, endTime);
+          
+          if (symbolData && symbolData.length > 0) {
+            historicalData[symbol] = symbolData;
+            this.logger.info(`✅ ${symbol}: ${symbolData.length} candles obtidos`);
+          } else {
+            this.logger.warn(`⚠️ ${symbol}: Sem dados disponíveis`);
+          }
+          
+          // Pequena pausa para evitar rate limit
+          await this.delay(100);
+          
+        } catch (error) {
+          this.logger.error(`❌ Erro ao obter dados para ${symbol}: ${error.message}`);
+>>>>>>> Stashed changes
         }
       }
       
       this.logger.info(`📈 Dados obtidos com sucesso para ${successCount}/${symbols.length} símbolos`);
       
+<<<<<<< Updated upstream
       if (successCount === 0) {
         throw new Error('Nenhum símbolo com dados válidos encontrado');
+=======
+      // REFATORADO: Lógica para modo HIGH_FIDELITY
+      if (dataTimeframe === '1m' && interval !== '1m') {
+        this.logger.info(`🔬 Modo HIGH_FIDELITY: Preparando dados duplos (1m + ${interval})...`);
+        
+        // Agrupa dados de 1m para timeframe AMBIENT
+        const ambientData = this.groupDataForAmbientTimeframe(historicalData, interval);
+        
+        // Retorna objeto com ambos os conjuntos de dados
+        const highFidelityData = {};
+        
+        for (const symbol of symbols) {
+          if (historicalData[symbol] && ambientData[symbol]) {
+            highFidelityData[symbol] = {
+              oneMinuteCandles: historicalData[symbol], // Dados brutos de 1m
+              ambientCandles: ambientData[symbol]       // Dados agregados do timeframe AMBIENT
+            };
+            
+            this.logger.info(`🔬 ${symbol}: ${historicalData[symbol].length} candles 1m + ${ambientData[symbol].length} candles ${interval}`);
+          }
+        }
+        
+        this.logger.info(`✅ Modo HIGH_FIDELITY: Dados duplos preparados para ${Object.keys(highFidelityData).length} símbolos`);
+        return highFidelityData;
+>>>>>>> Stashed changes
       }
       
+      // Modo STANDARD: retorna dados no formato original
+      this.logger.info(`✅ Modo STANDARD: Dados no timeframe ${interval} retornados`);
       return historicalData;
       
     } catch (error) {
@@ -59,6 +128,7 @@ export class DataProvider {
   }
 
   /**
+<<<<<<< Updated upstream
    * Obtém dados históricos para um símbolo específico com suporte a períodos longos
    * Tenta Backpack primeiro, depois Binance como fallback
    */
@@ -328,6 +398,162 @@ export class DataProvider {
     } catch (error) {
       this.logger.error(`❌ [BINANCE] Erro ao obter dados para ${symbol}: ${error.message}`);
       return [];
+=======
+   * NOVO: Determina o timeframe de dados baseado no modo de simulação
+   * @param {string} ambientTimeframe - Timeframe da estratégia
+   * @param {string} simulationMode - Modo de simulação
+   * @returns {string} - Timeframe de dados a ser buscado
+   */
+  determineDataTimeframe(ambientTimeframe, simulationMode) {
+    // Se modo for AUTO, determina automaticamente
+    if (simulationMode === 'AUTO') {
+      const highFidelityTimeframes = ['30m', '15m', '5m', '1m'];
+      simulationMode = highFidelityTimeframes.includes(ambientTimeframe) ? 'HIGH_FIDELITY' : 'STANDARD';
+    }
+    
+    // Se for High-Fidelity, sempre busca dados de 1m
+    if (simulationMode === 'HIGH_FIDELITY') {
+      return '1m';
+    }
+    
+    // Se for Standard, usa o timeframe da estratégia
+    return ambientTimeframe;
+  }
+
+  /**
+   * CORRIGIDO: Agrupa dados de 1m para timeframe AMBIENT com lógica robusta
+   * @param {object} historicalData - Dados históricos de 1m
+   * @param {string} ambientTimeframe - Timeframe AMBIENT desejado
+   * @returns {object} - Dados agrupados por timeframe AMBIENT
+   */
+  groupDataForAmbientTimeframe(historicalData, ambientTimeframe) {
+    const groupedData = {};
+    const ambientMs = this.timeframeToMs(ambientTimeframe);
+    let totalInput = 0;
+    let totalOutput = 0;
+    for (const [symbol, candles1m] of Object.entries(historicalData)) {
+      if (!candles1m || candles1m.length === 0) {
+        this.logger.warn(`⚠️ ${symbol}: Sem dados de 1m para agrupar`);
+        continue;
+      }
+      this.logger.info(`🔬 ${symbol}: Iniciando agrupamento de ${candles1m.length} candles 1m para ${ambientTimeframe}`);
+      totalInput += candles1m.length;
+      // Ordena candles por timestamp
+      candles1m.sort((a, b) => a.timestamp - b.timestamp);
+      const groupedCandles = [];
+      let group = [];
+      let groupStart = null;
+      for (const candle of candles1m) {
+        // Calcula o início do grupo AMBIENT
+        const thisGroupStart = Math.floor(candle.timestamp / ambientMs) * ambientMs;
+        if (groupStart === null) {
+          groupStart = thisGroupStart;
+        }
+        if (thisGroupStart !== groupStart && group.length > 0) {
+          // Fecha grupo anterior e cria candle agregado
+          groupedCandles.push(this.aggregateCandleGroup(group, groupStart, ambientMs));
+          group = [];
+          groupStart = thisGroupStart;
+        }
+        group.push(candle);
+      }
+      // Último grupo
+      if (group.length > 0) {
+        groupedCandles.push(this.aggregateCandleGroup(group, groupStart, ambientMs));
+      }
+      groupedData[symbol] = groupedCandles;
+      totalOutput += groupedCandles.length;
+      this.logger.info(`🔬 ${symbol}: ${candles1m.length} candles 1m → ${groupedCandles.length} candles ${ambientTimeframe}`);
+      if (groupedCandles.length === 0) {
+        this.logger.error(`❌ ${symbol}: Nenhum candle agrupado gerado!`);
+      } else if (groupedCandles.length === 1) {
+        this.logger.warn(`⚠️ ${symbol}: Apenas 1 candle agrupado gerado. Verificar dados de entrada.`);
+      }
+    }
+    this.logger.info(`✅ SUCESSO: ${totalInput} candles de 1m foram agregados em ${totalOutput} candles de ${ambientTimeframe}.`);
+    return groupedData;
+  }
+
+  /**
+   * NOVO: Agrega um grupo de candles de 1m em um candle do timeframe AMBIENT
+   * @param {Array} group - Array de candles de 1m
+   * @param {number} groupStart - Timestamp de início do grupo
+   * @param {number} ambientMs - Duração do timeframe AMBIENT em ms
+   * @returns {object} - Candle agregado
+   */
+  aggregateCandleGroup(group, groupStart, ambientMs) {
+    return {
+      timestamp: groupStart,
+      open: parseFloat(group[0].open),
+      high: Math.max(...group.map(c => parseFloat(c.high))),
+      low: Math.min(...group.map(c => parseFloat(c.low))),
+      close: parseFloat(group[group.length - 1].close),
+      volume: group.reduce((sum, c) => sum + parseFloat(c.volume || 0), 0),
+      quoteVolume: group.reduce((sum, c) => sum + parseFloat(c.quoteVolume || 0), 0),
+      trades: group.reduce((sum, c) => sum + parseInt(c.trades || 0), 0),
+      start: groupStart,
+      end: groupStart + ambientMs - 1
+    };
+  }
+
+  /**
+   * Converte timeframe para milissegundos
+   * @param {string} timeframe - Timeframe (ex: "1m", "5m", "15m", "1h", "4h", "1d")
+   * @returns {number} - Milissegundos
+   */
+  timeframeToMs(timeframe) {
+    const unit = timeframe.slice(-1);
+    const value = parseInt(timeframe.slice(0, -1));
+    
+    switch (unit) {
+      case 'm': return value * 60 * 1000; // minutos
+      case 'h': return value * 60 * 60 * 1000; // horas
+      case 'd': return value * 24 * 60 * 60 * 1000; // dias
+      case 'w': return value * 7 * 24 * 60 * 60 * 1000; // semanas
+      default: return 60 * 1000; // fallback para 1 minuto
+    }
+  }
+
+  /**
+   * CORRIGIDO: Obtém dados estendidos para um símbolo com paginação eficiente
+   * @param {string} symbol - Símbolo do mercado
+   * @param {string} interval - Intervalo dos candles
+   * @param {number} days - Período em dias
+   * @param {Date} startTime - Data de início (opcional)
+   * @param {Date} endTime - Data de fim (opcional)
+   * @returns {Array} - Array de candles
+   */
+  async getSymbolDataExtended(symbol, interval, days, startTime = null, endTime = null) {
+    try {
+      const end = endTime ? endTime.getTime() : Date.now();
+      const start = startTime ? startTime.getTime() : end - (days * 24 * 60 * 60 * 1000);
+      const intervalMs = this.getIntervalMs(interval);
+      const candlesPerDay = this.getCandlesPerDay(interval);
+      const totalCandles = days * candlesPerDay;
+      this.logger.info(`📈 ${symbol}: Buscando ${totalCandles} candles (${days} dias) - ${new Date(start).toISOString()} até ${new Date(end).toISOString()}`);
+      // Tenta Backpack primeiro
+      let allCandles = [];
+      try {
+        allCandles = await this.getBackpackSymbolData(symbol, interval, totalCandles, start, end);
+        if (allCandles && allCandles.length > 0) {
+          this.logger.info(`✅ ${symbol}: ${allCandles.length} candles obtidos da Backpack.`);
+          return allCandles;
+        } else {
+          this.logger.warn(`⚠️ ${symbol}: Backpack não retornou dados, tentando Binance...`);
+        }
+      } catch (e) {
+        this.logger.warn(`⚠️ ${symbol}: Erro na Backpack: ${e.message}. Tentando Binance...`);
+      }
+      // Busca dados reais da Binance (sem fallback sintético)
+      allCandles = await this.getBinanceSymbolData(this.convertSymbolToBinance(symbol), interval, totalCandles, start, end);
+      if (!allCandles || allCandles.length === 0) {
+        throw new Error(`❌ ${symbol}: Não foi possível obter dados reais da Binance para o período solicitado.`);
+      }
+      return allCandles;
+    } catch (error) {
+      this.logger.error(`❌ Erro ao obter dados para ${symbol}: ${error.message}`);
+      throw error;
+>>>>>>> Stashed changes
     }
   }
 
@@ -375,7 +601,254 @@ export class DataProvider {
   }
 
   /**
+<<<<<<< Updated upstream
    * Obtém lista de símbolos disponíveis com filtros otimizados
+=======
+   * CORRIGIDO: Obtém dados do Backpack com validação de período
+   * @param {string} symbol - Símbolo do mercado
+   * @param {string} interval - Intervalo dos candles
+   * @param {number} limit - Número máximo de candles
+   * @param {number} startTime - Timestamp de início
+   * @param {number} endTime - Timestamp de fim
+   * @returns {Array} - Array de candles
+   */
+  async getBackpackSymbolData(symbol, interval, limit, startTime, endTime) {
+    try {
+      // Converte símbolo para formato Backpack se necessário
+      const backpackSymbol = this.convertSymbolToBackpack(symbol);
+      
+      // CORRIGIDO: Verifica se o período solicitado não está no futuro
+      const now = Date.now();
+      if (startTime > now) {
+        this.logger.warn(`⚠️ ${symbol}: Período solicitado está no futuro (${new Date(startTime).toISOString()}). Usando dados até o momento atual.`);
+        return [];
+      }
+      
+      this.logger.info(`🔍 ${symbol}: Buscando dados Backpack - ${new Date(startTime).toISOString()} até ${new Date(endTime).toISOString()}`);
+      
+      // CORRIGIDO: Calcula o limit correto baseado no período solicitado
+      const intervalMs = this.getIntervalMs(interval);
+      const requestedDuration = endTime - startTime;
+      const requiredCandles = Math.ceil(requestedDuration / intervalMs);
+      
+      // Usa o maior entre o limit solicitado e o necessário para cobrir o período
+      const actualLimit = Math.max(limit, requiredCandles);
+      
+      this.logger.info(`🔍 ${symbol}: Período solicitado: ${(requestedDuration / (24 * 60 * 60 * 1000)).toFixed(1)} dias, candles necessários: ${requiredCandles}, limit usado: ${actualLimit}`);
+      
+      // Chama a API com o limit calculado (a API sempre retorna candles até o momento atual)
+      const candles = await Markets.getKLines(backpackSymbol, interval, actualLimit);
+      
+      if (!candles || !Array.isArray(candles)) {
+        this.logger.warn(`⚠️ ${symbol}: API Backpack retornou dados inválidos`);
+        return [];
+      }
+      
+      this.logger.info(`🔍 ${symbol}: API retornou ${candles.length} candles`);
+      
+      // CORRIGIDO: Filtra candles que estão dentro do período solicitado com logs detalhados
+      const filteredCandles = candles.filter(candle => {
+        const candleTime = candle.start || candle.timestamp;
+        const isInRange = candleTime >= startTime && candleTime <= endTime;
+        
+        // Log detalhado para debug (apenas para os primeiros candles)
+        if (candles.indexOf(candle) < 3) {
+          this.logger.info(`🔍 ${symbol}: Candle ${new Date(candleTime).toISOString()} - ${isInRange ? '✅' : '❌'} no período solicitado`);
+        }
+        
+        return isInRange;
+      });
+      
+      this.logger.info(`🔍 ${symbol}: ${candles.length} candles retornados, ${filteredCandles.length} filtrados para o período solicitado`);
+      
+      // CORRIGIDO: Se nenhum candle foi filtrado, mostra o range de timestamps disponíveis
+      if (filteredCandles.length === 0 && candles.length > 0) {
+        const firstCandle = candles[0];
+        const lastCandle = candles[candles.length - 1];
+        const firstTime = firstCandle.start || firstCandle.timestamp;
+        const lastTime = lastCandle.start || lastCandle.timestamp;
+        
+        this.logger.warn(`⚠️ ${symbol}: Nenhum candle no período solicitado. Dados disponíveis: ${new Date(firstTime).toISOString()} até ${new Date(lastTime).toISOString()}`);
+        this.logger.warn(`⚠️ ${symbol}: Período solicitado: ${new Date(startTime).toISOString()} até ${new Date(endTime).toISOString()}`);
+      }
+      
+      // Formata candles para o formato padrão
+      return filteredCandles.map(candle => ({
+        timestamp: candle.start || candle.timestamp,
+        open: parseFloat(candle.open),
+        high: parseFloat(candle.high),
+        low: parseFloat(candle.low),
+        close: parseFloat(candle.close),
+        volume: parseFloat(candle.volume),
+        quoteVolume: parseFloat(candle.quoteVolume || 0),
+        trades: parseInt(candle.trades || 0),
+        start: candle.start || candle.timestamp,
+        end: candle.end || (candle.start || candle.timestamp) + this.getIntervalMs(interval) - 1
+      }));
+      
+    } catch (error) {
+      this.logger.warn(`⚠️ Erro ao obter dados do Backpack para ${symbol}: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Converte símbolo para formato Backpack
+   * @param {string} symbol - Símbolo original
+   * @returns {string} - Símbolo no formato Backpack
+   */
+  convertSymbolToBackpack(symbol) {
+    // Backpack usa o mesmo formato que já temos (ex: BTC_USDC_PERP)
+    // Não precisa de conversão
+    return symbol;
+  }
+
+  /**
+   * Busca dados reais da API da Binance com paginação robusta
+   * @param {string} symbol - Símbolo do mercado (ex: BTCUSDT)
+   * @param {string} interval - Intervalo dos candles (ex: '1m', '15m')
+   * @param {number} totalLimit - Número total de candles desejados
+   * @param {number} startTime - Timestamp de início (ms)
+   * @param {number} endTime - Timestamp de fim (ms)
+   * @returns {Array} - Array de candles reais
+   */
+  async getBinanceSymbolData(symbol, interval, totalLimit, startTime, endTime) {
+    const axios = (await import('axios')).default;
+    const maxBatch = 1000; // Limite da Binance por requisição
+    let allCandles = [];
+    let currentStart = startTime;
+    let batchCount = 0;
+    let lastTimestamp = null;
+    let safety = 0;
+    const maxSafety = Math.ceil(totalLimit / maxBatch) * 2;
+    try {
+      while (allCandles.length < totalLimit && currentStart < endTime && safety < maxSafety) {
+        safety++;
+        batchCount++;
+        const batchLimit = Math.min(maxBatch, totalLimit - allCandles.length);
+        const params = {
+          symbol,
+          interval,
+          limit: batchLimit,
+          startTime: currentStart,
+          endTime: endTime
+        };
+        this.logger.info(`🔍 Binance: Lote ${batchCount} | ${symbol} | ${interval} | startTime=${new Date(currentStart).toISOString()} | endTime=${new Date(endTime).toISOString()} | limit=${batchLimit}`);
+        let response;
+        try {
+          response = await axios.get('https://api.binance.com/api/v3/klines', { params });
+        } catch (err) {
+          this.logger.error(`❌ Erro na API Binance: ${err.message}`);
+          throw new Error(`Erro ao buscar dados reais da Binance: ${err.message}`);
+        }
+        if (!response.data || !Array.isArray(response.data) || response.data.length === 0) {
+          this.logger.warn(`⚠️ Binance retornou 0 candles no lote ${batchCount}.`);
+          break;
+        }
+        // Mapeia para o formato padrão
+        const candles = response.data.map(candle => ({
+          timestamp: candle[0],
+          open: parseFloat(candle[1]),
+          high: parseFloat(candle[2]),
+          low: parseFloat(candle[3]),
+          close: parseFloat(candle[4]),
+          volume: parseFloat(candle[5]),
+          quoteVolume: parseFloat(candle[7]),
+          trades: parseInt(candle[8]),
+          start: candle[0],
+          end: candle[6]
+        }));
+        // Evita duplicatas (caso a Binance retorne o último candle do lote anterior)
+        if (lastTimestamp !== null) {
+          while (candles.length && candles[0].timestamp <= lastTimestamp) {
+            candles.shift();
+          }
+        }
+        if (candles.length === 0) {
+          this.logger.warn(`⚠️ Nenhum novo candle após remoção de duplicatas no lote ${batchCount}.`);
+          break;
+        }
+        allCandles.push(...candles);
+        lastTimestamp = candles[candles.length - 1].timestamp;
+        currentStart = lastTimestamp + 1;
+        this.logger.info(`✅ Binance: Lote ${batchCount} - ${candles.length} candles obtidos (total: ${allCandles.length})`);
+        // Delay para respeitar rate limit
+        await this.delay(200);
+      }
+      if (safety >= maxSafety) {
+        throw new Error('Loop de paginação interrompido por segurança. Verifique os parâmetros.');
+      }
+      // Limita ao total solicitado e filtra por período
+      const filtered = allCandles.filter(c => c.timestamp >= startTime && c.timestamp <= endTime);
+      this.logger.info(`✅ Binance: ${filtered.length} candles finais obtidos para ${symbol} (${interval})`);
+      if (filtered.length === 0) {
+        throw new Error('Nenhum dado real retornado da Binance para o período solicitado.');
+      }
+      return filtered.slice(0, totalLimit);
+    } catch (error) {
+      this.logger.error(`❌ Erro fatal ao buscar dados reais da Binance: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Converte símbolo para formato Binance
+   * @param {string} symbol - Símbolo original
+   * @returns {string} - Símbolo no formato Binance
+   */
+  convertSymbolToBinance(symbol) {
+    // Remove sufixos e converte para formato Binance
+    return symbol
+      .replace('_PERP', '')
+      .replace('_USDC', 'USDC')
+      .replace('_USDT', 'USDT');
+  }
+
+  /**
+   * @param {Array} candles - Array de candles
+   * @returns {Array} - Array sem duplicatas
+   */
+  removeDuplicates(candles) {
+    const unique = new Map();
+    let duplicatesCount = 0;
+    
+    for (const candle of candles) {
+      if (!unique.has(candle.timestamp)) {
+        unique.set(candle.timestamp, candle);
+      } else {
+        duplicatesCount++;
+      }
+    }
+    
+    const uniqueCandles = Array.from(unique.values());
+    
+    if (duplicatesCount > 0) {
+      this.logger.warn(`🔄 Removidas ${duplicatesCount} duplicatas de ${candles.length} candles (${uniqueCandles.length} únicos restantes)`);
+    }
+    
+    return uniqueCandles;
+  }
+
+  /**
+   * Formata período para exibição
+   * @param {Array} candles - Array de candles
+   * @returns {string} - Período formatado
+   */
+  formatPeriod(candles) {
+    if (!candles || candles.length === 0) {
+      return 'Sem dados';
+    }
+    
+    const start = new Date(candles[0].timestamp);
+    const end = new Date(candles[candles.length - 1].timestamp);
+    
+    return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
+  }
+
+  /**
+   * Obtém símbolos disponíveis
+   * @returns {Array} - Lista de símbolos
+>>>>>>> Stashed changes
    */
   async getAvailableSymbols() {
     try {
@@ -577,4 +1050,4 @@ export class DataProvider {
     
     return issues.length === 0;
   }
-} 
+}
