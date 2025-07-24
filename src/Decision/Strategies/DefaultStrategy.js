@@ -38,6 +38,17 @@ export class DefaultStrategy extends BaseStrategy {
 
       console.log(`✅ ${data.market.symbol}: Money Flow confirma ${signals.isLong ? 'LONG' : 'SHORT'} - ${moneyFlowValidation.details}`);
 
+      // FILTRO DE TENDÊNCIA VWAP (sentimento intradiário)
+      const vwapValidation = this.validateVWAPTrend(data, signals.isLong, data.market.symbol === 'BTC_USDC_PERP');
+      
+      if (!vwapValidation.isValid) {
+        console.log(`❌ ${data.market.symbol}: Sinal ${signals.signalType} rejeitado - ${vwapValidation.reason}`);
+        console.log(`   📊 VWAP: ${vwapValidation.details}`);
+        return null;
+      }
+
+      console.log(`✅ ${data.market.symbol}: VWAP confirma ${signals.isLong ? 'LONG' : 'SHORT'} - ${vwapValidation.details}`);
+
       // FILTRO DE TENDÊNCIA DO BTC (usando tendência já calculada)
       if (data.market.symbol !== 'BTC_USDC_PERP') {
         // Só permite operações quando BTC tem tendência clara (BULLISH ou BEARISH)
@@ -87,7 +98,7 @@ export class DefaultStrategy extends BaseStrategy {
         btcTrendMsg = `BTC: ${btcTrend}`;
       }
       
-      console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - Tendência: ${btcTrendMsg} - Sinal: ${signals.signalType} - Money Flow: ${moneyFlowValidation.reason}`);
+      console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - Tendência: ${btcTrendMsg} - Sinal: ${signals.signalType} - Money Flow: ${moneyFlowValidation.reason} - VWAP: ${vwapValidation.reason}`);
 
       return {
         market: data.market.symbol,
@@ -383,6 +394,80 @@ export class DefaultStrategy extends BaseStrategy {
       isShort,
       signalType,
       analysisDetails: analysisDetails || []
+    };
+  }
+
+  /**
+   * Valida se o VWAP confirma a tendência intradiária
+   * @param {object} data - Dados de mercado com indicadores
+   * @param {boolean} isLong - Se é sinal de compra
+   * @param {boolean} isBTCAnalysis - Se é análise do BTC (para logs diferentes)
+   * @returns {object} - Resultado da validação
+   */
+  validateVWAPTrend(data, isLong, isBTCAnalysis = false) {
+    const vwap = data.vwap;
+    const currentPrice = parseFloat(data.marketPrice);
+    
+    // Verifica se o VWAP está disponível
+    if (!vwap || vwap.vwap === null || vwap.vwap === undefined) {
+      if (isBTCAnalysis) {
+        console.log(`   ⚠️ BTC: VWAP não disponível`);
+      }
+      return {
+        isValid: false,
+        reason: 'VWAP não disponível',
+        details: 'Indicador VWAP não encontrado nos dados'
+      };
+    }
+
+    const vwapValue = vwap.vwap;
+    const stdDev = vwap.stdDev;
+    const upperBand = vwap.upperBands;
+    const lowerBand = vwap.lowerBands;
+
+    let isValid = false;
+    let reason = '';
+    let details = '';
+
+    if (isLong) {
+      // Para sinal LONG: Preço atual deve estar acima do VWAP
+      if (currentPrice > vwapValue) {
+        isValid = true;
+        reason = 'VWAP confirma LONG';
+        details = `Preço: ${currentPrice.toFixed(6)} > VWAP: ${vwapValue.toFixed(6)} (sentimento intradiário bullish)`;
+      } else {
+        isValid = false;
+        reason = 'VWAP não confirma LONG';
+        details = `Preço: ${currentPrice.toFixed(6)} <= VWAP: ${vwapValue.toFixed(6)} (sentimento intradiário bearish)`;
+      }
+    } else {
+      // Para sinal SHORT: Preço atual deve estar abaixo do VWAP
+      if (currentPrice < vwapValue) {
+        isValid = true;
+        reason = 'VWAP confirma SHORT';
+        details = `Preço: ${currentPrice.toFixed(6)} < VWAP: ${vwapValue.toFixed(6)} (sentimento intradiário bearish)`;
+      } else {
+        isValid = false;
+        reason = 'VWAP não confirma SHORT';
+        details = `Preço: ${currentPrice.toFixed(6)} >= VWAP: ${vwapValue.toFixed(6)} (sentimento intradiário bullish)`;
+      }
+    }
+
+    // Log detalhado do VWAP
+    if (isBTCAnalysis) {
+      console.log(`   📊 BTC VWAP: Preço=${currentPrice.toFixed(6)}, VWAP=${vwapValue.toFixed(6)}, StdDev=${(stdDev || 0).toFixed(6)}`);
+      console.log(`   ${isValid ? '✅' : '❌'} BTC: ${reason} - ${details}`);
+    }
+
+    return {
+      isValid,
+      reason,
+      details,
+      currentPrice,
+      vwapValue,
+      stdDev,
+      upperBand,
+      lowerBand
     };
   }
 
