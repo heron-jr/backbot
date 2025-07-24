@@ -14,7 +14,7 @@ class Futures {
         
         const response = await axios.get(`${process.env.API_URL}/api/v1/position`, {
           headers,
-          timeout: 15000, // Aumentado para 15 segundos
+          timeout: 15000,
         });
         
         return response.data;

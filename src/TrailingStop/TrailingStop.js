@@ -1,6 +1,5 @@
 import Futures from '../Backpack/Authenticated/Futures.js';
 import OrderController from '../Controllers/OrderController.js';
-import AccountController from '../Controllers/AccountController.js';
 import { StopLossFactory } from '../Decision/Strategies/StopLossFactory.js';
 import PnlController from '../Controllers/PnlController.js';
 import Markets from '../Backpack/Public/Markets.js';
@@ -86,72 +85,15 @@ class TrailingStop {
    * @param {object} account - Dados da conta
    * @returns {object} - PnL em USD e porcentagem
    */
-  calculatePnL(position, account) {
+  calculatePnL(position) {
     try { 
-      const notional = parseFloat(position.netExposureNotional || position.notional || 0);
-      
-      // Tenta diferentes campos para obter o PnL
-      let pnl = 0;
-      
-      // Prioridade 1: unrealizedPnl
-      if (position.unrealizedPnl !== undefined && position.unrealizedPnl !== null && parseFloat(position.unrealizedPnl) !== 0) {
-        pnl = parseFloat(position.unrealizedPnl);
-      }
-      // Prioridade 2: pnlUnrealized
-      else if (position.pnlUnrealized !== undefined && position.pnlUnrealized !== null && parseFloat(position.pnlUnrealized) !== 0) {
-        pnl = parseFloat(position.pnlUnrealized);
-      }
-      // Prioridade 3: pnl
-      else if (position.pnl !== undefined && position.pnl !== null && parseFloat(position.pnl) !== 0) {
-        pnl = parseFloat(position.pnl);
-      }
-      // Prioridade 4: pnlRealized + pnlUnrealized
-      else if ((position.pnlRealized !== undefined && parseFloat(position.pnlRealized) !== 0) || 
-               (position.pnlUnrealized !== undefined && parseFloat(position.pnlUnrealized) !== 0)) {
-        pnl = parseFloat(position.pnlRealized || 0) + parseFloat(position.pnlUnrealized || 0);
-      }
-      // Prioridade 5: Calcula manualmente usando entryPrice e markPrice
-      else if (position.entryPrice && position.markPrice && position.size) {
-        const entryPrice = parseFloat(position.entryPrice);
-        const markPrice = parseFloat(position.markPrice);
-        const size = parseFloat(position.size);
-        const isLong = position.side === 'Long' || position.side === 'long';
-        
-        if (isLong) {
-          pnl = (markPrice - entryPrice) * size;
-        } else {
-          pnl = (entryPrice - markPrice) * size;
-        }
-        
+      const pnl = parseFloat(position.pnlUnrealized || 0);
 
-      }
-      
+      const costBasis = Math.abs(parseFloat(position.netCost ?? '0'));
 
-      
-      if (notional <= 0) {
-        return { pnl: 0, pnlPct: 0 };
-      }
-      
-      // Para posições com alavancagem, usar o valor da margem em vez do notional
-      const margin = parseFloat(position.margin || 0);
-      const leverage = parseFloat(position.leverage || 1);
-      
-
-      
-      // Calcula PnL baseado na margem real (mesma base da interface)
-      let pnlPct;
-      
-      // Calcula PnL baseado na margem real (mesma base da interface)
-      const marginReal = notional / leverage;
-      const netCost = Math.abs(parseFloat(position.netCost || 0));
-      
-      // Calcula PnL baseado no valor real investido (netCost)
-      if (netCost > 0) {
-        pnlPct = (pnl / netCost) * 100;
-      } else if (marginReal > 0) {
-        pnlPct = (pnl / marginReal) * 100;
-      } else {
-        pnlPct = (pnl / notional) * 100;
+      let pnlPct = 0;
+      if (costBasis > 0) {
+        pnlPct = (pnl / costBasis) * 100;
       }
       
       return {
@@ -204,12 +146,36 @@ class TrailingStop {
    * Prioridade 1: Esta verificação acontece ANTES da verificação de MIN_PROFIT_PERCENTAGE
    * 
    * @param {object} position - Dados da posição
-   * @param {object} account - Dados da conta
    * @returns {Promise<boolean>} - True se deve fechar por lucro mínimo
    */
-  async shouldCloseForMinimumProfit(position, account) {
+  async shouldCloseForMinimumProfit(position) {
     try {
-      const { pnl, pnlPct } = this.calculatePnL(position, account);
+      const { pnl, pnlPct } = this.calculatePnL(position);
+      
+      // Configuração do stop loss por porcentagem (opcional)
+      const MAX_NEGATIVE_PNL_STOP_PCT = process.env.MAX_NEGATIVE_PNL_STOP_PCT;
+      
+      // Só valida se a configuração estiver presente
+      if (MAX_NEGATIVE_PNL_STOP_PCT !== undefined && MAX_NEGATIVE_PNL_STOP_PCT !== null && MAX_NEGATIVE_PNL_STOP_PCT !== '') {
+        const maxNegativePnlStopPct = parseFloat(MAX_NEGATIVE_PNL_STOP_PCT);
+        
+        // Verifica se os valores são válidos
+        if (isNaN(maxNegativePnlStopPct) || !isFinite(maxNegativePnlStopPct)) {
+          console.error(`❌ [PROFIT_CHECK] Valor inválido para MAX_NEGATIVE_PNL_STOP_PCT: ${MAX_NEGATIVE_PNL_STOP_PCT}`);
+          return false;
+        }
+        
+        if (isNaN(pnlPct) || !isFinite(pnlPct)) {
+          console.error(`❌ [PROFIT_CHECK] PnL inválido para ${position.symbol}: ${pnlPct}`);
+          return false;
+        }
+        
+        // Verifica se deve fechar por stop loss baseado no pnlPct
+        if (pnlPct <= maxNegativePnlStopPct) {
+          console.log(`🚨 [PROFIT_CHECK] ${position.symbol}: Fechando por stop loss - PnL ${pnlPct.toFixed(2)}% <= limite ${maxNegativePnlStopPct}%`);
+          return true;
+        }
+      }
       
       // Obtém taxas dinâmicas baseado no volume de 30 dias via API
       const fees = await this.getFeeTier();
@@ -219,9 +185,7 @@ class TrailingStop {
       
       // Lucro líquido (após taxas)
       const netProfit = pnl - totalFees;
-      const netProfitPct = parseFloat(position.netExposureNotional || position.notional || 0) > 0 ? 
-                          (netProfit / parseFloat(position.netExposureNotional || position.notional || 0)) * 100 : 0;
-      
+
       // Só fecha se há lucro líquido E ele cobre as taxas
       if (netProfit > 0 && netProfit >= minProfitUSD) {
         console.log(`✅ [PROFIT_CHECK] ${position.symbol}: Fechando por lucro $${netProfit.toFixed(4)} >= mínimo $${minProfitUSD.toFixed(4)}`);
@@ -250,12 +214,11 @@ class TrailingStop {
    * um lucro real após todas as taxas.
    * 
    * @param {object} position - Dados da posição
-   * @param {object} account - Dados da conta
    * @returns {Promise<boolean>} - True se deve fechar por profit configurado
    */
-  async shouldCloseForConfiguredProfit(position, account) {
+  async shouldCloseForConfiguredProfit(position) {
     try {
-      const { pnl, pnlPct } = this.calculatePnL(position, account);
+      const { pnl, pnlPct } = this.calculatePnL(position);
       
       // Configuração de profit mínimo (apenas porcentagem)
       // MIN_PROFIT_PERCENTAGE=0: Fecha quando lucro líquido > 0 (apenas cobrir taxas)
@@ -294,7 +257,6 @@ class TrailingStop {
   async stopLoss() {
     try {
       const positions = await Futures.getOpenPositions();
-      const Account = await AccountController.get();
 
       if (!positions || positions.length === 0) {
         return;
@@ -302,14 +264,14 @@ class TrailingStop {
 
       for (const position of positions) {
         // Verifica se deve fechar por profit mínimo baseado nas taxas (prioridade 1)
-        if (await this.shouldCloseForMinimumProfit(position, Account)) {
+        if (await this.shouldCloseForMinimumProfit(position)) {
           console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
           await OrderController.forceClose(position);
           continue;
         }
 
         // Verifica se deve fechar por profit mínimo configurado (prioridade 2)
-        if (await this.shouldCloseForConfiguredProfit(position, Account)) {
+        if (await this.shouldCloseForConfiguredProfit(position)) {
           console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por profit mínimo configurado`);
           await OrderController.forceClose(position);
           continue;
@@ -324,7 +286,7 @@ class TrailingStop {
         }
 
         // Verifica stop loss normal (prioridade 4)
-        const decision = this.stopLossStrategy.shouldClosePosition(position, Account);
+        const decision = this.stopLossStrategy.shouldClosePosition(position);
         
         if (decision && decision.shouldClose) {
           console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por stop loss normal`);
