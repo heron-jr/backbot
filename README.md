@@ -32,68 +32,58 @@ cp .env.example .env
 
 ## ⚙️ Configuração
 
-### Variáveis de Ambiente (.env)
+### 1. Instalar Dependências
+
+```bash
+npm install
+```
+
+### 2. Configurar API Keys
+
+O arquivo `.env` já está pré-configurado com todas as configurações necessárias! 🎉
+
+**Você só precisa alterar a API KEY do Account 1:**
 
 ```env
-# Backpack API Keys
-BACKPACK_API_KEY=your_api_key
-BACKPACK_SECRET_KEY=your_secret_key
-BACKPACK_PASSPHRASE=your_passphrase
-
-# Configurações de Trading
-TRADING_STRATEGY=DEFAULT
-INVESTMENT_PER_TRADE=100
-MAX_CONCURRENT_TRADES=5
-ACCOUNT2_CAPITAL_PERCENTAGE=20  # Porcentagem de capital por trade (10-80)
-
-# Configurações da Estratégia DEFAULT
-# O bot usa configurações inteligentes baseadas em múltiplos indicadores
-# Não é necessário configurar parâmetros específicos - o sistema é automático
-
-# Configurações de Risco
-MIN_TAKE_PROFIT_PCT=0.5
-ENABLE_STOP_LOSS=true
-ENABLE_TAKE_PROFIT=true
-MIN_PROFIT_PERCENTAGE=0.5  # Lucro mínimo para fechar trade (vs taxas)
+# ========================================
+# CONTA 1 - ESTRATÉGIA DEFAULT
+# ========================================
+ACCOUNT1_API_KEY=<API_KEY_ACCOCUNT1>      # ← ALTERE AQUI  
+ACCOUNT1_API_SECRET=<SECRET_KEY_ACCOUNT1> # ← ALTERE AQUI
 ```
+
+**Como obter suas API Keys na Backpack Exchange:**
+
+1. Acesse: https://backpack.exchange
+2. Faça login na sua conta
+3. Vá para: Account > API Keys
+4. Clique em "Create New API Key"
+5. Configure:
+   - Nome: "Backbot Trading"
+   - Permissões: READ, TRADE
+6. Salve as credenciais e copie para o arquivo `.env`
+
+**⚠️ Configurações já pré-definidas:**
+- Estratégia: DEFAULT (8 camadas de validação)
+- Capital por trade: 30% (configurável)
+- Máximo de posições: 3
+- Timeframe: 5m
+- Stop loss e take profit automáticos
+
+**🔧 Configurações opcionais (já configuradas):**
+- `MAX_NEGATIVE_PNL_STOP_PCT=10` - Stop loss em %
+- `MIN_PROFIT_PCT=0.5` - Lucro mínimo
+- `ORDER_TIMEOUT_MINUTES=10` - Timeout de ordens
 
 ## 🚀 Uso
 
 ### Executar Bot de Trading
 
 ```bash
-# Menu interativo
-npm run menu
+npm install
 
-# Estratégia DEFAULT
-npm run start
-
-# Produção (sem nodemon)
-npm run prod
+npm start
 ```
-
-### Executar Backtest
-
-```bash
-# Menu interativo do backtest
-npm run backtest
-
-# Ou execute diretamente
-node backtest.js
-```
-
-## 📊 Como Usar o Backtest
-
-### Backtest Simples
-
-1. Execute `npm run backtest`
-2. Escolha "Executar Backtest Simples"
-3. Configure:
-   - **Símbolos**: Lista separada por vírgula (ex: BTC_USDC_PERP,ETH_USDC_PERP)
-   - **Período**: Dias para testar (1-365)
-   - **Intervalo**: Frequência dos candles (1m, 5m, 15m, 1h, 4h, 1d)
-   - **Saldo Inicial**: Capital para simulação
-   - **Investimento por Trade**: Valor por operação
 
 ## 📈 Estratégias
 
@@ -137,45 +127,6 @@ backbot/
 └── package.json
 ```
 
-## 🔧 Desenvolvimento
-
-### Adicionar Nova Estratégia
-
-1. Crie nova classe em `src/Decision/Strategies/`
-2. Estenda `BaseStrategy`
-3. Implemente `analyzeTrade()` e `analyzeSignals()`
-4. Adicione ao `StrategyFactory`
-
-### Exemplo de Estratégia
-
-```javascript
-import { BaseStrategy } from './BaseStrategy.js';
-
-export class MinhaEstrategia extends BaseStrategy {
-  async analyzeTrade(fee, data, investmentUSD, media_rsi, config = null) {
-    // Sua lógica aqui
-    return {
-      market: data.market.symbol,
-      entry: price,
-      stop: stopPrice,
-      target: targetPrice,
-      action: 'long', // ou 'short'
-      pnl: calculatedPnl,
-      risk: calculatedRisk
-    };
-  }
-}
-```
-
-## 📊 Resultados do Backtest
-
-Os resultados são salvos em `backtest_results/` com:
-
-- **Métricas de Performance**: Win rate, profit factor, Sharpe ratio
-- **Métricas de Risco**: Drawdown máximo, perdas consecutivas
-- **Configuração Usada**: Parâmetros da estratégia e do backtest
-- **Histórico de Trades**: Detalhes de cada operação
-
 ## ⚠️ Disclaimer
 
 Este software é para fins educacionais. Trading de criptomoedas envolve riscos significativos. Use por sua conta e risco.
@@ -191,12 +142,6 @@ MIT License - veja [LICENSE](LICENSE) para detalhes.
 3. Commit suas mudanças
 4. Push para a branch
 5. Abra um Pull Request
-
-## 📞 Suporte
-
-- **Autor**: @heron_jr
-- **Issues**: Use o GitHub Issues para reportar bugs
-- **Discord**: [Link do servidor]
 
 ---
 
