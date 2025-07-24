@@ -27,6 +27,17 @@ export class DefaultStrategy extends BaseStrategy {
         return null;
       }
 
+      // FILTRO DE CONFIRMAÇÃO MONEY FLOW
+      const moneyFlowValidation = this.validateMoneyFlowConfirmation(data, signals.isLong, data.market.symbol === 'BTC_USDC_PERP');
+      
+      if (!moneyFlowValidation.isValid) {
+        console.log(`❌ ${data.market.symbol}: Sinal ${signals.signalType} rejeitado - ${moneyFlowValidation.reason}`);
+        console.log(`   💰 Money Flow: ${moneyFlowValidation.details}`);
+        return null;
+      }
+
+      console.log(`✅ ${data.market.symbol}: Money Flow confirma ${signals.isLong ? 'LONG' : 'SHORT'} - ${moneyFlowValidation.details}`);
+
       // FILTRO DE TENDÊNCIA DO BTC (usando tendência já calculada)
       if (data.market.symbol !== 'BTC_USDC_PERP') {
         // Só permite operações quando BTC tem tendência clara (BULLISH ou BEARISH)
@@ -76,7 +87,7 @@ export class DefaultStrategy extends BaseStrategy {
         btcTrendMsg = `BTC: ${btcTrend}`;
       }
       
-      console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - Tendência: ${btcTrendMsg} - Sinal: ${signals.signalType}`);
+      console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - Tendência: ${btcTrendMsg} - Sinal: ${signals.signalType} - Money Flow: ${moneyFlowValidation.reason}`);
 
       return {
         market: data.market.symbol,
@@ -346,6 +357,84 @@ export class DefaultStrategy extends BaseStrategy {
       isShort,
       signalType,
       analysisDetails: analysisDetails || []
+    };
+  }
+
+  /**
+   * Valida se o Money Flow confirma a convicção do sinal
+   * @param {object} data - Dados de mercado com indicadores
+   * @param {boolean} isLong - Se é sinal de compra
+   * @param {boolean} isBTCAnalysis - Se é análise do BTC (para logs diferentes)
+   * @returns {object} - Resultado da validação
+   */
+  validateMoneyFlowConfirmation(data, isLong, isBTCAnalysis = false) {
+    const moneyFlow = data.moneyFlow;
+    
+    // Verifica se o Money Flow está disponível
+    if (!moneyFlow || moneyFlow.mfi === null || moneyFlow.mfi === undefined) {
+      if (isBTCAnalysis) {
+        console.log(`   ⚠️ BTC: Money Flow não disponível`);
+      }
+      return {
+        isValid: false,
+        reason: 'Money Flow não disponível',
+        details: 'Indicador Money Flow não encontrado nos dados'
+      };
+    }
+
+    const mfi = moneyFlow.mfi;
+    const mfiAvg = moneyFlow.mfiAvg;
+    const mfiValue = moneyFlow.value; // MFI - Média do MFI
+    const isBullish = moneyFlow.isBullish;
+    const isBearish = moneyFlow.isBearish;
+    const isStrong = moneyFlow.isStrong;
+    const direction = moneyFlow.direction;
+
+    let isValid = false;
+    let reason = '';
+    let details = '';
+
+    if (isLong) {
+      // Para sinal LONG: MFI > 50 OU mfiValue > 0
+      if (mfi > 50 || (mfiValue !== null && mfiValue > 0)) {
+        isValid = true;
+        reason = 'Money Flow confirma LONG';
+        details = `MFI: ${(mfi || 0).toFixed(1)} > 50 OU mfiValue: ${(mfiValue || 0).toFixed(1)} > 0`;
+      } else {
+        isValid = false;
+        reason = 'Money Flow não confirma LONG';
+        details = `MFI: ${(mfi || 0).toFixed(1)} <= 50 E mfiValue: ${(mfiValue || 0).toFixed(1)} <= 0`;
+      }
+    } else {
+      // Para sinal SHORT: MFI < 50 OU mfiValue < 0
+      if (mfi < 50 || (mfiValue !== null && mfiValue < 0)) {
+        isValid = true;
+        reason = 'Money Flow confirma SHORT';
+        details = `MFI: ${(mfi || 0).toFixed(1)} < 50 OU mfiValue: ${(mfiValue || 0).toFixed(1)} < 0`;
+      } else {
+        isValid = false;
+        reason = 'Money Flow não confirma SHORT';
+        details = `MFI: ${(mfi || 0).toFixed(1)} >= 50 E mfiValue: ${(mfiValue || 0).toFixed(1)} >= 0`;
+      }
+    }
+
+    // Log detalhado do Money Flow
+    if (isBTCAnalysis) {
+      console.log(`   💰 BTC Money Flow: MFI=${(mfi || 0).toFixed(1)}, Avg=${(mfiAvg || 0).toFixed(1)}, Value=${(mfiValue || 0).toFixed(1)}, Direction=${direction}, Strong=${isStrong}`);
+      console.log(`   ${isValid ? '✅' : '❌'} BTC: ${reason} - ${details}`);
+    }
+
+    return {
+      isValid,
+      reason,
+      details,
+      mfi,
+      mfiAvg,
+      mfiValue,
+      isBullish,
+      isBearish,
+      isStrong,
+      direction
     };
   }
 
