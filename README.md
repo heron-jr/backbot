@@ -1,46 +1,19 @@
-# BackBot - Bot de Trading para Backpack Exchange
+# BackBot - Bot de Trading Inteligente para Backpack Exchange
 
-Bot de trading automatizado para Backpack Exchange com estratégias para farm de volume e lucro.
+Bot de trading automatizado avançado para Backpack Exchange com estratégia inteligente baseada em múltiplos indicadores técnicos e filtros de confirmação.
 
 ## 🚀 Funcionalidades
 
-- **Estratégia DEFAULT**: Foco em farm de volume com sinais baseados em RSI, Stochastic e MACD
-- **Estratégia PRO_MAX**: Estratégia avançada baseada em ADX com múltiplas confluências
-- **Sistema de Backtest**: Teste suas estratégias com dados históricos antes de usar em produção
+- **Estratégia DEFAULT**: Sistema inteligente com 8 camadas de validação
+- **Estratégia PRO_MAX**: Em breve - Estratégia avançada baseada em ADX
+- **Sistema de Backtest**: Teste suas estratégias com dados históricos
 - **Multi-Bot**: Execute múltiplas instâncias simultaneamente
 - **Trailing Stop**: Proteção automática de lucros
 - **Logs Coloridos**: Interface visual clara e informativa
 
-## 📊 Sistema de Backtest e Otimização
+## 📊 Sistema de Backtest
 
-O BackBot agora inclui um sistema completo de backtest e otimização que permite:
-
-### ✅ Funcionalidades do Backtest
-
-- **Teste de Estratégias**: Compare DEFAULT vs PRO_MAX
-- **Dados Históricos**: Use dados reais da API ou sintéticos para teste
-- **Métricas Avançadas**: Win rate, profit factor, Sharpe ratio, drawdown
-- **Configuração Flexível**: Ajuste parâmetros de risco e performance
-- **Relatórios Detalhados**: Salve resultados em JSON para análise posterior
-- **Interface Interativa**: Menu CLI intuitivo para configuração
-
-### 🎯 Sistema de Otimização
-
-- **Otimização de Estratégias**: Teste diferentes parâmetros automaticamente
-- **Otimização de Targets**: Encontre o melhor número de alvos para PRO_MAX
-- **Otimização de Capital**: Descubra a porcentagem ideal de capital por trade
-- **Análise Comparativa**: Compare múltiplas configurações simultaneamente
-- **Recomendações Inteligentes**: Sugestões baseadas em retorno, risco e eficiência
-
-### 🎯 Métricas Calculadas
-
-- **Retorno Total e Anualizado**
-- **Win Rate** (taxa de acerto)
-- **Profit Factor** (ganhos vs perdas)
-- **Máximo Drawdown**
-- **Sharpe Ratio**
-- **Máximo de Perdas Consecutivas**
-- **Média de Ganhos e Perdas**
+O BackBot inclui um sistema de backtest para validar a estratégia DEFAULT com dados históricos reais da API.
 
 ## 🛠️ Instalação
 
@@ -68,21 +41,14 @@ BACKPACK_SECRET_KEY=your_secret_key
 BACKPACK_PASSPHRASE=your_passphrase
 
 # Configurações de Trading
-TRADING_STRATEGY=DEFAULT  # ou PRO_MAX
+TRADING_STRATEGY=DEFAULT
 INVESTMENT_PER_TRADE=100
 MAX_CONCURRENT_TRADES=5
 ACCOUNT2_CAPITAL_PERCENTAGE=20  # Porcentagem de capital por trade (10-80)
 
-# Configurações da Estratégia PRO_MAX
-ADX_LENGTH=14
-ADX_THRESHOLD=20
-ADX_AVERAGE_LENGTH=21
-USE_RSI_VALIDATION=true
-USE_STOCH_VALIDATION=true
-USE_MACD_VALIDATION=true
-IGNORE_BRONZE_SIGNALS=false
-MAX_TARGETS_PER_ORDER=8  # Número de alvos por trade (3-20)
-MAX_TAKE_PROFIT_ORDERS=8  # Limite de ordens de take profit
+# Configurações da Estratégia DEFAULT
+# O bot usa configurações inteligentes baseadas em múltiplos indicadores
+# Não é necessário configurar parâmetros específicos - o sistema é automático
 
 # Configurações de Risco
 MIN_TAKE_PROFIT_PCT=0.5
@@ -102,9 +68,6 @@ npm run menu
 # Estratégia DEFAULT
 npm run start
 
-# Estratégia PRO_MAX
-npm run promax
-
 # Produção (sem nodemon)
 npm run prod
 ```
@@ -115,79 +78,41 @@ npm run prod
 # Menu interativo do backtest
 npm run backtest
 
-# Otimização de estratégias
-npm run optimize
-
-# Otimização de targets (PRO_MAX)
-npm run optimize-targets
-
-# Otimização de capital por trade
-npm run optimize-capital
-
 # Ou execute diretamente
 node backtest.js
 ```
 
-## 📊 Como Usar o Backtest e Otimização
+## 📊 Como Usar o Backtest
 
-### 1. Backtest Simples
+### Backtest Simples
 
 1. Execute `npm run backtest`
 2. Escolha "Executar Backtest Simples"
 3. Configure:
-   - **Estratégia**: DEFAULT ou PRO_MAX
    - **Símbolos**: Lista separada por vírgula (ex: BTC_USDC_PERP,ETH_USDC_PERP)
    - **Período**: Dias para testar (1-365)
    - **Intervalo**: Frequência dos candles (1m, 5m, 15m, 1h, 4h, 1d)
    - **Saldo Inicial**: Capital para simulação
    - **Investimento por Trade**: Valor por operação
 
-### 2. Backtest Comparativo
-
-1. Escolha "Executar Backtest Comparativo"
-2. Configure parâmetros base
-3. Compare automaticamente DEFAULT vs PRO_MAX
-
-### 3. Otimização de Estratégias
-
-1. Execute `npm run optimize`
-2. Teste automaticamente diferentes parâmetros:
-   - **ADX**: Comprimento e threshold
-   - **Validações**: RSI, Stochastic, MACD
-   - **Filtros**: Sinais Bronze, Silver, Gold, Platinum
-
-### 4. Otimização de Targets (PRO_MAX)
-
-1. Execute `npm run optimize-targets`
-2. Teste diferentes números de alvos (3-20)
-3. Encontre o equilíbrio ideal entre retorno e risco
-
-### 5. Otimização de Capital
-
-1. Execute `npm run optimize-capital`
-2. Teste porcentagens de 10% a 80%
-3. Descubra a eficiência ideal de capital
-
-### 6. Configurações Avançadas
-
-- **Parâmetros PRO_MAX**: ADX, validações RSI/Stochastic/MACD
-- **Parâmetros de Risco**: Stop loss, take profit, drawdown máximo
-- **Parâmetros de Performance**: Win rate mínimo, profit factor
-
 ## 📈 Estratégias
 
-### DEFAULT Strategy
-- **Objetivo**: Farm de volume
-- **Sinais**: RSI, Stochastic, MACD
-- **Filtros**: Tendência do BTC
-- **Stop/Target**: Baseado em VWAP
+### DEFAULT Strategy - Sistema Inteligente de 8 Camadas
+- **Objetivo**: Trading inteligente com múltiplas validações
+- **Camada 1**: Momentum (RSI Avançado) - Cruzamentos GREEN/RED + Sobrevenda/Sobrecompra
+- **Camada 2**: Stochastic - Cruzamentos K/D em zonas extremas
+- **Camada 3**: MACD - Momentum e tendência (histograma + cruzamentos)
+- **Camada 4**: ADX - Força e direção da tendência
+- **Camada 5**: Money Flow - Filtro de confirmação (MFI > 50 para LONG, < 50 para SHORT)
+- **Camada 6**: VWAP - Filtro de tendência intradiária (Preço > VWAP para LONG, < VWAP para SHORT)
+- **Camada 7**: BTC Trend - Filtro macro de correlação com Bitcoin
+- **Camada 8**: Stop/Target - Cálculo inteligente baseado em VWAP + StdDev
 
-### PRO_MAX Strategy
-- **Objetivo**: Lucro com análise técnica avançada
-- **Base**: ADX (Average Directional Index)
-- **Confluências**: RSI, Stochastic, MACD
-- **Níveis**: BRONZE, SILVER, GOLD, PLATINUM
-- **Stop/Target**: Múltiplos alvos
+### PRO_MAX Strategy - Em Breve
+- **Status**: Em desenvolvimento
+- **Objetivo**: Estratégia avançada baseada em ADX com múltiplas confluências
+- **Base**: ADX (Average Directional Index) com níveis BRONZE, SILVER, GOLD, PLATINUM
+- **Nota**: Esta estratégia ainda não está completa e não deve ser usada em produção
 
 ## 📁 Estrutura do Projeto
 
@@ -242,9 +167,7 @@ export class MinhaEstrategia extends BaseStrategy {
 }
 ```
 
-## 📊 Resultados do Backtest e Otimização
-
-### Resultados do Backtest
+## 📊 Resultados do Backtest
 
 Os resultados são salvos em `backtest_results/` com:
 
@@ -252,16 +175,6 @@ Os resultados são salvos em `backtest_results/` com:
 - **Métricas de Risco**: Drawdown máximo, perdas consecutivas
 - **Configuração Usada**: Parâmetros da estratégia e do backtest
 - **Histórico de Trades**: Detalhes de cada operação
-
-### Resultados da Otimização
-
-Os otimizadores fornecem:
-
-- **Comparação de Configurações**: Tabelas comparativas detalhadas
-- **Rankings**: Top 3 por retorno, profit factor, eficiência e risco
-- **Recomendações**: Sugestões baseadas em equilíbrio risco/retorno
-- **Análise de Eficiência**: Métricas de uso de capital
-- **Configurações Ideais**: Valores recomendados para .env
 
 ## ⚠️ Disclaimer
 

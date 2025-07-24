@@ -8,8 +8,6 @@
     "start": "cross-env TRADING_STRATEGY=DEFAULT nodemon bootstrap-app.js",
     "menu": "nodemon bootstrap-app.js",
     "start:skip": "nodemon bootstrap-app.js -- --skip-selection",
-    "promax": "TRADING_STRATEGY=PRO_MAX nodemon bootstrap-app.js",
-    "promax:prod": "TRADING_STRATEGY=PRO_MAX node bootstrap-app.js",
     "prod": "TRADING_STRATEGY=DEFAULT node bootstrap-app.js",
     "prod:menu": "node bootstrap-app.js",
     "prod:skip": "node bootstrap-app.js -- --skip-selection",
