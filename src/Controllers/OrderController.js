@@ -3,6 +3,7 @@ import Futures from '../Backpack/Authenticated/Futures.js';
 import AccountController from './AccountController.js';
 import Utils from '../utils/Utils.js';
 import Markets from '../Backpack/Public/Markets.js';
+import TrailingStop from '../TrailingStop/TrailingStop.js';
 
 class OrderController {
 
@@ -116,8 +117,12 @@ class OrderController {
           const entryFee = orderValue * fee;
           const exitFee = exitValue * fee;
           const totalFee = entryFee + exitFee;
-          const pnlAtual = (currentPrice - entryPrice) * (parseFloat(position.netQuantity));
-          console.log(`[MONITOR][${accountId}] ${market} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} | PnL atual: $${pnlAtual.toFixed(6)}`);
+          
+          // Usa a função calculatePnL do TrailingStop para calcular o PnL corretamente
+          const leverage = Account.leverage;
+          const { pnl, pnlPct } = TrailingStop.calculatePnL(position, leverage);
+          
+          console.log(`[MONITOR][${accountId}] ${market} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
           // Posição foi aberta, delega para método dedicado
           await OrderController.handlePositionOpenedForProMax(market, position, orderData, accountId);
           OrderController.removePendingEntryOrder(market, accountId);
@@ -225,9 +230,13 @@ class OrderController {
         const entryFee = orderValue * fee;
         const exitFee = exitValue * fee;
         const totalFee = entryFee + exitFee;
-        const pnlAtual = (currentPrice - entryPrice) * (parseFloat(position.netQuantity));
+        
+        // Usa a função calculatePnL do TrailingStop para calcular o PnL corretamente
+        const leverage = Account.leverage;
+        const { pnl, pnlPct } = TrailingStop.calculatePnL(position, leverage);
+        
         const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
-        console.log(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnlAtual.toFixed(6)}`);
+        console.log(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
       }
       
       // Verifica se há posições que não estão sendo monitoradas

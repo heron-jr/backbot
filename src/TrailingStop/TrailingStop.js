@@ -3,6 +3,7 @@ import OrderController from '../Controllers/OrderController.js';
 import { StopLossFactory } from '../Decision/Strategies/StopLossFactory.js';
 import PnlController from '../Controllers/PnlController.js';
 import Markets from '../Backpack/Public/Markets.js';
+import AccountController from '../Controllers/AccountController.js';
 
 class TrailingStop {
 
@@ -85,20 +86,26 @@ class TrailingStop {
    * @param {object} account - Dados da conta
    * @returns {object} - PnL em USD e porcentagem
    */
-  calculatePnL(position) {
+  calculatePnL(position, leverage) {
     try { 
-      const pnl = parseFloat(position.pnlUnrealized || 0);
+      // PnL em dólar, que já estava correto.
+      const pnl = parseFloat(position.pnlUnrealized ?? '0');
 
-      const costBasis = Math.abs(parseFloat(position.netCost ?? '0'));
+      // O 'netCost' aqui é tratado como o VALOR NOCIONAL da posição.
+      const notionalValue = Math.abs(parseFloat(position.netCost ?? '0'));
+      
+      // A base de custo real (MARGEM) é o valor nocional dividido pela alavancagem.
+      // Se a alavancagem for 0 ou não informada, consideramos 1 para evitar divisão por zero.
+      const costBasis = notionalValue / (leverage || 1);
 
       let pnlPct = 0;
       if (costBasis > 0) {
         pnlPct = (pnl / costBasis) * 100;
       }
-      
+
       return {
         pnl: pnl,
-        pnlPct: pnlPct
+        pnlPct: pnlPct,
       };
     } catch (error) {
       console.error('[PNL_CALC] Erro ao calcular PnL:', error.message);
@@ -150,7 +157,9 @@ class TrailingStop {
    */
   async shouldCloseForMinimumProfit(position) {
     try {
-      const { pnl, pnlPct } = this.calculatePnL(position);
+      const Account = await AccountController.get();
+      const leverage = Account.leverage;
+      const { pnl, pnlPct } = this.calculatePnL(position, leverage);
       
       // Configuração do stop loss por porcentagem (opcional)
       const MAX_NEGATIVE_PNL_STOP_PCT = process.env.MAX_NEGATIVE_PNL_STOP_PCT;
@@ -218,7 +227,34 @@ class TrailingStop {
    */
   async shouldCloseForConfiguredProfit(position) {
     try {
-      const { pnl, pnlPct } = this.calculatePnL(position);
+      const Account = await AccountController.get();
+      const leverage = Account.leverage;
+      const { pnl, pnlPct } = this.calculatePnL(position, leverage);
+      
+      // Configuração do stop loss por porcentagem (opcional)
+      const MAX_NEGATIVE_PNL_STOP_PCT = process.env.MAX_NEGATIVE_PNL_STOP_PCT;
+      
+      // Só valida se a configuração estiver presente
+      if (MAX_NEGATIVE_PNL_STOP_PCT !== undefined && MAX_NEGATIVE_PNL_STOP_PCT !== null && MAX_NEGATIVE_PNL_STOP_PCT !== '') {
+        const maxNegativePnlStopPct = parseFloat(MAX_NEGATIVE_PNL_STOP_PCT);
+        
+        // Verifica se os valores são válidos
+        if (isNaN(maxNegativePnlStopPct) || !isFinite(maxNegativePnlStopPct)) {
+          console.error(`❌ [CONFIG_PROFIT] Valor inválido para MAX_NEGATIVE_PNL_STOP_PCT: ${MAX_NEGATIVE_PNL_STOP_PCT}`);
+          return false;
+        }
+        
+        if (isNaN(pnlPct) || !isFinite(pnlPct)) {
+          console.error(`❌ [CONFIG_PROFIT] PnL inválido para ${position.symbol}: ${pnlPct}`);
+          return false;
+        }
+        
+        // Verifica se deve fechar por stop loss baseado no pnlPct
+        if (pnlPct <= maxNegativePnlStopPct) {
+          console.log(`🚨 [CONFIG_PROFIT] ${position.symbol}: Fechando por stop loss - PnL ${pnlPct.toFixed(3)}% <= limite ${maxNegativePnlStopPct.toFixed(3)}%`);
+          return true;
+        }
+      }
       
       // Configuração de profit mínimo (apenas porcentagem)
       // MIN_PROFIT_PERCENTAGE=0: Fecha quando lucro líquido > 0 (apenas cobrir taxas)
