@@ -5,7 +5,7 @@
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "TRADING_STRATEGY=DEFAULT nodemon bootstrap-app.js",
+    "start": "cross-env TRADING_STRATEGY=DEFAULT nodemon bootstrap-app.js",
     "menu": "nodemon bootstrap-app.js",
     "start:skip": "nodemon bootstrap-app.js -- --skip-selection",
     "promax": "TRADING_STRATEGY=PRO_MAX nodemon bootstrap-app.js",
@@ -44,5 +44,8 @@
     "technicalindicators": "^3.1.0",
     "tweetnacl": "^1.0.3",
     "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
   }
 }

@@ -25,7 +25,12 @@ class OrderController {
     if (!OrderController.pendingEntryOrdersByAccount[accountId]) {
       OrderController.pendingEntryOrdersByAccount[accountId] = {};
     }
-    OrderController.pendingEntryOrdersByAccount[accountId][market] = orderData;
+    // Adiciona timestamp de criação da ordem
+    const orderDataWithTimestamp = {
+      ...orderData,
+      createdAt: Date.now()
+    };
+    OrderController.pendingEntryOrdersByAccount[accountId][market] = orderDataWithTimestamp;
     console.log(`\n[MONITOR-${accountId}] Ordem registrada para monitoramento: ${market}`);
   }
 
@@ -45,10 +50,8 @@ class OrderController {
    * @param {string} accountId - ID da conta para monitorar
    */
   static async monitorPendingEntryOrders(accountId = 'DEFAULT') {
-    // Só executa para contas PRO_MAX
-    if (accountId !== 'CONTA2' && !accountId.includes('PRO_MAX')) {
-      return;
-    }
+    // Executa para todas as estratégias (DEFAULT e PRO_MAX)
+    // A lógica de timeout de ordens é aplicada para todas as contas
     try {
       // Define as variáveis de ambiente corretas baseado no accountId
       if (accountId === 'CONTA2') {
@@ -119,23 +122,68 @@ class OrderController {
           await OrderController.handlePositionOpenedForProMax(market, position, orderData, accountId);
           OrderController.removePendingEntryOrder(market, accountId);
         } else {
-          // Verifica se a ordem ainda existe (não foi cancelada)
-          try {
-            const openOrders = await Order.getOpenOrders(market);
-            const hasEntryOrder = openOrders && openOrders.some(o => {
-              const isEntryOrder = !o.reduceOnly;
-              const isLimitOrder = o.orderType === 'Limit';
-              const isCorrectSymbol = o.symbol === market;
-              const isNotStopLoss = !o.stopLossTriggerPrice && !o.stopLossLimitPrice;
-              const isNotTakeProfit = !o.takeProfitTriggerPrice && !o.takeProfitLimitPrice;
-              const isPending = o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled';
-              return isEntryOrder && isLimitOrder && isCorrectSymbol && isNotStopLoss && isNotTakeProfit && isPending;
-            });
-            if (!hasEntryOrder) {
-              OrderController.removePendingEntryOrder(market, accountId);
+          // Verifica timeout da ordem (10 minutos)
+          const ORDER_TIMEOUT_MINUTES = Number(process.env.ORDER_TIMEOUT_MINUTES || 10);
+          const orderAgeMinutes = (Date.now() - orderData.createdAt) / (1000 * 60);
+          
+          if (orderAgeMinutes >= ORDER_TIMEOUT_MINUTES) {
+            console.log(`⏰ [MONITOR-${accountId}] ${market}: Ordem expirou após ${orderAgeMinutes.toFixed(1)} minutos (limite: ${ORDER_TIMEOUT_MINUTES} min)`);
+            
+            try {
+              // Cancela apenas ordens de entrada (não reduceOnly)
+              const openOrders = await Order.getOpenOrders(market);
+              const entryOrders = openOrders && openOrders.filter(o => {
+                // IMPORTANTE: Só cancela ordens de ENTRADA (não reduceOnly)
+                const isEntryOrder = !o.reduceOnly;
+                const isLimitOrder = o.orderType === 'Limit';
+                const isCorrectSymbol = o.symbol === market;
+                const isNotStopLoss = !o.stopLossTriggerPrice && !o.stopLossLimitPrice;
+                const isNotTakeProfit = !o.takeProfitTriggerPrice && !o.takeProfitLimitPrice;
+                const isPending = o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled';
+                
+                // Só cancela se for ordem de entrada (não reduceOnly) e não for stop/take profit
+                return isEntryOrder && isLimitOrder && isCorrectSymbol && isNotStopLoss && isNotTakeProfit && isPending;
+              });
+              
+              if (entryOrders && entryOrders.length > 0) {
+                console.log(`🔄 [MONITOR-${accountId}] ${market}: Cancelando ${entryOrders.length} ordem(ns) de entrada antiga(s) (ordens reduceOnly não são afetadas)`);
+                
+                // Cancela todas as ordens de entrada antigas
+                const cancelPromises = entryOrders.map(order => 
+                  Order.cancelOpenOrder(market, order.orderId, order.clientId)
+                );
+                
+                await Promise.all(cancelPromises);
+                console.log(`✅ [MONITOR-${accountId}] ${market}: Ordens antigas canceladas com sucesso`);
+                
+                // Remove do monitoramento
+                OrderController.removePendingEntryOrder(market, accountId);
+              } else {
+                console.log(`ℹ️ [MONITOR-${accountId}] ${market}: Nenhuma ordem encontrada para cancelar`);
+                OrderController.removePendingEntryOrder(market, accountId);
+              }
+            } catch (cancelError) {
+              console.error(`❌ [MONITOR-${accountId}] ${market}: Erro ao cancelar ordens antigas:`, cancelError.message);
             }
-          } catch (orderError) {
-            console.warn(`⚠️ [MONITOR-${accountId}] Falha ao verificar ordens de ${market}, mantendo no monitoramento...`);
+          } else {
+            // Verifica se a ordem ainda existe (não foi cancelada)
+            try {
+              const openOrders = await Order.getOpenOrders(market);
+              const hasEntryOrder = openOrders && openOrders.some(o => {
+                const isEntryOrder = !o.reduceOnly;
+                const isLimitOrder = o.orderType === 'Limit';
+                const isCorrectSymbol = o.symbol === market;
+                const isNotStopLoss = !o.stopLossTriggerPrice && !o.stopLossLimitPrice;
+                const isNotTakeProfit = !o.takeProfitTriggerPrice && !o.takeProfitLimitPrice;
+                const isPending = o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled';
+                return isEntryOrder && isLimitOrder && isCorrectSymbol && isNotStopLoss && isNotTakeProfit && isPending;
+              });
+              if (!hasEntryOrder) {
+                OrderController.removePendingEntryOrder(market, accountId);
+              }
+            } catch (orderError) {
+              console.warn(`⚠️ [MONITOR-${accountId}] Falha ao verificar ordens de ${market}, mantendo no monitoramento...`);
+            }
           }
         }
       }
