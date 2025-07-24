@@ -217,7 +217,7 @@ export class DefaultStrategy extends BaseStrategy {
       analysisDetails.push(`Stoch: Não disponível`);
     }
 
-    // 3. MACD com validação de cruzamento (se disponível)
+    // 3. MACD com validação de momentum e tendência (CORRIGIDO)
     if (!isLong && !isShort && hasMacd) {
       const macdValue = macd.MACD;
       const macdSignal = macd.MACD_signal;
@@ -229,66 +229,66 @@ export class DefaultStrategy extends BaseStrategy {
         console.log(`      • MACD Debug: Value=${(macdValue || 0).toFixed(3)}, Signal=${(macdSignal || 0).toFixed(3)}, Hist=${(macdHistogram || 0).toFixed(3)}, HistPrev=${(macdHistogramPrev || 0).toFixed(3)}`);
       }
 
-      // Se MACD signal não estiver disponível, usa apenas o histograma
+      // NOVA LÓGICA: MACD como indicador de momentum e tendência (NÃO sobrecompra/sobrevenda)
       if (macdSignal !== null && macdSignal !== undefined) {
-        // MACD sobrevendido com cruzamento (histograma cruzando de negativo para positivo)
-        if (macdHistogram < -0.3 && macdValue < macdSignal && 
+        // MACD BULLISH: Histograma positivo (momentum de alta) + cruzamento de baixo para cima
+        if (macdHistogram > 0 && macdValue > macdSignal && 
             macdHistogramPrev !== null && macdHistogramPrev !== undefined && 
             macdHistogramPrev < macdHistogram) {
           isLong = true;
-          signalType = 'MACD Sobrevendido + Cruzamento';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} > HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (sobrevendido + subindo)`);
+          signalType = 'MACD Bullish + Cruzamento';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} > HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (bullish + momentum crescente)`);
         }
-        // MACD sobrecomprado com cruzamento (histograma cruzando de positivo para negativo)
-        else if (macdHistogram > 0.3 && macdValue > macdSignal && 
+        // MACD BEARISH: Histograma negativo (momentum de baixa) + cruzamento de cima para baixo
+        else if (macdHistogram < 0 && macdValue < macdSignal && 
                  macdHistogramPrev !== null && macdHistogramPrev !== undefined && 
                  macdHistogramPrev > macdHistogram) {
           isShort = true;
-          signalType = 'MACD Sobrecomprado + Cruzamento';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} < HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (sobrecomprado + caindo)`);
+          signalType = 'MACD Bearish + Cruzamento';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} < HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (bearish + momentum decrescente)`);
         }
-        // MACD sobrevendido (histograma muito negativo) - sem cruzamento
-        else if (macdHistogram < -0.5 && macdValue < macdSignal) {
-          isLong = true;
-          signalType = 'MACD Sobrevendido';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} < Signal (sobrevendido)`);
-        }
-        // MACD sobrecomprado (histograma muito positivo) - sem cruzamento
+        // MACD BULLISH forte (histograma muito positivo) - sem cruzamento
         else if (macdHistogram > 0.5 && macdValue > macdSignal) {
+          isLong = true;
+          signalType = 'MACD Bullish Forte';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} > Signal (bullish forte)`);
+        }
+        // MACD BEARISH forte (histograma muito negativo) - sem cruzamento
+        else if (macdHistogram < -0.5 && macdValue < macdSignal) {
           isShort = true;
-          signalType = 'MACD Sobrecomprado';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} > Signal (sobrecomprado)`);
+          signalType = 'MACD Bearish Forte';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} < Signal (bearish forte)`);
         } else {
           analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} (neutro)`);
         }
       } else {
         // Usa apenas o histograma sem signal (com cruzamento)
-        if (macdHistogram < -0.3 && 
+        if (macdHistogram > 0.3 && 
             macdHistogramPrev !== null && macdHistogramPrev !== undefined && 
             macdHistogramPrev < macdHistogram) {
           isLong = true;
-          signalType = 'MACD Sobrevendido + Cruzamento';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} > HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (sobrevendido + subindo - sem signal)`);
+          signalType = 'MACD Bullish + Cruzamento';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} > HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (bullish + momentum crescente - sem signal)`);
         }
-        // MACD sobrecomprado (histograma muito positivo) - sem cruzamento
-        else if (macdHistogram > 0.3 && 
+        // MACD BEARISH (histograma negativo) - sem cruzamento
+        else if (macdHistogram < -0.3 && 
                  macdHistogramPrev !== null && macdHistogramPrev !== undefined && 
                  macdHistogramPrev > macdHistogram) {
           isShort = true;
-          signalType = 'MACD Sobrecomprado + Cruzamento';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} < HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (sobrecomprado + caindo - sem signal)`);
+          signalType = 'MACD Bearish + Cruzamento';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} < HistPrev=${(macdHistogramPrev || 0).toFixed(3)} (bearish + momentum decrescente - sem signal)`);
         }
-        // MACD sobrevendido (histograma muito negativo) - sem cruzamento
-        else if (macdHistogram < -0.5) {
-          isLong = true;
-          signalType = 'MACD Sobrevendido';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} (sobrevendido - sem signal)`);
-        }
-        // MACD sobrecomprado (histograma muito positivo) - sem cruzamento
+        // MACD BULLISH forte (histograma muito positivo) - sem cruzamento
         else if (macdHistogram > 0.5) {
+          isLong = true;
+          signalType = 'MACD Bullish Forte';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} (bullish forte - sem signal)`);
+        }
+        // MACD BEARISH forte (histograma muito negativo) - sem cruzamento
+        else if (macdHistogram < -0.5) {
           isShort = true;
-          signalType = 'MACD Sobrecomprado';
-          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} (sobrecomprado - sem signal)`);
+          signalType = 'MACD Bearish Forte';
+          analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} (bearish forte - sem signal)`);
         } else {
           analysisDetails.push(`MACD: Hist=${(macdHistogram || 0).toFixed(3)} (neutro - sem signal)`);
         }
