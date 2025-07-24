@@ -395,26 +395,26 @@ export class DefaultStrategy extends BaseStrategy {
     let details = '';
 
     if (isLong) {
-      // Para sinal LONG: MFI > 50 OU mfiValue > 0
-      if (mfi > 50 || (mfiValue !== null && mfiValue > 0)) {
+      // Para sinal LONG: MFI > 50 E mfiValue > 0 (LÓGICA AND - MAIS ROBUSTA)
+      if (mfi > 50 && (mfiValue !== null && mfiValue > 0)) {
         isValid = true;
         reason = 'Money Flow confirma LONG';
-        details = `MFI: ${(mfi || 0).toFixed(1)} > 50 OU mfiValue: ${(mfiValue || 0).toFixed(1)} > 0`;
+        details = `MFI: ${(mfi || 0).toFixed(1)} > 50 E mfiValue: ${(mfiValue || 0).toFixed(1)} > 0`;
       } else {
         isValid = false;
         reason = 'Money Flow não confirma LONG';
-        details = `MFI: ${(mfi || 0).toFixed(1)} <= 50 E mfiValue: ${(mfiValue || 0).toFixed(1)} <= 0`;
+        details = `MFI: ${(mfi || 0).toFixed(1)} <= 50 OU mfiValue: ${(mfiValue || 0).toFixed(1)} <= 0`;
       }
     } else {
-      // Para sinal SHORT: MFI < 50 OU mfiValue < 0
-      if (mfi < 50 || (mfiValue !== null && mfiValue < 0)) {
+      // Para sinal SHORT: MFI < 50 E mfiValue < 0 (LÓGICA AND - MAIS ROBUSTA)
+      if (mfi < 50 && (mfiValue !== null && mfiValue < 0)) {
         isValid = true;
         reason = 'Money Flow confirma SHORT';
-        details = `MFI: ${(mfi || 0).toFixed(1)} < 50 OU mfiValue: ${(mfiValue || 0).toFixed(1)} < 0`;
+        details = `MFI: ${(mfi || 0).toFixed(1)} < 50 E mfiValue: ${(mfiValue || 0).toFixed(1)} < 0`;
       } else {
         isValid = false;
         reason = 'Money Flow não confirma SHORT';
-        details = `MFI: ${(mfi || 0).toFixed(1)} >= 50 E mfiValue: ${(mfiValue || 0).toFixed(1)} >= 0`;
+        details = `MFI: ${(mfi || 0).toFixed(1)} >= 50 OU mfiValue: ${(mfiValue || 0).toFixed(1)} >= 0`;
       }
     }
 

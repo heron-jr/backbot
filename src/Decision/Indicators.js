@@ -171,65 +171,95 @@ function calculateWaveTrend(candles, channelLen = 9, avgLen = 12, maLen = 3) {
 }
 
 /**
- * Função Custom Money Flow (MONEY FLOW) - Baseada no PineScript CypherPunk
- * @param {Array} candles - Array de candles
- * @param {number} period - Período (padrão: 60)
- * @param {number} multiplier - Multiplicador (padrão: 225)
- * @returns {Object} - Dados do Money Flow
+ * Calcula o Money Flow Index (MFI) e seus sinais derivados.
+ * @param {Array<Object>} candles - Array de candles.
+ * @param {number} mfiPeriod - Período para o cálculo do MFI (padrão: 14).
+ * @param {number} signalPeriod - Período para a média móvel (SMA) do MFI (padrão: 9).
+ * @returns {Object} - Um objeto contendo os dados do Money Flow.
  */
-function calculateCustomMoneyFlow(candles, period = 60, multiplier = 225) {
-  if (candles.length < period) {
+function calculateMoneyFlow(candles, mfiPeriod = 14, signalPeriod = 9) {
+  // A validação de quantidade de velas está correta
+  if (candles.length < mfiPeriod + 1) {
     return {
-      value: 0,
-      mfi: 50,
-      mfiAvg: 50,
-      isBullish: false,
-      isBearish: false,
-      isStrong: false,
-      direction: 'NEUTRAL'
+      value: 0, mfi: 50, mfiAvg: 50, isBullish: false, isBearish: false,
+      isStrong: false, direction: 'NEUTRAL', history: []
     };
   }
 
-  // Calcular ((close - open) / (high - low)) * multiplier
-  const mfiValues = [];
-  for (const c of candles) {
-    const open = parseFloat(c.open);
+  // --- Passo 1: Calcular o Fluxo de Dinheiro Bruto com conversão de dados ---
+  const moneyFlows = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i];
+    const p = candles[i - 1];
+
+    // **A CORREÇÃO ESTÁ AQUI**
     const high = parseFloat(c.high);
     const low = parseFloat(c.low);
     const close = parseFloat(c.close);
+    const volume = parseFloat(c.volume);
+
+    const prevHigh = parseFloat(p.high);
+    const prevLow = parseFloat(p.low);
+    const prevClose = parseFloat(p.close);
     
-    const denominator = high - low;
-    if (denominator !== 0) {
-      mfiValues.push(((close - open) / denominator) * multiplier);
-    } else {
-      mfiValues.push(0);
-    }
+    // Validar se os dados são numéricos após a conversão
+    if (isNaN(high) || isNaN(low) || isNaN(close) || isNaN(volume)) continue;
+
+    const typicalPrice = (high + low + close) / 3;
+    const prevTypicalPrice = (prevHigh + prevLow + prevClose) / 3;
+    const rawMoneyFlow = typicalPrice * volume;
+
+    moneyFlows.push({
+      positive: typicalPrice > prevTypicalPrice ? rawMoneyFlow : 0,
+      negative: typicalPrice < prevTypicalPrice ? rawMoneyFlow : 0,
+    });
   }
   
-  // Calcular SMA dos valores
-  const mfi = [];
-  for (let i = 0; i < mfiValues.length; i++) {
-    if (i >= period - 1) {
-      const sum = mfiValues.slice(i - period + 1, i + 1).reduce((acc, val) => acc + val, 0);
-      mfi.push(sum / period);
-    } else {
-      mfi.push(null);
+  // O resto da função continua igual, pois agora ela receberá os dados corretos...
+  
+  // --- Passo 2: Calcular o histórico de MFI ---
+  const mfiHistory = [];
+  // (código omitido para brevidade, continua o mesmo da resposta anterior)
+  for (let i = mfiPeriod - 1; i < moneyFlows.length; i++) {
+    const slice = moneyFlows.slice(i - mfiPeriod + 1, i + 1);
+    const totalPositiveFlow = slice.reduce((sum, val) => sum + val.positive, 0);
+    const totalNegativeFlow = slice.reduce((sum, val) => sum + val.negative, 0);
+
+    if (totalNegativeFlow === 0) {
+      mfiHistory.push(100);
+      continue;
     }
+
+    const moneyRatio = totalPositiveFlow / totalNegativeFlow;
+    const mfi = 100 - (100 / (1 + moneyRatio));
+    mfiHistory.push(mfi);
   }
+
+  // --- Passo 3: Calcular a média (linha de sinal) do MFI ---
+  const mfiAvgHistory = [];
+  if (mfiHistory.length >= signalPeriod) {
+      for (let i = signalPeriod - 1; i < mfiHistory.length; i++) {
+          const smaSlice = mfiHistory.slice(i - signalPeriod + 1, i + 1);
+          const sma = smaSlice.reduce((sum, val) => sum + val, 0) / signalPeriod;
+          mfiAvgHistory.push(sma);
+      }
+  }
+
+  // --- Passo 4: Obter os valores atuais e calcular o resultado final ---
+  const currentMfi = mfiHistory[mfiHistory.length - 1] || 50;
+  const currentMfiAvg = mfiAvgHistory[mfiAvgHistory.length - 1] || 50;
+  const mfiValue = currentMfi - currentMfiAvg;
   
-  const currentMfi = mfi[mfi.length - 1];
-  const mfiAvg = mfi.length >= period ? mfi.slice(-period).reduce((sum, val) => sum + (val || 0), 0) / period : 50;
-  const mfiValue = (currentMfi || 50) - mfiAvg;
-  
+  // --- Passo 5: Montar o objeto de retorno ---
   return {
     value: mfiValue,
-    mfi: currentMfi || 50,
-    mfiAvg: mfiAvg,
+    mfi: currentMfi,
+    mfiAvg: currentMfiAvg,
     isBullish: mfiValue > 0,
     isBearish: mfiValue < 0,
     isStrong: Math.abs(mfiValue) > 10,
-    direction: mfiValue > 0 ? 'UP' : 'DOWN',
-    history: mfi
+    direction: mfiValue > 0 ? 'UP' : (mfiValue < 0 ? 'DOWN' : 'NEUTRAL'),
+    history: mfiHistory
   };
 }
 
@@ -458,21 +488,12 @@ export function calculateIndicators(candles) {
     period: 21 
   });
 
-  // MONEY FLOW INDEX (MFI) - Para o MONEY FLOW do CypherPunk
-  const mfi = MFI.calculate({
-    period: 14,
-    high: highs,
-    low: lows,
-    close: closes,
-    volume: candles.map(c => parseFloat(c.volume))
-  });
-
-  // MOMENTUM - Para o MOMENTUM do CypherPunk (baseado em RSI)
+  // MOMENTUM - Para o MOMENTUM (baseado em RSI)
   const momentum = calculateMomentum(closes);
 
-  // CYPHERPUNK INDICATORS - Baseados no PineScript
+  // INDICATORS - Baseados no PineScript
   const waveTrend = calculateWaveTrend(candles, 9, 12, 3); // MOMENTUM(2)
-  const customMoneyFlow = calculateCustomMoneyFlow(candles, 60, 225); // MONEY FLOW(3)
+  const customMoneyFlow = calculateMoneyFlow(candles) // MONEY FLOW(3)
 
   const { vwap, stdDev, upperBands, lowerBands } = calculateVWAPClassicBands(candles);
   const volumeAnalyse = analyzeTrends(volumesUSD)
@@ -543,7 +564,7 @@ export function calculateIndicators(candles) {
       history: adx,
       emaHistory: adxEma
     },
-    // CYPHERPUNK INDICATORS
+    // INDICATORS
     momentum: {
       value: momentum.value,
       rsi: momentum.rsi,
@@ -558,7 +579,7 @@ export function calculateIndicators(candles) {
       momentumValue: momentum.momentumValue,
       momentumHistory: momentum.momentumHistory
     },
-    // CYPHERPUNK WAVETREND (MOMENTUM 2)
+    // WAVETREND (MOMENTUM 2)
     waveTrend: {
       wt1: waveTrend.wt1,
       wt2: waveTrend.wt2,
@@ -568,27 +589,17 @@ export function calculateIndicators(candles) {
       isBearish: waveTrend.isBearish,
       history: waveTrend.history
     },
-    // CYPHERPUNK CUSTOM MONEY FLOW (MONEY FLOW 3)
-    customMoneyFlow: {
-      value: customMoneyFlow.value,
+    moneyFlow: {
       mfi: customMoneyFlow.mfi,
       mfiAvg: customMoneyFlow.mfiAvg,
+      value: customMoneyFlow.value,
       isBullish: customMoneyFlow.isBullish,
       isBearish: customMoneyFlow.isBearish,
       isStrong: customMoneyFlow.isStrong,
       direction: customMoneyFlow.direction,
-      history: customMoneyFlow.history
-    },
-    moneyFlow: {
-      mfi: mfi[mfi.length - 1] ?? 50,
-      mfiAvg: mfi.length >= 14 ? mfi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : 50,
-      mfiPrev: mfi[mfi.length - 2] ?? 50,
-      value: (mfi[mfi.length - 1] ?? 50) - (mfi.length >= 14 ? mfi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : 50),
-      isBullish: (mfi[mfi.length - 1] ?? 50) > (mfi.length >= 14 ? mfi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : 50),
-      isBearish: (mfi[mfi.length - 1] ?? 50) < (mfi.length >= 14 ? mfi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : 50),
-      isStrong: Math.abs((mfi[mfi.length - 1] ?? 50) - (mfi.length >= 14 ? mfi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : 50)) > 10,
-      direction: (mfi[mfi.length - 1] ?? 50) > (mfi.length >= 14 ? mfi.slice(-14).reduce((sum, val) => sum + val, 0) / 14 : 50) ? 'UP' : 'DOWN',
-      history: mfi
+      history: customMoneyFlow.history,
+    
+      mfiPrev: customMoneyFlow.history[customMoneyFlow.history.length - 2] ?? 50
     }
   };
 }
