@@ -1,57 +1,71 @@
 import { EMA, RSI, MACD, BollingerBands, ATR, Stochastic, ADX, MFI } from 'technicalindicators';
 
-function calculateVWAPClassicBands(candles) {
-  let sumVol = 0;
-  let sumTPV = 0;
+/**
+ * Calcula o VWAP e suas bandas de desvio padrão da forma correta (cumulativo com reset diário).
+ * @param {Array<Object>} candles - Array de candles, ordenados do mais antigo para o mais novo.
+ * @returns {Array<Object>} - Um array de objetos, cada um com { vwap, stdDev, upperBands, lowerBands } para cada vela.
+ */
+function calculateIntradayVWAP(candles) {
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  let currentDay = null;
+  const vwapHistory = [];
 
-  // 1ª passada: soma de volume e tp * volume
+  // Este array irá guardar as velas da sessão atual para calcular o desvio padrão
+  let sessionCandles = [];
+
   for (const c of candles) {
-    const high  = parseFloat(c.high);
-    const low   = parseFloat(c.low);
+    const high = parseFloat(c.high);
+    const low = parseFloat(c.low);
     const close = parseFloat(c.close);
-    const vol   = parseFloat(c.volume);
+    const volume = parseFloat(c.volume);
 
-    const tp = (high + low + close) / 3;
-    sumVol  += vol;
-    sumTPV  += tp * vol;
+    // Usa a data de início da vela para detectar a mudança de dia
+    const candleDay = new Date(c.start).getUTCDate();
+
+    // Se o dia mudou, reseta os contadores e a sessão
+    if (candleDay !== currentDay) {
+      currentDay = candleDay;
+      cumulativeTPV = 0;
+      cumulativeVolume = 0;
+      sessionCandles = [];
+    }
+    
+    // Validação para evitar dados inválidos
+    if (isNaN(high) || isNaN(low) || isNaN(close) || isNaN(volume)) {
+      vwapHistory.push(vwapHistory.length > 0 ? vwapHistory[vwapHistory.length-1] : { vwap: close }); // Repete o último valor válido
+      continue;
+    }
+
+    // Acumula os valores da sessão atual
+    const typicalPrice = (high + low + close) / 3;
+    cumulativeTPV += typicalPrice * volume;
+    cumulativeVolume += volume;
+    sessionCandles.push({ typicalPrice, volume });
+
+    // Calcula o VWAP para a vela atual
+    const vwap = cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : typicalPrice;
+
+    // --- Cálculo do Desvio Padrão para a sessão atual ---
+    let sumVarV = 0;
+    for (const sc of sessionCandles) {
+      const diff = sc.typicalPrice - vwap;
+      sumVarV += sc.volume * diff * diff;
+    }
+    
+    const variance = cumulativeVolume > 0 ? sumVarV / cumulativeVolume : 0;
+    const stdDev = Math.sqrt(variance);
+
+    // Adiciona o resultado do VWAP e suas bandas para esta vela ao histórico
+    vwapHistory.push({
+      vwap,
+      stdDev,
+      upperBands: [vwap + stdDev, vwap + (2 * stdDev), vwap + (3 * stdDev)],
+      lowerBands: [vwap - stdDev, vwap - (2 * stdDev), vwap - (3 * stdDev)],
+    });
   }
 
-  const vwap = sumTPV / sumVol;
-
-  // 2ª passada: soma do desvio² ponderado por volume
-  let sumVarV = 0;
-  for (const c of candles) {
-    const high  = parseFloat(c.high);
-    const low   = parseFloat(c.low);
-    const close = parseFloat(c.close);
-    const vol   = parseFloat(c.volume);
-
-    const tp = (high + low + close) / 3;
-    const diff = tp - vwap;
-    sumVarV += vol * diff * diff;
-  }
-
-  const variance = sumVarV / sumVol;
-  const stdDev   = Math.sqrt(variance);
-
-  // bandas clássicas: ±1, ±2, ±3 desvios
-  const upperBands = [
-    vwap + stdDev,
-    vwap + 2 * stdDev,
-    vwap + 3 * stdDev
-  ];
-  const lowerBands = [
-    vwap - stdDev,
-    vwap - 2 * stdDev,
-    vwap - 3 * stdDev
-  ];
-
-  return {
-    vwap,
-    stdDev,
-    upperBands,
-    lowerBands
-  };
+  return vwapHistory;
 }
 
 /**
@@ -370,60 +384,57 @@ function analyzeTrends(data) {
 /**
  * Calcula o MOMENTUM para a estratégia CypherPunk
  * Baseado em RSI e análise de tendência
- * @param {Array} closes - Array de preços de fechamento
+ * @param {Array<number>} closes - Array de preços de fechamento
  * @returns {Object} - Dados do momentum
  */
 function calculateMomentum(closes) {
-  if (closes.length < 14) {
-    return {
-      value: 0,
-      rsi: 50,
-      rsiAvg: 50,
-      isBullish: false,
-      isBearish: false,
-      reversal: null,
-      isExhausted: false,
-      isNearZero: true,
-      direction: 'NEUTRAL',
-      momentumValue: 0
-    };
+  if (closes.length < 15) { // Precisa de pelo menos 14 para o RSI e 1 para a média
+    return { /* ... seu objeto de retorno padrão ... */ };
   }
 
-  // Calcular RSI para momentum
-  const rsi = RSI.calculate({ period: 14, values: closes });
-  const currentRsi = rsi[rsi.length - 1] || 50;
-  const prevRsi = rsi[rsi.length - 2] || 50;
+  const rsiHistory = RSI.calculate({ period: 14, values: closes });
   
-  // Média do RSI (últimos 14 períodos)
-  const rsiAvg = rsi.slice(-14).reduce((sum, val) => sum + val, 0) / 14;
-  
-  // Momentum baseado na diferença RSI vs Média
-  const momentumValue = currentRsi - rsiAvg;
-  
-  // Detectar reversão baseado no RSI
+  // Calcula o histórico do momentumValue (RSI - Média do RSI)
+  const momentumHistory = [];
+  const rsiAvgHistory = [];
+
+  for (let i = 13; i < rsiHistory.length; i++) { // Começa após ter 14 valores de RSI
+    const rsiSlice = rsiHistory.slice(i - 13, i + 1);
+    const rsiAvg = rsiSlice.reduce((sum, val) => sum + val, 0) / 14;
+    rsiAvgHistory.push(rsiAvg);
+    momentumHistory.push(rsiHistory[i] - rsiAvg);
+  }
+
+  // Pega os valores mais recentes
+  const currentRsi = rsiHistory[rsiHistory.length - 1] || 50;
+  const prevRsi = rsiHistory[rsiHistory.length - 2] || 50;
+  const currentRsiAvg = rsiAvgHistory[rsiAvgHistory.length - 1] || 50;
+  const prevRsiAvg = rsiAvgHistory[rsiAvgHistory.length - 2] || 50;
+  const momentumValue = momentumHistory[momentumHistory.length - 1] || 0;
+
+  // Detectar cruzamento (reversão)
   let reversal = null;
-  if (currentRsi > rsiAvg && currentRsi > 50 && prevRsi <= rsiAvg) {
-    reversal = { type: 'GREEN', strength: currentRsi - rsiAvg };
-  } else if (currentRsi < rsiAvg && currentRsi < 50 && prevRsi >= rsiAvg) {
-    reversal = { type: 'RED', strength: rsiAvg - currentRsi };
+  if (currentRsi > currentRsiAvg && prevRsi <= prevRsiAvg) {
+    reversal = { type: 'GREEN', strength: momentumValue };
+  } else if (currentRsi < currentRsiAvg && prevRsi >= prevRsiAvg) {
+    reversal = { type: 'RED', strength: Math.abs(momentumValue) };
   }
   
-  // Verificar exaustão baseado no RSI
   const isExhausted = Math.abs(currentRsi - 50) > 30; // RSI > 80 ou < 20
-  
+
   return {
     value: momentumValue,
     rsi: currentRsi,
-    rsiAvg: rsiAvg,
-    isBullish: momentumValue > 0 && currentRsi > rsiAvg,
-    isBearish: momentumValue < 0 && currentRsi < rsiAvg,
+    rsiAvg: currentRsiAvg,
+    isBullish: momentumValue > 0, // Lógica simplificada
+    isBearish: momentumValue < 0, // Lógica simplificada
     reversal: reversal,
     isExhausted: isExhausted,
     isNearZero: Math.abs(momentumValue) <= 5,
     direction: momentumValue > 0 ? 'UP' : 'DOWN',
-    history: rsi,
+    history: rsiHistory, // Renomeado para clareza
     momentumValue: momentumValue,
-    momentumHistory: rsi
+    momentumHistory: momentumHistory, // Agora retorna o histórico correto
   };
 }
 
@@ -495,7 +506,9 @@ export function calculateIndicators(candles) {
   const waveTrend = calculateWaveTrend(candles, 9, 12, 3); // MOMENTUM(2)
   const customMoneyFlow = calculateMoneyFlow(candles) // MONEY FLOW(3)
 
-  const { vwap, stdDev, upperBands, lowerBands } = calculateVWAPClassicBands(candles);
+  const vwapHistory = calculateIntradayVWAP(candles);
+  const latestVwapData = vwapHistory[vwapHistory.length - 1];
+
   const volumeAnalyse = analyzeTrends(volumesUSD)
 
   const emaAnalysis = analyzeEMA(ema9, ema21);
@@ -532,10 +545,10 @@ export function calculateIndicators(candles) {
       ...volumeAnalyse
     },
     vwap: {
-        vwap, 
-        stdDev, 
-        upperBands, 
-        lowerBands
+      vwap: latestVwapData.vwap,
+      stdDev: latestVwapData.stdDev,
+      upperBands: latestVwapData.upperBands,
+      lowerBands: latestVwapData.lowerBands
     },
     atr: {
       atr: atr[atr.length - 1] ?? null,

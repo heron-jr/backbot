@@ -58,10 +58,12 @@ export class DefaultStrategy extends BaseStrategy {
 
         // Validação restritiva: só permite operações alinhadas com a tendência do BTC
         if (signals.isLong && btcTrend === 'BEARISH') {
+          console.log(`❌ ${data.market.symbol}: Sinal ${signals.signalType} rejeitado - BTC em tendência BEARISH (não permite LONG em altcoins)`);
           return null; // BTC em baixa - não entrar LONG em altcoins
         }
 
         if (!signals.isLong && btcTrend === 'BULLISH') {
+          console.log(`❌ ${data.market.symbol}: Sinal ${signals.signalType} rejeitado - BTC em tendência BULLISH (não permite SHORT em altcoins)`);
           return null; // BTC em alta - não entrar SHORT em altcoins
         }
       }
