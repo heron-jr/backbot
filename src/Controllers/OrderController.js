@@ -674,7 +674,7 @@ class OrderController {
     }
   }
 
-  async cancelPendingOrders(symbol) {
+  static async cancelPendingOrders(symbol) {
     try {
       // Obtém ordens abertas para o símbolo
       const openOrders = await Order.getOpenOrders(symbol);
