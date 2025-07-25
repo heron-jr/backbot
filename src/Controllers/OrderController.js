@@ -926,6 +926,44 @@ class OrderController {
     }
   };
 
+  /**
+   * Método openOrder - wrapper para openHybridOrder
+   * @param {object} orderData - Dados da ordem
+   * @returns {object} - Resultado da execução da ordem
+   */
+  static async openOrder(orderData) {
+    try {
+      // Valida se os parâmetros obrigatórios estão presentes
+      const requiredParams = ['entry', 'action', 'market', 'volume', 'decimal_quantity', 'decimal_price', 'stepSize_quantity'];
+      for (const param of requiredParams) {
+        if (!orderData[param]) {
+          console.error(`❌ [openOrder] Parâmetro obrigatório ausente: ${param}`);
+          return { error: `Parâmetro obrigatório ausente: ${param}` };
+        }
+      }
+
+      // Chama o método openHybridOrder com os dados fornecidos
+      const result = await OrderController.openHybridOrder({
+        entry: orderData.entry,
+        stop: orderData.stop,
+        target: orderData.target,
+        action: orderData.action,
+        market: orderData.market,
+        volume: orderData.volume,
+        decimal_quantity: orderData.decimal_quantity,
+        decimal_price: orderData.decimal_price,
+        stepSize_quantity: orderData.stepSize_quantity,
+        accountId: orderData.accountId || 'DEFAULT',
+        originalSignalData: orderData.originalSignalData
+      });
+
+      return result;
+    } catch (error) {
+      console.error(`❌ [openOrder] Erro ao executar ordem:`, error.message);
+      return { error: error.message };
+    }
+  }
+
   static async getRecentOpenOrders(market) {
     const orders = await Order.getOpenOrders(market)
     
