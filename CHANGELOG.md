@@ -5,6 +5,13 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.2.1] - 2024-12-19
+
+### 🐛 Correções
+- **TrailingStop Error**: Corrigido erro `this.cancelPendingOrders is not a function`
+  - Solução: Alterado `cancelPendingOrders` de método de instância para método estático
+  - Permite chamada correta a partir do método estático `forceClose` no OrderController
+
 ## [1.2.0] - 2024-12-19
 
 ### 🎯 Adicionado
