@@ -133,6 +133,8 @@ class OrderController {
           
           if (orderAgeMinutes >= ORDER_TIMEOUT_MINUTES) {
             console.log(`⏰ [MONITOR-${accountId}] ${market}: Ordem expirou após ${orderAgeMinutes.toFixed(1)} minutos (limite: ${ORDER_TIMEOUT_MINUTES} min)`);
+            console.log(`🟡 [INFO] ${market}: A ordem com desconto (LIMIT) não foi executada em ${orderAgeMinutes.toFixed(1)} minutos...`);
+            console.log(`[AÇÃO] ${market}: Cancelando e acionando plano B com ordem a MERCADO.`);
             
             try {
               // Cancela apenas ordens de entrada (não reduceOnly)
@@ -816,11 +818,75 @@ class OrderController {
     return Math.abs(priceCurrent - priceLimit) / priceLimit * 100;
   }
 
-  // Função auxiliar para revalidar sinal (deve ser adaptada para chamar a estratégia correta)
+  // Função auxiliar para revalidar sinal
   static async revalidateSignal({ market, accountId, originalSignalData }) {
-    // Exemplo: chamar novamente a análise da estratégia
-    // Aqui, apenas retorna true (mock), mas deve ser implementado conforme a lógica real
-    return true;
+    try {
+      // Se não temos dados originais do sinal, assume válido
+      if (!originalSignalData) {
+        console.log(`ℹ️ [${accountId}] ${market}: Sem dados originais para revalidação. Assumindo sinal válido.`);
+        return true;
+      }
+
+      // Determina a estratégia baseada no accountId
+      const strategyName = accountId === 'CONTA2' ? 'PRO_MAX' : 'DEFAULT';
+      
+      // Importa a estratégia apropriada
+      const { StrategyFactory } = await import('../Decision/Strategies/StrategyFactory.js');
+      const strategy = StrategyFactory.createStrategy(strategyName);
+      
+      if (!strategy) {
+        console.warn(`⚠️ [${accountId}] ${market}: Estratégia ${strategyName} não encontrada. Assumindo sinal válido.`);
+        return true;
+      }
+
+      // Obtém dados de mercado atualizados
+      const timeframe = process.env.TIME || '5m';
+      const candles = await Markets.getKLines(market, timeframe, 30);
+      
+      if (!candles || candles.length < 20) {
+        console.warn(`⚠️ [${accountId}] ${market}: Dados insuficientes para revalidação. Assumindo sinal válido.`);
+        return true;
+      }
+
+      // Calcula indicadores atualizados
+      const { calculateIndicators } = await import('../Decision/Indicators.js');
+      const indicators = calculateIndicators(candles);
+      
+      // Obtém informações do mercado
+      const Account = await AccountController.get();
+      const marketInfo = Account.markets.find(m => m.symbol === market);
+      const currentPrice = parseFloat(candles[candles.length - 1].close);
+      
+      // Cria dados para análise
+      const data = { 
+        ...indicators, 
+        market: marketInfo, 
+        marketPrice: currentPrice 
+      };
+
+      // Reanalisa o trade com dados atualizados
+      const decision = await strategy.analyzeTrade({
+        symbol: market,
+        currentPrice: currentPrice,
+        indicators: data,
+        config: originalSignalData.config || {}
+      });
+
+      // Verifica se o sinal ainda é válido
+      const isStillValid = decision && decision.action && decision.action === originalSignalData.action;
+      
+      if (isStillValid) {
+        console.log(`✅ [${accountId}] ${market}: Sinal revalidado com sucesso.`);
+      } else {
+        console.log(`❌ [${accountId}] ${market}: Sinal não é mais válido. Condições de mercado mudaram.`);
+      }
+
+      return isStillValid;
+      
+    } catch (error) {
+      console.warn(`⚠️ [${accountId}] ${market}: Erro na revalidação do sinal: ${error.message}. Assumindo válido.`);
+      return true; // Em caso de erro, assume válido para não perder oportunidades
+    }
   }
 
   // Função principal de execução híbrida
@@ -832,16 +898,14 @@ class OrderController {
       const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
       const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
       const entryPrice = parseFloat(entry);
-      const marketInfo = await AccountController.get();
-      const currentMarket = marketInfo?.markets?.find(m => m.symbol === market);
       const orderValue = volume;
-      const leverage = marketInfo.leverage;
-      const marginRequired = orderValue / leverage;
-      const markPrices = await Markets.getAllMarkPrices(market);
-      const currentMarketPrice = parseFloat(markPrices[0]?.markPrice || entryPrice);
-      const tickSize = currentMarket?.tickSize || 0.0001;
       let finalPrice = formatPrice(entryPrice);
       let quantity = formatQuantity(Math.floor((orderValue / entryPrice) / stepSize_quantity) * stepSize_quantity);
+      
+      // Log inicial da execução híbrida
+      console.log(`\n🚀 [${accountId}] ${market}: Iniciando execução híbrida`);
+      console.log(`📊 [${accountId}] ${market}: Preço de entrada: $${entryPrice.toFixed(6)} | Quantidade: ${quantity} | Valor: $${orderValue.toFixed(2)}`);
+      
       const body = {
         symbol: market,
         side,
@@ -850,72 +914,187 @@ class OrderController {
         quantity,
         price: finalPrice,
         timeInForce: "GTC",
-        selfTradePrevention: "RejectTaker"
+        selfTradePrevention: "RejectTaker",
+        clientId: Math.floor(Math.random() * 1000000)
       };
-      // 1. Envia ordem LIMIT
-      const limitResult = await Order.executeOrder(body);
-      if (!limitResult || limitResult.error) {
-        console.error(`❌ [${accountId}] ${market}: Falha ao enviar ordem LIMIT: ${limitResult && limitResult.error}`);
-        return { error: limitResult && limitResult.error };
+      
+      // 1. Envia ordem LIMIT (post-only)
+      console.log(`🟡 [${accountId}] ${market}: Enviando ordem LIMIT (post-only) para minimizar taxas...`);
+      
+      let limitResult;
+      try {
+        limitResult = await Order.executeOrder(body);
+        
+        if (!limitResult || limitResult.error) {
+          const errorMessage = limitResult && limitResult.error ? limitResult.error.toString() : '';
+          
+          if (errorMessage.includes("Order would immediately match and take")) {
+            console.log(`🟡 [INFO] ${market}: A ordem com desconto (LIMIT) não foi aceita porque o mercado se moveu muito rápido.`);
+            console.log(`[AÇÃO] ${market}: Cancelando e acionando plano B com ordem a MERCADO.`);
+            
+            return await OrderController.executeMarketFallback({
+              market,
+              side,
+              quantity,
+              accountId,
+              originalSignalData,
+              entryPrice
+            });
+          } else {
+            console.error(`❌ [${accountId}] ${market}: Falha ao enviar ordem LIMIT: ${limitResult && limitResult.error}`);
+            return { error: limitResult && limitResult.error };
+          }
+        }
+        
+        console.log(`✅ [${accountId}] ${market}: Ordem LIMIT enviada com sucesso (ID: ${limitResult.orderId || 'N/A'})`);
+        
+      } catch (error) {
+        const errorMessage = error.message || error.toString();
+        
+        if (errorMessage.includes("Order would immediately match and take")) {
+          console.log(`🟡 [INFO] ${market}: A ordem com desconto (LIMIT) não foi aceita porque o mercado se moveu muito rápido.`);
+          console.log(`[AÇÃO] ${market}: Cancelando e acionando plano B com ordem a MERCADO.`);
+          
+          return await OrderController.executeMarketFallback({
+            market,
+            side,
+            quantity,
+            accountId,
+            originalSignalData,
+            entryPrice
+          });
+        } else {
+          console.error(`❌ [${accountId}] ${market}: Erro ao enviar ordem LIMIT:`, error.message);
+          return { error: error.message };
+        }
       }
-      console.log(`📋 [${accountId}] ${market}: Ordem LIMIT enviada (ID: ${limitResult.id || 'N/A'}) a ${finalPrice}`);
-      // 2. Monitorar execução por ORDER_EXECUTION_TIMEOUT_SECONDS
+      
+      // 2. Monitora execução por ORDER_EXECUTION_TIMEOUT_SECONDS
       const timeoutSec = Number(process.env.ORDER_EXECUTION_TIMEOUT_SECONDS || 12);
+      console.log(`⏰ [${accountId}] ${market}: Monitorando execução por ${timeoutSec} segundos...`);
+      
       let filled = false;
       for (let i = 0; i < timeoutSec; i++) {
         await new Promise(r => setTimeout(r, 1000));
-        const openOrders = await Order.getOpenOrders(market);
-        const stillOpen = openOrders && openOrders.some(o => o.orderId === limitResult.orderId && (o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled'));
-        if (!stillOpen) {
-          filled = true;
-          break;
+        
+        try {
+          const openOrders = await Order.getOpenOrders(market);
+          const stillOpen = openOrders && openOrders.some(o => 
+            o.orderId === limitResult.orderId && 
+            (o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled')
+          );
+          
+          if (!stillOpen) {
+            filled = true;
+            break;
+          }
+          
+          // Log de progresso a cada 3 segundos
+          if (i % 3 === 0 && i > 0) {
+            console.log(`⏳ [${accountId}] ${market}: Aguardando execução... ${i}/${timeoutSec}s`);
+          }
+          
+        } catch (monitorError) {
+          console.warn(`⚠️ [${accountId}] ${market}: Erro ao monitorar ordem: ${monitorError.message}`);
         }
       }
+      
       if (filled) {
-        console.log(`✅ [${accountId}] ${market}: Ordem LIMIT executada normalmente.`);
+        console.log(`✅ [SUCESSO] ${market}: Ordem LIMIT executada normalmente em ${timeoutSec} segundos.`);
         return { success: true, type: 'LIMIT', limitResult };
       }
+      
       // 3. Timeout: cancela ordem LIMIT
-      await Order.cancelOpenOrder(market, limitResult.id);
-      console.log(`⏰ [${accountId}] ${market}: Timeout - Ordem LIMIT não executada. Cancelada.`);
+      console.log(`⏰ [${accountId}] ${market}: Ordem LIMIT não executada em ${timeoutSec} segundos. Cancelando...`);
+      
+      try {
+        await Order.cancelOpenOrder(market, limitResult.orderId);
+        console.log(`✅ [${accountId}] ${market}: Ordem LIMIT cancelada com sucesso.`);
+      } catch (cancelError) {
+        console.warn(`⚠️ [${accountId}] ${market}: Erro ao cancelar ordem LIMIT: ${cancelError.message}`);
+      }
+      
       // 4. Revalida sinal e slippage
+      console.log(`🔍 [${accountId}] ${market}: Revalidando sinal e verificando slippage...`);
+      
       const signalValid = await OrderController.revalidateSignal({ market, accountId, originalSignalData });
       const markPrices2 = await Markets.getAllMarkPrices(market);
       const priceCurrent = parseFloat(markPrices2[0]?.markPrice || entryPrice);
       const slippage = OrderController.calcSlippagePct(entryPrice, priceCurrent);
-      console.log(`[${accountId}] ${market}: Revalidação - Sinal: ${signalValid ? 'OK' : 'NÃO OK'} | Slippage: ${slippage.toFixed(3)}%`);
+      
+      console.log(`📊 [${accountId}] ${market}: Revalidação - Sinal: ${signalValid ? '✅ VÁLIDO' : '❌ INVÁLIDO'} | Slippage: ${slippage.toFixed(3)}%`);
+      
       if (!signalValid) {
         console.log(`🚫 [${accountId}] ${market}: Sinal não é mais válido. Abortando entrada.`);
         return { aborted: true, reason: 'signal' };
       }
-      if (slippage > parseFloat(process.env.MAX_SLIPPAGE_PCT || 0.2)) {
-        console.log(`🚫 [${accountId}] ${market}: Slippage de ${slippage.toFixed(3)}% excede o máximo permitido (${process.env.MAX_SLIPPAGE_PCT}%). Abortando entrada.`);
+      
+      const maxSlippage = parseFloat(process.env.MAX_SLIPPAGE_PCT || 0.2);
+      if (slippage > maxSlippage) {
+        console.log(`🚫 [${accountId}] ${market}: Slippage de ${slippage.toFixed(3)}% excede o máximo permitido (${maxSlippage}%). Abortando entrada.`);
         return { aborted: true, reason: 'slippage' };
       }
+      
       // 5. Fallback: envia ordem a mercado
+      console.log(`[AÇÃO] ${market}: Acionando plano B com ordem a MERCADO para garantir entrada.`);
+      
+      return await OrderController.executeMarketFallback({
+        market,
+        side,
+        quantity,
+        accountId,
+        originalSignalData,
+        entryPrice
+      });
+      
+    } catch (error) {
+      console.error(`❌ [${accountId}] ${market}: Erro no fluxo híbrido:`, error.message);
+      return { error: error.message };
+    }
+  }
+
+  /**
+   * NOVO: Método auxiliar para executar fallback a mercado
+   * @param {object} params - Parâmetros para execução do fallback
+   * @returns {object} - Resultado da execução
+   */
+  static async executeMarketFallback({ market, side, quantity, accountId, originalSignalData, entryPrice }) {
+    try {
+      console.log(`⚡ [${accountId}] ${market}: Executando fallback a MERCADO para garantir entrada...`);
+      
       const marketBody = {
         symbol: market,
         side,
         orderType: "Market",
         quantity,
         timeInForce: "IOC",
-        selfTradePrevention: "RejectTaker"
+        selfTradePrevention: "RejectTaker",
+        clientId: Math.floor(Math.random() * 1000000)
       };
+      
       const marketResult = await Order.executeOrder(marketBody);
       if (marketResult && !marketResult.error) {
         OrderController.fallbackCount++;
-        console.log(`⚡ [${accountId}] ${market}: Fallback - Ordem a MERCADO executada com sucesso!`);
+        
+        // Calcula slippage real
+        const executionPrice = parseFloat(marketResult.price || marketResult.avgPrice || entryPrice);
+        const slippage = OrderController.calcSlippagePct(entryPrice, executionPrice);
+        
+        console.log(`✅ [SUCESSO] ${market}: Operação aberta com sucesso via fallback a MERCADO!`);
+        console.log(`📊 [${accountId}] ${market}: Preço de execução: $${executionPrice.toFixed(6)} | Slippage: ${slippage.toFixed(3)}%`);
+        
         // Estatística de fallback
         if (OrderController.totalHybridOrders % 50 === 0) {
           const fallbackPct = (OrderController.fallbackCount / OrderController.totalHybridOrders) * 100;
-          console.log(`\n[EXECUTION_STATS] ${fallbackPct.toFixed(1)}% das ordens precisaram de fallback para mercado (${OrderController.fallbackCount}/${OrderController.totalHybridOrders})`);
+          console.log(`\n📈 [EXECUTION_STATS] Taxa de fallback: ${fallbackPct.toFixed(1)}% (${OrderController.fallbackCount}/${OrderController.totalHybridOrders} ordens)`);
           if (fallbackPct > 30) {
-            console.log('⚠️ Taxa de fallback alta! Considere ajustar o timeout ou o preço da LIMIT.');
+            console.log('⚠️ Taxa de fallback alta! Considere ajustar ORDER_EXECUTION_TIMEOUT_SECONDS ou o preço da LIMIT.');
           } else {
             console.log('✅ Taxa de fallback dentro do esperado.');
           }
         }
-        return { success: true, type: 'MARKET', marketResult };
+
+        return { success: true, type: 'MARKET', marketResult, executionPrice, slippage };
       } else {
         console.log(`❌ [${accountId}] ${market}: Fallback - Falha ao executar ordem a mercado: ${marketResult && marketResult.error}`);
         return { error: marketResult && marketResult.error };
