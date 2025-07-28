@@ -7,6 +7,9 @@ import AccountController from '../Controllers/AccountController.js';
 
 class TrailingStop {
 
+  // Gerenciador de estado do trailing stop para cada posição
+  static trailingState = new Map(); // Ex: { 'SOL_USDC_PERP': { trailingStopPrice: 180.50, highestPrice: 182.00, lowestPrice: 175.00 } }
+
   constructor(strategyType = null) {
     const finalStrategyType = strategyType || 'DEFAULT';
     console.log(`🔧 [TRAILING_INIT] Inicializando TrailingStop com estratégia: ${finalStrategyType}`);
@@ -27,6 +30,184 @@ class TrailingStop {
     }
     
     this.stopLossStrategy = StopLossFactory.createStopLoss(strategyType);
+  }
+
+  /**
+   * Limpa o estado do trailing stop para uma posição específica
+   * @param {string} symbol - Símbolo da posição
+   */
+  static clearTrailingState(symbol) {
+    if (TrailingStop.trailingState.has(symbol)) {
+      TrailingStop.trailingState.delete(symbol);
+      console.log(`🧹 [TRAILING_CLEANUP] Estado do trailing stop limpo para ${symbol}`);
+    }
+  }
+
+  /**
+   * Atualiza o trailing stop para uma posição específica
+   * @param {object} position - Dados da posição
+   * @returns {object|null} - Estado atualizado do trailing stop ou null se não aplicável
+   */
+  async updateTrailingStopForPosition(position) {
+    try {
+      // Verifica se o trailing stop está habilitado
+      const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
+      if (!enableTrailingStop) {
+        return null;
+      }
+
+      // Obtém a distância do trailing stop (em porcentagem)
+      const trailingStopDistance = Number(process.env.TRAILING_STOP_DISTANCE || 2.0); // 2% por padrão (valor real: 2 = 2%, 1.5 = 1.5%)
+      
+      if (isNaN(trailingStopDistance) || trailingStopDistance <= 0) {
+        console.error(`❌ [TRAILING_ERROR] TRAILING_STOP_DISTANCE inválido: ${process.env.TRAILING_STOP_DISTANCE}`);
+        return null;
+      }
+
+      // Calcula PnL da posição
+      const Account = await AccountController.get();
+      const leverage = Account.leverage;
+      const { pnl, pnlPct } = this.calculatePnL(position, leverage);
+
+      // Trailing stop só é ativado se a posição estiver com lucro
+      if (pnl <= 0) {
+        // Remove estado se posição não está mais lucrativa
+        TrailingStop.clearTrailingState(position.symbol);
+        return null;
+      }
+
+      // Obtém preço atual da posição
+      const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
+      if (currentPrice <= 0) {
+        console.error(`❌ [TRAILING_ERROR] Preço atual inválido para ${position.symbol}: ${currentPrice}`);
+        return null;
+      }
+
+      // Obtém preço de entrada
+      const entryPrice = parseFloat(position.entryPrice || 0);
+      if (entryPrice <= 0) {
+        console.error(`❌ [TRAILING_ERROR] Preço de entrada inválido para ${position.symbol}: ${entryPrice}`);
+        return null;
+      }
+
+      // Determina se é LONG ou SHORT
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const isShort = parseFloat(position.netQuantity) < 0;
+
+      if (!isLong && !isShort) {
+        return null;
+      }
+
+      // Obtém ou inicializa o estado do trailing stop
+      let trailingState = TrailingStop.trailingState.get(position.symbol);
+      
+      if (!trailingState) {
+        // Inicializa o estado - LOG DE ATIVAÇÃO
+        trailingState = {
+          entryPrice: entryPrice,
+          trailingStopPrice: null,
+          highestPrice: isLong ? entryPrice : null,
+          lowestPrice: isShort ? entryPrice : null,
+          isLong: isLong,
+          isShort: isShort,
+          activated: false
+        };
+        TrailingStop.trailingState.set(position.symbol, trailingState);
+        console.log(`[TRAILING_INIT] ${position.symbol}: Trailing Stop ATIVADO. Preço de Entrada: $${entryPrice.toFixed(4)}`);
+      }
+
+      // Atualiza o trailing stop baseado na direção da posição
+      if (isLong) {
+        // Para posições LONG
+        if (currentPrice > trailingState.highestPrice) {
+          trailingState.highestPrice = currentPrice;
+          
+          // Calcula novo trailing stop price
+          const newTrailingStopPrice = currentPrice * (1 - (trailingStopDistance / 100));
+          
+          // Só atualiza se o novo stop for maior que o anterior (trailing stop só se move a favor)
+          if (!trailingState.trailingStopPrice || newTrailingStopPrice > trailingState.trailingStopPrice) {
+            trailingState.trailingStopPrice = newTrailingStopPrice;
+            trailingState.activated = true;
+            console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço Máximo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
+          }
+        }
+      } else if (isShort) {
+        // Para posições SHORT
+        if (currentPrice < trailingState.lowestPrice) {
+          trailingState.lowestPrice = currentPrice;
+          
+          // Calcula novo trailing stop price
+          const newTrailingStopPrice = currentPrice * (1 + (trailingStopDistance / 100));
+          
+          // Só atualiza se o novo stop for menor que o anterior (trailing stop só se move a favor)
+          if (!trailingState.trailingStopPrice || newTrailingStopPrice < trailingState.trailingStopPrice) {
+            trailingState.trailingStopPrice = newTrailingStopPrice;
+            trailingState.activated = true;
+            console.log(`📉 [TRAILING_UPDATE] ${position.symbol}: SHORT - Preço Mínimo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
+          }
+        }
+      }
+
+      return trailingState;
+
+    } catch (error) {
+      console.error(`[TRAILING_UPDATE] Erro ao atualizar trailing stop para ${position.symbol}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Verifica se uma posição deve ser fechada por trailing stop
+   * @param {object} position - Dados da posição
+   * @param {object} trailingState - Estado do trailing stop
+   * @returns {object|null} - Decisão de fechamento ou null
+   */
+  checkTrailingStopTrigger(position, trailingState) {
+    try {
+      if (!trailingState || !trailingState.activated || !trailingState.trailingStopPrice) {
+        return null;
+      }
+
+      const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
+      if (currentPrice <= 0) {
+        return null;
+      }
+
+      let shouldClose = false;
+      let reason = '';
+
+      if (trailingState.isLong) {
+        // Para LONG: fecha se preço atual <= trailing stop price
+        if (currentPrice <= trailingState.trailingStopPrice) {
+          shouldClose = true;
+          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} <= stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+        }
+      } else if (trailingState.isShort) {
+        // Para SHORT: fecha se preço atual >= trailing stop price
+        if (currentPrice >= trailingState.trailingStopPrice) {
+          shouldClose = true;
+          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} >= stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+        }
+      }
+
+      if (shouldClose) {
+        console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: GATILHO ATIVADO! Preço atual $${currentPrice.toFixed(4)} cruzou o stop em $${trailingState.trailingStopPrice.toFixed(4)}.`);
+        return {
+          shouldClose: true,
+          reason: reason,
+          type: 'TRAILING_STOP',
+          trailingStopPrice: trailingState.trailingStopPrice,
+          currentPrice: currentPrice
+        };
+      }
+
+      return null;
+
+    } catch (error) {
+      console.error(`[TRAILING_CHECK] Erro ao verificar trailing stop para ${position.symbol}:`, error.message);
+      return null;
+    }
   }
 
   /**
@@ -299,21 +480,33 @@ class TrailingStop {
       }
 
       for (const position of positions) {
-        // Verifica se deve fechar por profit mínimo baseado nas taxas (prioridade 1)
+        // Atualiza o estado do trailing stop para a posição
+        await this.updateTrailingStopForPosition(position);
+
+        // Verifica se deve fechar por trailing stop (prioridade 1)
+        const trailingState = TrailingStop.trailingState.get(position.symbol);
+        const trailingDecision = this.checkTrailingStopTrigger(position, trailingState);
+        if (trailingDecision && trailingDecision.shouldClose) {
+          console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por trailing stop`);
+          await OrderController.forceClose(position);
+          continue;
+        }
+
+        // Verifica se deve fechar por profit mínimo baseado nas taxas (prioridade 2)
         if (await this.shouldCloseForMinimumProfit(position)) {
           console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
           await OrderController.forceClose(position);
           continue;
         }
 
-        // Verifica se deve fechar por profit mínimo configurado (prioridade 2)
+        // Verifica se deve fechar por profit mínimo configurado (prioridade 3)
         if (await this.shouldCloseForConfiguredProfit(position)) {
           console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Fechando por profit mínimo configurado`);
           await OrderController.forceClose(position);
           continue;
         }
 
-        // Verifica ADX crossover para estratégia PRO_MAX (prioridade 3)
+        // Verifica ADX crossover para estratégia PRO_MAX (prioridade 4)
         const adxCrossoverDecision = await this.checkADXCrossover(position);
         if (adxCrossoverDecision && adxCrossoverDecision.shouldClose) {
           console.log(`🔄 [ADX_CROSSOVER] ${position.symbol}: ${adxCrossoverDecision.reason}`);
@@ -321,7 +514,7 @@ class TrailingStop {
           continue;
         }
 
-        // Verifica stop loss normal (prioridade 4)
+        // Verifica stop loss normal (prioridade 5)
         const decision = this.stopLossStrategy.shouldClosePosition(position);
         
         if (decision && decision.shouldClose) {

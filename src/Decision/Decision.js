@@ -606,10 +606,11 @@ class Decision {
       try {
         const marketInfo = Account.markets.find((el) => el.symbol === row.market);
 
-        row.volume = investmentUSD
-        row.decimal_quantity = marketInfo.decimal_quantity
-        row.decimal_price = marketInfo.decimal_price
-        row.stepSize_quantity = marketInfo.stepSize_quantity
+        // Usa os dados fornecidos pela estratégia ou fallback para os padrões
+        row.volume = row.volume || investmentUSD
+        row.decimal_quantity = row.decimal_quantity || marketInfo.decimal_quantity
+        row.decimal_price = row.decimal_price || marketInfo.decimal_price
+        row.stepSize_quantity = row.stepSize_quantity || marketInfo.stepSize_quantity
 
         // Verifica se já existe uma posição ativa para este mercado
         const positions = await Futures.getOpenPositions();

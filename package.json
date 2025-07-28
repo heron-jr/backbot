@@ -4,7 +4,10 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:trailing": "jest TrailingStop.test.js",
     "start": "cross-env TRADING_STRATEGY=DEFAULT nodemon bootstrap-app.js",
     "menu": "nodemon bootstrap-app.js",
     "start:skip": "nodemon bootstrap-app.js -- --skip-selection",
@@ -44,6 +47,7 @@
     "ws": "^8.18.1"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3"
+    "cross-env": "^7.0.3",
+    "jest": "^30.0.5"
   }
 }

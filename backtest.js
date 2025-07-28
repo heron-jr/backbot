@@ -131,29 +131,9 @@ async function runRealBacktest(strategy) {
   logger.info('\n📊 CONFIGURAÇÃO DO BACKTEST COM DADOS REAIS');
   logger.info('-'.repeat(40));
   
-<<<<<<< Updated upstream
-  // Primeiro, perguntar a estratégia para determinar se precisa do investimento por trade
-  const strategyChoice = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'strategy',
-      message: 'Escolha a estratégia:',
-      choices: [
-        { name: 'DEFAULT - Farm de Volume', value: 'DEFAULT' },
-        { name: 'PRO_MAX - Estratégia Avançada', value: 'PRO_MAX' },
-        { name: 'CYPHERPUNK - Sistema AMBIENT + ACTION', value: 'CYPHERPUNK' }
-      ]
-    }
-  ]);
-
-  // Configurações base
-  const baseConfig = await inquirer.prompt([
-    {
-=======
   // CORREÇÃO: Perguntas limitadas apenas aos parâmetros de simulação (estratégia já selecionada)
   const simulationConfig = await inquirer.prompt([
     {
->>>>>>> Stashed changes
       type: 'input',
       name: 'symbols',
       message: 'Símbolos para testar (separados por vírgula):',
@@ -240,181 +220,10 @@ async function runRealBacktest(strategy) {
     }
   ]);
 
-  // Perguntar investimento por trade apenas para estratégias que não gerenciam isso internamente
-  let investmentPerTrade = null;
-  let capitalPercentage = null;
-  if (strategyChoice.strategy !== 'CYPHERPUNK') {
-    const investmentConfig = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'investmentType',
-        message: 'Tipo de investimento por trade:',
-        choices: [
-          { name: '💰 Valor fixo em USD', value: 'fixed' },
-          { name: '📊 Porcentagem do capital disponível', value: 'percentage' }
-        ],
-        default: 'fixed'
-      }
-    ]);
-
-    if (investmentConfig.investmentType === 'fixed') {
-      const fixedConfig = await inquirer.prompt([
-        {
-          type: 'number',
-          name: 'investmentPerTrade',
-          message: 'Investimento por trade (USD):',
-        default: 100,
-        validate: (value) => value > 0 ? true : 'Investimento deve ser maior que zero'
-      }
-    ]);
-    investmentPerTrade = fixedConfig.investmentPerTrade;
-  } else {
-    const percentageConfig = await inquirer.prompt([
-      {
-        type: 'number',
-        name: 'capitalPercentage',
-        message: 'Porcentagem do capital por trade (%):',
-        default: 10,
-        validate: (value) => {
-          if (value <= 0 || value > 100) {
-            return 'Porcentagem deve estar entre 0.1% e 100%';
-          }
-          return true;
-        }
-      }
-    ]);
-    capitalPercentage = percentageConfig.capitalPercentage;
-  }
-} else {
-  // Para CypherPunk, usar 10% do saldo inicial como padrão (será gerenciado pela estratégia)
-  investmentPerTrade = Math.round(baseConfig.initialBalance * 0.1);
-  logger.info(`💰 CypherPunk: Usando ${investmentPerTrade} USD por trade (10% do saldo - gerenciado pela estratégia)`);
-}
-
-  // Configuração final
-  const config = {
-    ...strategyChoice,
-    ...baseConfig,
-    investmentPerTrade,
-    capitalPercentage
-  };
-
-  // Configurações adicionais
-  const additionalConfig = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'saveResults',
-      message: 'Salvar resultados em arquivo?',
-      default: true
-    }
-  ]);
-
-  Object.assign(config, additionalConfig);
-  
-  // Configurações adicionais para dados reais
-  config.useSyntheticData = false; // SEMPRE dados reais
-  config.allowSyntheticFallback = false; // Não permite fallback sintético
-  config.fee = 0.0004; // 0.04%
-  config.slippage = 0.0001; // 0.01%
-  config.maxConcurrentTrades = 5;
-  config.enableStopLoss = true;
-  config.enableTakeProfit = true;
-  config.leverage = baseConfig.leverage; // Alavancagem selecionada
-  config.minProfitPercentage = 0; // Profit mínimo: 0% = apenas vs taxas (como o bot real)
-  
-  // Configurações específicas da estratégia
-  if (config.strategy === 'PRO_MAX') {
-    config.strategyConfig = {
-      adxLength: 14,
-      adxThreshold: 20,
-      adxAverageLength: 21,
-      useRsiValidation: 'true',
-      useStochValidation: 'true',
-      useMacdValidation: 'true',
-      ignoreBronzeSignals: 'false'
-    };
-  } else if (config.strategy === 'CYPHERPUNK') {
-    config.strategyConfig = {
-      // Trade System CypherPunk
-      targets: 3, // 3 pontos de entrada
-      stopLossPercentage: 2, // 2% stop loss
-      takeProfitPercentage: 10, // 10% take profit
-      // Sistema AMBIENT + ACTION
-      ambientTimeframe: config.interval, // Usa o timeframe selecionado como AMBIENT
-      actionTimeframe: getActionTimeframe(config.interval), // Calcula ACTION automaticamente
-      // Configurações dos indicadores
-      vwapThreshold: 0.5, // Sensibilidade VWAP
-      momentumThreshold: 0.3, // Sensibilidade MOMENTUM
-      moneyFlowThreshold: 0.7, // Sensibilidade MONEY FLOW (mais importante)
-      // Filtros
-      enableDivergence: true,
-      enableExhaustionLines: true,
-      minDays: 10 // Mínimo de dias para análise
-    };
-  }
-  
-  try {
-    logger.info('\n🚀 Iniciando backtest com dados REAIS...');
-    logger.info(`📅 Período: ${config.days} dias`);
-    logger.info(`📊 Símbolos: ${config.symbols.join(', ')}`);
-    logger.info(`⏱️ Intervalo: ${config.interval}`);
-    logger.info(`⚡ Alavancagem: ${config.leverage}x`);
-    logger.info(`💰 Capital efetivo: $${(config.initialBalance * config.leverage).toFixed(2)}`);
-    
-    // Log da configuração de volume
-    if (config.capitalPercentage > 0) {
-      logger.info(`📈 Volume por operação: ${config.capitalPercentage}% do capital disponível`);
-    } else {
-      logger.info(`📈 Volume por operação: $${config.investmentPerTrade.toFixed(2)} (valor fixo)`);
-    }
-    
-    // Log da configuração de profit mínimo
-    if (config.minProfitPercentage > 0) {
-      logger.info(`🎯 Profit mínimo: ${config.minProfitPercentage}%`);
-    } else {
-      logger.info(`🎯 Profit mínimo: Apenas vs taxas (lucro líquido > 0)`);
-    }
-    
-    // Informações específicas do CypherPunk
-    if (config.strategy === 'CYPHERPUNK') {
-      const tradingType = getTradingType(config.interval);
-      logger.info(`🎯 Estratégia: CYPHERPUNK - Sistema AMBIENT + ACTION`);
-      logger.info(`📈 Tipo: ${tradingType}`);
-      logger.info(`🌍 AMBIENT: ${config.interval} (Visão MACRO)`);
-      logger.info(`⚡ ACTION: ${config.strategyConfig.actionTimeframe} (Pontos de Entrada)`);
-      logger.info(`📊 Trade System: 3 entradas, 10% lucro, 2% stop loss`);
-      logger.info(`🔍 Análise: VWAP → MOMENTUM → MONEY FLOW (ordem obrigatória)`);
-      
-      // Avisos específicos para timeframes de alto risco
-      if (config.interval === '15m') {
-        logger.warn('🚨 ATENÇÃO: Super Scalp Trade - APENAS para traders EXPERIENTES!');
-        logger.warn('   Alto risco - Requer conhecimento profundo do CypherPunk');
-      } else if (config.interval === '30m') {
-        logger.info('🎯 Scalp Trade - Requer atenção constante');
-      } else if (config.interval === '1h') {
-        logger.info('⚡ Day Trade Volátil - Mercados em movimento');
-      }
-    }
-    
-    const runner = new BacktestRunner();
-    await runner.runBacktest(config);
-    
-    const { continueTest } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'continueTest',
-        message: '\nDeseja executar outro backtest?',
-        default: false
-      }
-    ]);
-    
-<<<<<<< Updated upstream
-    if (continueTest) {
-      await runRealBacktest();
-=======
-    finalSimulationMode = customSimulationMode;
-    logger.info(`✅ Modo de simulação alterado para: ${finalSimulationMode}`);
-  }
+  // Determinar timeframes baseado no intervalo selecionado
+  const ambientTimeframe = simulationConfig.interval;
+  const actionTimeframe = getActionTimeframe(ambientTimeframe);
+  const finalSimulationMode = determineSimulationMode(ambientTimeframe);
 
   // CORREÇÃO: Carregar TODAS as configurações de estratégia do .env (FONTE ÚNICA DA VERDADE)
   const config = {
@@ -428,6 +237,9 @@ async function runRealBacktest(strategy) {
     simulationMode: finalSimulationMode,
     ambientTimeframe: ambientTimeframe,
     actionTimeframe: actionTimeframe,
+    
+    // NOVO: Modo de Auditoria para diagnosticar por que não há trades
+    isAuditing: process.env.BACKTEST_AUDIT_MODE === 'true',
     
     // CORREÇÃO: Parâmetros de estratégia carregados do .env
     // Stop Loss e Take Profit
@@ -524,7 +336,20 @@ async function runRealBacktest(strategy) {
       const filename = `backtest_${config.strategy}_${config.ambientTimeframe}_${new Date().toISOString().split('T')[0]}.json`;
       await runner.saveResults(results, filename);
       logger.info(`💾 Resultados salvos em: ${filename}`);
->>>>>>> Stashed changes
+    }
+    
+    // Pergunta se deseja continuar testando
+    const { continueTest } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'continueTest',
+        message: '\nDeseja executar outro backtest?',
+        default: false
+      }
+    ]);
+    
+    if (continueTest) {
+      await runRealBacktest(strategy);
     }
     
   } catch (error) {
@@ -540,7 +365,7 @@ async function runRealBacktest(strategy) {
     ]);
     
     if (retry) {
-      await runRealBacktest();
+      await runRealBacktest(strategy);
     }
   }
 }
@@ -1148,40 +973,10 @@ async function showStrategyMenu() {
  */
 async function main() {
   try {
-<<<<<<< Updated upstream
-    while (true) {
-      const action = await showMainMenu();
-      
-      switch (action) {
-        case 'real':
-          await runRealBacktest();
-          break;
-        case 'comparative':
-          await runComparativeBacktest();
-          break;
-        case 'liquid':
-          await showLiquidSymbols();
-          break;
-        case 'symbols':
-          await showAllSymbols();
-          break;
-        case 'advanced':
-          await showAdvancedSettings();
-          break;
-        case 'synthetic':
-          await runSyntheticTest();
-          break;
-        case 'exit':
-          logger.info('👋 Até logo!');
-          process.exit(0);
-      }
-    }
-=======
     logger.info('🚀 BACKTEST - Sistema de Teste de Estratégias');
     logger.info('='.repeat(50));
     // MODIFICADO: Vai direto para o menu de seleção de estratégias
     await showStrategyMenu();
->>>>>>> Stashed changes
   } catch (error) {
     logger.error(`❌ Erro fatal: ${error.message}`);
     process.exit(1);

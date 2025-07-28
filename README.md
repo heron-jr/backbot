@@ -9,6 +9,7 @@ Bot de trading automatizado avançado para Backpack Exchange com estratégia int
 - **Sistema de Backtest**: Teste suas estratégias com dados históricos
 - **Multi-Bot**: Execute múltiplas instâncias simultaneamente
 - **Trailing Stop**: Proteção automática de lucros
+- **🛡️ Sistema de Ordens de Segurança (Failsafe)**: SL/TP automáticos com cálculo correto de alavancagem
 - **Logs Coloridos**: Interface visual clara e informativa
 
 ## 📊 Sistema de Backtest
@@ -74,6 +75,35 @@ ACCOUNT1_API_SECRET=<SECRET_KEY_ACCOUNT1> # ← ALTERE AQUI
 - `MAX_NEGATIVE_PNL_STOP_PCT=10` - Stop loss em %
 - `MIN_PROFIT_PCT=0.5` - Lucro mínimo
 - `ORDER_TIMEOUT_MINUTES=10` - Timeout de ordens
+
+## 🛡️ Sistema de Ordens de Segurança (Failsafe)
+
+O bot inclui um sistema automático de ordens de segurança que cria Stop Loss e Take Profit para todas as posições abertas, servindo como uma "rede de segurança" caso o monitoramento ativo falhe.
+
+### Funcionalidades
+- **Cálculo Correto**: SL/TP calculados considerando alavancagem da posição
+- **Criação Automática**: SL/TP criados imediatamente após abertura de posição
+- **Monitoramento Contínuo**: Verifica e recria ordens se necessário
+- **Configurável**: Preços baseados em variáveis de ambiente
+- **Multi-Conta**: Suporte completo para CONTA1 e CONTA2
+
+### Configuração
+```bash
+# Porcentagem mínima de lucro para take profit
+MIN_PROFIT_PERCENTAGE=0.5
+
+# Porcentagem máxima de perda para stop loss
+MAX_NEGATIVE_PNL_STOP_PCT=4.0
+```
+
+### Exemplo de Cálculo
+- **Cenário**: BTC a $50,000 com alavancagem 20x
+- **Configuração**: TP 0.5%, SL 4%
+- **Resultado**: 
+  - TP executado em $50,012.50 (0.5% de lucro real)
+  - SL executado em $50,100.00 (4% de perda real)
+
+📖 [Documentação Completa do Sistema Failsafe](FAILSAFE_ORDERS_V2.md)
 
 ## 🚀 Uso
 
