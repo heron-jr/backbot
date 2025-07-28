@@ -128,7 +128,7 @@ class TrailingStop {
       let trailingState = TrailingStop.trailingState.get(position.symbol);
       
       if (!trailingState) {
-        // Inicializa o estado - LOG DE ATIVAÇÃO
+        // Inicializa o estado - LOG ÚNICO DE ATIVAÇÃO
         trailingState = {
           entryPrice: entryPrice,
           trailingStopPrice: null,
@@ -136,10 +136,12 @@ class TrailingStop {
           lowestPrice: isShort ? entryPrice : null,
           isLong: isLong,
           isShort: isShort,
-          activated: false
+          activated: false,
+          initialized: false // Novo campo para controlar logs
         };
         TrailingStop.trailingState.set(position.symbol, trailingState);
-        console.log(`[TRAILING_INIT] ${position.symbol}: Trailing Stop INICIALIZADO. Preço de Entrada: $${entryPrice.toFixed(4)}`);
+        console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO. Preço de Entrada: $${entryPrice.toFixed(4)}`);
+        trailingState.initialized = true;
       }
 
       // Atualiza o trailing stop baseado na direção da posição
@@ -156,7 +158,6 @@ class TrailingStop {
             trailingState.trailingStopPrice = newTrailingStopPrice;
             trailingState.activated = true;
             console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço Máximo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
-            console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO para LONG`);
           }
         } else if (pnl > 0 && !trailingState.activated) {
           // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
@@ -179,7 +180,6 @@ class TrailingStop {
             trailingState.trailingStopPrice = newTrailingStopPrice;
             trailingState.activated = true;
             console.log(`📉 [TRAILING_UPDATE] ${position.symbol}: SHORT - Preço Mínimo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
-            console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO para SHORT`);
           }
         } else if (pnl > 0 && !trailingState.activated) {
           // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
