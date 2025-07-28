@@ -10,6 +10,16 @@ class TrailingStop {
   // Gerenciador de estado do trailing stop para cada posição
   static trailingState = new Map(); // Ex: { 'SOL_USDC_PERP': { trailingStopPrice: 180.50, highestPrice: 182.00, lowestPrice: 175.00 } }
 
+  /**
+   * Função de debug condicional
+   * @param {string} message - Mensagem de debug
+   */
+  static debug(message) {
+    if (process.env.LOG_TYPE === 'debug') {
+      console.log(message);
+    }
+  }
+
   constructor(strategyType = null) {
     const finalStrategyType = strategyType || 'DEFAULT';
     console.log(`🔧 [TRAILING_INIT] Inicializando TrailingStop com estratégia: ${finalStrategyType}`);
@@ -130,8 +140,6 @@ class TrailingStop {
         };
         TrailingStop.trailingState.set(position.symbol, trailingState);
         console.log(`[TRAILING_INIT] ${position.symbol}: Trailing Stop INICIALIZADO. Preço de Entrada: $${entryPrice.toFixed(4)}`);
-      } else {
-        console.log(`🔍 [TRAILING_DEBUG] ${position.symbol}: Estado existente - activated=${trailingState.activated}, stopPrice=${trailingState.trailingStopPrice?.toFixed(4) || 'null'}`);
       }
 
       // Atualiza o trailing stop baseado na direção da posição
@@ -150,6 +158,13 @@ class TrailingStop {
             console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço Máximo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
             console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO para LONG`);
           }
+        } else if (pnl > 0 && !trailingState.activated) {
+          // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
+          // ativa com o preço atual como base
+          const newTrailingStopPrice = currentPrice * (1 - (trailingStopDistance / 100));
+          trailingState.trailingStopPrice = newTrailingStopPrice;
+          trailingState.activated = true;
+          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: LONG - Ativando trailing stop com lucro existente. Preço: $${currentPrice.toFixed(4)}, Stop: $${newTrailingStopPrice.toFixed(4)}`);
         }
       } else if (isShort) {
         // Para posições SHORT
@@ -166,6 +181,13 @@ class TrailingStop {
             console.log(`📉 [TRAILING_UPDATE] ${position.symbol}: SHORT - Preço Mínimo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
             console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO para SHORT`);
           }
+        } else if (pnl > 0 && !trailingState.activated) {
+          // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
+          // ativa com o preço atual como base
+          const newTrailingStopPrice = currentPrice * (1 + (trailingStopDistance / 100));
+          trailingState.trailingStopPrice = newTrailingStopPrice;
+          trailingState.activated = true;
+          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: SHORT - Ativando trailing stop com lucro existente. Preço: $${currentPrice.toFixed(4)}, Stop: $${newTrailingStopPrice.toFixed(4)}`);
         }
       }
 
@@ -238,12 +260,7 @@ class TrailingStop {
   isTrailingStopActive(symbol) {
     const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
     const trailingState = TrailingStop.trailingState.get(symbol);
-    const isActive = enableTrailingStop && trailingState && trailingState.activated;
-    
-    // Debug logs
-    console.log(`🔍 [TRAILING_DEBUG] ${symbol}: enableTrailingStop=${enableTrailingStop}, hasState=${!!trailingState}, activated=${trailingState?.activated}, isActive=${isActive}`);
-    
-    return isActive;
+    return enableTrailingStop && trailingState && trailingState.activated;
   }
 
   /**
@@ -537,38 +554,61 @@ class TrailingStop {
         return;
       }
 
-      console.log(`🔍 [TRAILING_MONITOR] Verificando ${positions.length} posições abertas...`);
+      TrailingStop.debug(`🔍 [TRAILING_MONITOR] Verificando ${positions.length} posições abertas...`);
 
       for (const position of positions) {
         // Atualiza o estado do trailing stop para a posição
         await this.updateTrailingStopForPosition(position);
 
         // NOVA HIERARQUIA DE DECISÃO CONDICIONAL
+        const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
         const isTrailingActive = this.isTrailingStopActive(position.symbol);
         const trailingInfo = this.getTrailingStopInfo(position.symbol);
         let decision = null;
 
-        if (isTrailingActive) {
-          // PRIORIDADE 1: Trailing Stop está ativo e no controle
-          // Neste caso, IGNORAMOS completamente as regras de Take Profit fixo
-          console.log(`🎯 [TRAILING_PRIORITY] ${position.symbol}: Trailing Stop ATIVO - Ignorando regras de Take Profit fixo`);
+        if (enableTrailingStop) {
+          // MODO TRAILING STOP: Desabilita completamente o Take Profit fixo
+          TrailingStop.debug(`🎯 [TRAILING_MODE] ${position.symbol}: Modo Trailing Stop ativo - Take Profit fixo DESABILITADO`);
           
-          decision = this.checkTrailingStopTrigger(position, trailingInfo);
-          
-          if (decision && decision.shouldClose) {
-            console.log(`🚨 [TRAILING_PRIORITY] ${position.symbol}: Fechando por TRAILING STOP - ${decision.reason}`);
-            await OrderController.forceClose(position);
-            TrailingStop.onPositionClosed(position, 'trailing_stop');
-            continue;
+          if (isTrailingActive) {
+            // Trailing Stop está ativo e no controle
+            TrailingStop.debug(`🚀 [TRAILING_ACTIVE] ${position.symbol}: Trailing Stop ATIVO - Monitorando posição`);
+            
+            decision = this.checkTrailingStopTrigger(position, trailingInfo);
+            
+            if (decision && decision.shouldClose) {
+              console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: Fechando por TRAILING STOP - ${decision.reason}`);
+              await OrderController.forceClose(position);
+              TrailingStop.onPositionClosed(position, 'trailing_stop');
+              continue;
+            }
+          } else {
+            // Trailing Stop não está ativo (posição com prejuízo ou sem lucro suficiente)
+            TrailingStop.debug(`⏳ [TRAILING_WAITING] ${position.symbol}: Aguardando posição ficar lucrativa para ativar trailing stop`);
+            
+            // Verifica apenas stop loss normal da estratégia (sem take profit fixo)
+            decision = this.stopLossStrategy.shouldClosePosition(position);
+            
+            if (decision && decision.shouldClose) {
+              console.log(`🛑 [STOP_LOSS_ONLY] ${position.symbol}: Fechando por stop loss normal - ${decision.reason}`);
+              await OrderController.forceClose(position);
+              TrailingStop.onPositionClosed(position, 'stop_loss');
+              continue;
+            }
+
+            if (decision && decision.shouldTakePartialProfit) {
+              console.log(`💰 [PARTIAL_PROFIT_ONLY] ${position.symbol}: Tomando profit parcial`);
+              await OrderController.takePartialProfit(position, decision.partialPercentage);
+              continue;
+            }
           }
         } else {
-          // Trailing Stop não está ativo, então usamos as regras de Take Profit fixo como fallback
-          // PRIORIDADE 2: Lógica de Stop Loss e Take Profit Fixo da Estratégia
-          console.log(`📋 [PROFIT_FALLBACK] ${position.symbol}: Trailing Stop INATIVO - Usando regras de Take Profit fixo`);
+          // MODO TAKE PROFIT FIXO: Usa apenas regras de Take Profit fixo
+          TrailingStop.debug(`📋 [PROFIT_MODE] ${position.symbol}: Modo Take Profit fixo ativo`);
           
           // Verifica se deve fechar por profit mínimo baseado nas taxas
           if (await this.shouldCloseForMinimumProfit(position)) {
-            console.log(`✅ [PROFIT_FALLBACK] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
+            console.log(`✅ [PROFIT_FIXED] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
             await OrderController.forceClose(position);
             TrailingStop.onPositionClosed(position, 'profit_minimum');
             continue;
@@ -576,7 +616,7 @@ class TrailingStop {
 
           // Verifica se deve fechar por profit mínimo configurado
           if (await this.shouldCloseForConfiguredProfit(position)) {
-            console.log(`✅ [PROFIT_FALLBACK] ${position.symbol}: Fechando por profit mínimo configurado`);
+            console.log(`✅ [PROFIT_FIXED] ${position.symbol}: Fechando por profit mínimo configurado`);
             await OrderController.forceClose(position);
             TrailingStop.onPositionClosed(position, 'profit_configured');
             continue;
@@ -595,28 +635,27 @@ class TrailingStop {
           decision = this.stopLossStrategy.shouldClosePosition(position);
           
           if (decision && decision.shouldClose) {
-            console.log(`🛑 [STOP_LOSS_FALLBACK] ${position.symbol}: Fechando por stop loss normal - ${decision.reason}`);
+            console.log(`🛑 [STOP_LOSS_FIXED] ${position.symbol}: Fechando por stop loss normal - ${decision.reason}`);
             await OrderController.forceClose(position);
             TrailingStop.onPositionClosed(position, 'stop_loss');
             continue;
           }
 
           if (decision && decision.shouldTakePartialProfit) {
-            console.log(`💰 [PARTIAL_PROFIT_FALLBACK] ${position.symbol}: Tomando profit parcial`);
+            console.log(`💰 [PARTIAL_PROFIT_FIXED] ${position.symbol}: Tomando profit parcial`);
             await OrderController.takePartialProfit(position, decision.partialPercentage);
-            // Não limpa o trailing state para profit parcial, pois a posição continua aberta
             continue;
           }
         }
 
         // Log de monitoramento para posições que não foram fechadas
-        if (isTrailingActive && trailingInfo) {
+        if (enableTrailingStop && isTrailingActive && trailingInfo) {
           const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
           const distance = trailingInfo.isLong 
             ? ((currentPrice - trailingInfo.trailingStopPrice) / currentPrice * 100).toFixed(2)
             : ((trailingInfo.trailingStopPrice - currentPrice) / currentPrice * 100).toFixed(2);
           
-          console.log(`📊 [TRAILING_MONITOR] ${position.symbol}: Trailing ativo - Preço: $${currentPrice.toFixed(4)}, Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância: ${distance}%`);
+          TrailingStop.debug(`📊 [TRAILING_MONITOR] ${position.symbol}: Trailing ativo - Preço: $${currentPrice.toFixed(4)}, Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância: ${distance}%`);
         }
       }
 
