@@ -238,7 +238,7 @@ class OrderController {
         const { pnl, pnlPct } = TrailingStop.calculatePnL(position, leverage);
         
         const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
-        console.log(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
+        OrderController.debug(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
       }
       
       // Verifica se há posições que não estão sendo monitoradas
@@ -2024,6 +2024,16 @@ class OrderController {
     } catch (error) {
       console.error(`❌ [FAILSAFE] Erro no monitoramento de ordens de segurança:`, error.message);
       return { checked: 0, recreated: 0, error: error.message };
+    }
+  }
+
+  /**
+   * Função de debug condicional
+   * @param {string} message - Mensagem de debug
+   */
+  static debug(message) {
+    if (process.env.LOG_TYPE === 'debug') {
+      console.log(message);
     }
   }
 
