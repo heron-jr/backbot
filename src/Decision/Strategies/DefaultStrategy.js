@@ -135,7 +135,22 @@ export class DefaultStrategy extends BaseStrategy {
     // 6. CÁLCULO DE STOP E TARGET
     const action = signals.isLong ? 'long' : 'short';
     const price = parseFloat(data.marketPrice);
-    const stopTarget = this.calculateStopAndTarget(data, price, signals.isLong);
+    
+    // Carrega configurações do .env
+    const stopLossPct = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
+    const takeProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE);
+    
+    // Valida se as variáveis de ambiente existem
+    if (!process.env.MAX_NEGATIVE_PNL_STOP_PCT) {
+      console.error('❌ [DEFAULT_STRATEGY] MAX_NEGATIVE_PNL_STOP_PCT não definida no .env');
+      return null;
+    }
+    if (!process.env.MIN_PROFIT_PERCENTAGE) {
+      console.error('❌ [DEFAULT_STRATEGY] MIN_PROFIT_PERCENTAGE não definida no .env');
+      return null;
+    }
+    
+    const stopTarget = this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
     
     validationTrace.push({
       layer: '6. Cálculo de Stop e Target',
@@ -252,8 +267,22 @@ export class DefaultStrategy extends BaseStrategy {
       const action = signals.isLong ? 'long' : 'short';
       const price = parseFloat(data.marketPrice);
 
-      // Cálculo de stop e target usando VWAP
-      const stopTarget = this.calculateStopAndTarget(data, price, signals.isLong);
+      // Carrega configurações do .env
+      const stopLossPct = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || 4.0);
+      const takeProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE || 0.5);
+      
+      // Valida se as variáveis de ambiente existem
+      if (!process.env.MAX_NEGATIVE_PNL_STOP_PCT) {
+        console.error('❌ [DEFAULT_STRATEGY] MAX_NEGATIVE_PNL_STOP_PCT não definida no .env');
+        return null;
+      }
+      if (!process.env.MIN_PROFIT_PERCENTAGE) {
+        console.error('❌ [DEFAULT_STRATEGY] MIN_PROFIT_PERCENTAGE não definida no .env');
+        return null;
+      }
+
+      // Cálculo de stop e target usando configurações do .env
+      const stopTarget = this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
       if (!stopTarget) {
         return null;
       }

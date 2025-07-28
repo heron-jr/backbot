@@ -1421,7 +1421,21 @@ class OrderController {
           stop = stopAndTargets.stop;
         }
       } else {
-        const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong);
+        // Carrega configurações do .env
+        const stopLossPct = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
+        const takeProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE);
+        
+        // Valida se as variáveis de ambiente existem
+        if (!process.env.MAX_NEGATIVE_PNL_STOP_PCT) {
+          console.error('❌ [ORDER_CONTROLLER] MAX_NEGATIVE_PNL_STOP_PCT não definida no .env');
+          return false;
+        }
+        if (!process.env.MIN_PROFIT_PERCENTAGE) {
+          console.error('❌ [ORDER_CONTROLLER] MIN_PROFIT_PERCENTAGE não definida no .env');
+          return false;
+        }
+        
+        const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong, stopLossPct, takeProfitPct);
         if (stopAndTarget && stopAndTarget.stop) {
           stop = stopAndTarget.stop;
         }
@@ -1445,7 +1459,21 @@ class OrderController {
                 stop = stopAndTargets.stop;
               }
             } else {
-              const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong);
+              // Carrega configurações do .env
+              const stopLossPct = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
+              const takeProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE);
+              
+              // Valida se as variáveis de ambiente existem
+              if (!process.env.MAX_NEGATIVE_PNL_STOP_PCT) {
+                console.error('❌ [ORDER_CONTROLLER] MAX_NEGATIVE_PNL_STOP_PCT não definida no .env');
+                return false;
+              }
+              if (!process.env.MIN_PROFIT_PERCENTAGE) {
+                console.error('❌ [ORDER_CONTROLLER] MIN_PROFIT_PERCENTAGE não definida no .env');
+                return false;
+              }
+              
+              const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong, stopLossPct, takeProfitPct);
               if (stopAndTarget && stopAndTarget.stop) {
                 stop = stopAndTarget.stop;
               }
