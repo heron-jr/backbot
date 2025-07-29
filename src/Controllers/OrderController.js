@@ -108,6 +108,13 @@ class OrderController {
           // Log detalhado de taxa total e PnL atual
           const Account = await AccountController.get();
           const marketInfo = Account.markets.find(m => m.symbol === market);
+          
+          // Verifica se marketInfo existe antes de acessar a propriedade fee
+          if (!marketInfo) {
+            console.warn(`⚠️ [MONITOR-${accountId}] Market info não encontrada para ${market}, usando fee padrão`);
+            return; // Retorna se não encontrar as informações do mercado
+          }
+          
           const fee = marketInfo.fee || process.env.FEE || 0.0004;
           const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
           const currentPrice = parseFloat(position.markPrice);
@@ -223,6 +230,29 @@ class OrderController {
       for (const position of positions) {
         const Account = await AccountController.get();
         const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+        
+        // Verifica se marketInfo existe antes de acessar a propriedade fee
+        if (!marketInfo) {
+          // Posição manual em par não autorizado - usa configurações padrão
+          const defaultFee = parseFloat(process.env.FEE || 0.0004);
+          const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+          const currentPrice = parseFloat(position.markPrice);
+          const quantity = Math.abs(Number(position.netQuantity));
+          const orderValue = entryPrice * quantity;
+          const exitValue = currentPrice * quantity;
+          const entryFee = orderValue * defaultFee;
+          const exitFee = exitValue * defaultFee;
+          const totalFee = entryFee + exitFee;
+          
+          // Usa a função calculatePnL do TrailingStop para calcular o PnL corretamente
+          const leverage = Account.leverage;
+          const { pnl, pnlPct } = TrailingStop.calculatePnL(position, leverage);
+          
+          const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
+          console.log(`📋 [MANUAL_POSITION] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa estimada: $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL: $${pnl.toFixed(6)} (${pnlPct.toFixed(3)}%) | ⚠️ Par não configurado`);
+          continue; // Pula criação de ordens para pares não autorizados
+        }
+        
         const fee = marketInfo.fee || process.env.FEE || 0.0004;
         const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
         const currentPrice = parseFloat(position.markPrice);
@@ -249,6 +279,15 @@ class OrderController {
       if (unmonitoredPositions.length > 0) {
         // Verifica se já foram criados alvos para essas posições (evita loop infinito)
         for (const position of unmonitoredPositions) {
+          // Verifica se o par está autorizado antes de tentar criar ordens
+          const Account = await AccountController.get();
+          const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+          
+          if (!marketInfo) {
+            console.log(`ℹ️ [MANUAL_POSITION] ${position.symbol}: Par não autorizado - pulando criação de ordens automáticas`);
+            continue; // Pula posições em pares não autorizados
+          }
+          
           // Verifica se já existem ordens de take profit para esta posição
           const existingOrders = await Order.getOpenOrders(position.symbol);
           const hasTakeProfitOrders = existingOrders && existingOrders.some(order => 
