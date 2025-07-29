@@ -1,0 +1,15 @@
+{
+  "watch": ["src", "app.js", "bootstrap-app.js"],
+  "ignore": [
+    "persistence/*",
+    "src/persistence/*",
+    "node_modules",
+    "*.log",
+    "backtest_results/*",
+    "coverage/*"
+  ],
+  "ext": "js,json",
+  "env": {
+    "NODE_ENV": "development"
+  }
+} 

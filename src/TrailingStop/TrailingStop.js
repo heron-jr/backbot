@@ -4,11 +4,95 @@ import { StopLossFactory } from '../Decision/Strategies/StopLossFactory.js';
 import PnlController from '../Controllers/PnlController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import AccountController from '../Controllers/AccountController.js';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 class TrailingStop {
 
   // Gerenciador de estado do trailing stop para cada posição
   static trailingState = new Map(); // Ex: { 'SOL_USDC_PERP': { trailingStopPrice: 180.50, highestPrice: 182.00, lowestPrice: 175.00 } }
+
+  // Caminho para o arquivo de persistência
+  static persistenceFilePath = path.join(process.cwd(), 'persistence', 'trailing_state.json');
+
+  // Controle de debounce para evitar salvamentos excessivos
+  static saveTimeout = null;
+  static lastSaveTime = 0;
+  static saveDebounceMs = 5000; // Salva no máximo a cada 5 segundos
+
+  /**
+   * Salva o estado do trailing stop em arquivo JSON com debounce
+   */
+  static async saveStateToFile() {
+    try {
+      const now = Date.now();
+      
+      // Se tentou salvar muito recentemente, agenda para depois
+      if (now - TrailingStop.lastSaveTime < TrailingStop.saveDebounceMs) {
+        // Limpa timeout anterior se existir
+        if (TrailingStop.saveTimeout) {
+          clearTimeout(TrailingStop.saveTimeout);
+        }
+        
+        // Agenda novo salvamento
+        TrailingStop.saveTimeout = setTimeout(async () => {
+          await TrailingStop.saveStateToFile();
+        }, TrailingStop.saveDebounceMs - (now - TrailingStop.lastSaveTime));
+        
+        return;
+      }
+      
+      // Atualiza timestamp do último salvamento
+      TrailingStop.lastSaveTime = now;
+      
+      // Converte o Map para um formato serializável
+      const serializableState = Array.from(TrailingStop.trailingState.entries());
+      
+      // Cria o diretório se não existir
+      const dir = path.dirname(TrailingStop.persistenceFilePath);
+      await fs.mkdir(dir, { recursive: true });
+      
+      // Salva o estado em JSON
+      await fs.writeFile(TrailingStop.persistenceFilePath, JSON.stringify(serializableState, null, 2));
+      
+      TrailingStop.debug(`💾 [PERSISTENCE] Estado do trailing stop salvo: ${serializableState.length} posições`);
+    } catch (error) {
+      console.error(`❌ [PERSISTENCE] Erro ao salvar estado do trailing stop:`, error.message);
+    }
+  }
+
+  /**
+   * Carrega o estado do trailing stop do arquivo JSON
+   */
+  static async loadStateFromFile() {
+    try {
+      // Verifica se o arquivo existe
+      try {
+        await fs.access(TrailingStop.persistenceFilePath);
+      } catch (error) {
+        console.log(`ℹ️ [PERSISTENCE] Arquivo de estado não encontrado, iniciando com estado vazio`);
+        return;
+      }
+      
+      // Lê o arquivo
+      const fileContent = await fs.readFile(TrailingStop.persistenceFilePath, 'utf8');
+      const serializableState = JSON.parse(fileContent);
+      
+      // Reconstrói o Map
+      TrailingStop.trailingState = new Map(serializableState);
+      
+      console.log(`📂 [PERSISTENCE] Estado do trailing stop carregado: ${TrailingStop.trailingState.size} posições`);
+      
+      // Log das posições carregadas
+      for (const [symbol, state] of TrailingStop.trailingState.entries()) {
+        console.log(`📊 [PERSISTENCE] ${symbol}: Stop: $${state.trailingStopPrice?.toFixed(4) || 'N/A'}, Ativo: ${state.activated}`);
+      }
+    } catch (error) {
+      console.error(`❌ [PERSISTENCE] Erro ao carregar estado do trailing stop:`, error.message);
+      console.log(`🔄 [PERSISTENCE] Iniciando com estado vazio devido ao erro`);
+      TrailingStop.trailingState = new Map();
+    }
+  }
 
   /**
    * Função de debug condicional
@@ -114,11 +198,14 @@ class TrailingStop {
    * @param {string} symbol - Símbolo da posição
    * @param {string} reason - Motivo da limpeza (opcional)
    */
-  static clearTrailingState(symbol, reason = 'manual') {
+  static async clearTrailingState(symbol, reason = 'manual') {
     if (TrailingStop.trailingState.has(symbol)) {
       const state = TrailingStop.trailingState.get(symbol);
       TrailingStop.trailingState.delete(symbol);
       console.log(`🧹 [TRAILING_CLEANUP] ${symbol}: Estado limpo (${reason}) - Stop: $${state?.trailingStopPrice?.toFixed(4) || 'N/A'}`);
+      
+      // Salva o estado após a limpeza
+      await TrailingStop.saveStateToFile();
     }
   }
 
@@ -127,9 +214,9 @@ class TrailingStop {
    * @param {object} position - Dados da posição que foi fechada
    * @param {string} closeReason - Motivo do fechamento
    */
-  static onPositionClosed(position, closeReason) {
+  static async onPositionClosed(position, closeReason) {
     if (position && position.symbol) {
-      TrailingStop.clearTrailingState(position.symbol, `posição fechada: ${closeReason}`);
+      await TrailingStop.clearTrailingState(position.symbol, `posição fechada: ${closeReason}`);
     }
   }
 
@@ -166,7 +253,7 @@ class TrailingStop {
         // Isso evita que a posição fique "órfã" sem proteção
         let trailingState = TrailingStop.trailingState.get(position.symbol);
         if (trailingState && trailingState.activated) {
-          TrailingStop.debug(`📊 [TRAILING_HOLD] ${position.symbol}: Posição em prejuízo mas Trailing Stop mantido ativo - Stop: $${trailingState.trailingStopPrice?.toFixed(4) || 'N/A'}`);
+          console.log(`📊 [TRAILING_HOLD] ${position.symbol}: Posição em prejuízo mas Trailing Stop mantido ativo - Stop: $${trailingState.trailingStopPrice?.toFixed(4) || 'N/A'}`);
           return trailingState;
         }
         
@@ -283,6 +370,9 @@ class TrailingStop {
     } catch (error) {
       console.error(`[TRAILING_UPDATE] Erro ao atualizar trailing stop para ${position.symbol}:`, error.message);
       return null;
+    } finally {
+      // Salva o estado automaticamente após qualquer modificação
+      await TrailingStop.saveStateToFile();
     }
   }
 
@@ -664,7 +754,7 @@ class TrailingStop {
         if (decision && decision.shouldClose) {
           console.log(`🛑 [STOP_LOSS] ${position.symbol}: Fechando por stop loss - ${decision.reason}`);
           await OrderController.forceClose(position);
-          TrailingStop.onPositionClosed(position, 'stop_loss');
+          await TrailingStop.onPositionClosed(position, 'stop_loss');
           continue;
         }
 
@@ -676,14 +766,14 @@ class TrailingStop {
 
         // 2. SEGUNDO: Se Trailing Stop está ATIVO, ele é o ÚNICO responsável pela saída
         if (enableTrailingStop && isTrailingActive) {
-          TrailingStop.debug(`🎯 [TRAILING_MODE] ${position.symbol}: Trailing Stop ATIVO - verificando gatilho`);
+          console.log(`🎯 [TRAILING_MODE] ${position.symbol}: Trailing Stop ATIVO - verificando gatilho`);
           
           decision = this.checkTrailingStopTrigger(position, trailingInfo);
           
           if (decision && decision.shouldClose) {
             console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: Fechando por TRAILING STOP - ${decision.reason}`);
             await OrderController.forceClose(position);
-            TrailingStop.onPositionClosed(position, 'trailing_stop');
+            await TrailingStop.onPositionClosed(position, 'trailing_stop');
             continue;
           }
           
@@ -694,13 +784,13 @@ class TrailingStop {
 
         // 3. TERCEIRO: Se Trailing Stop NÃO está ativo, verifica Take Profit fixo
         if (!enableTrailingStop || !isTrailingActive) {
-          TrailingStop.debug(`📋 [PROFIT_MODE] ${position.symbol}: Modo Take Profit fixo ativo`);
+          console.log(`📋 [PROFIT_MODE] ${position.symbol}: Modo Take Profit fixo ativo`);
           
           // Verifica se deve fechar por profit mínimo baseado nas taxas
           if (await this.shouldCloseForMinimumProfit(position)) {
             console.log(`✅ [PROFIT_FIXED] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
             await OrderController.forceClose(position);
-            TrailingStop.onPositionClosed(position, 'profit_minimum');
+            await TrailingStop.onPositionClosed(position, 'profit_minimum');
             continue;
           }
 
@@ -708,7 +798,7 @@ class TrailingStop {
           if (await this.shouldCloseForConfiguredProfit(position)) {
             console.log(`✅ [PROFIT_FIXED] ${position.symbol}: Fechando por profit mínimo configurado`);
             await OrderController.forceClose(position);
-            TrailingStop.onPositionClosed(position, 'profit_configured');
+            await TrailingStop.onPositionClosed(position, 'profit_configured');
             continue;
           }
 
@@ -717,7 +807,7 @@ class TrailingStop {
           if (adxCrossoverDecision && adxCrossoverDecision.shouldClose) {
             console.log(`🔄 [ADX_CROSSOVER] ${position.symbol}: ${adxCrossoverDecision.reason}`);
             await OrderController.forceClose(position);
-            TrailingStop.onPositionClosed(position, 'adx_crossover');
+            await TrailingStop.onPositionClosed(position, 'adx_crossover');
             continue;
           }
         }
@@ -746,12 +836,12 @@ class TrailingStop {
             ? ((currentPrice - trailingInfo.trailingStopPrice) / currentPrice * 100).toFixed(2)
             : ((trailingInfo.trailingStopPrice - currentPrice) / currentPrice * 100).toFixed(2);
           
-          TrailingStop.debug(`📊 [TRAILING_MONITOR] ${position.symbol}: Trailing ativo - Preço: $${currentPrice.toFixed(4)}, Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância: ${distance}%`);
+          console.log(`📊 [TRAILING_MONITOR] ${position.symbol}: Trailing ativo - Preço Atual: $${currentPrice.toFixed(4)}, Trailing Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância até Stop: ${distance}%\n`);
         } else {
           // Log para posições sem trailing stop ativo
           const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
           const pnl = TrailingStop.calculatePnL(position, Account);
-          TrailingStop.debug(`📊 [POSITION_MONITOR] ${position.symbol}: Preço: $${currentPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%, Trailing: ${enableTrailingStop ? (isTrailingActive ? 'ATIVO' : 'INATIVO') : 'DESABILITADO'}`);
+          console.log(`📊 [POSITION_MONITOR] ${position.symbol}: Preço Atual: $${currentPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%, Status Trailing: ${enableTrailingStop ? (isTrailingActive ? 'ATIVO' : 'INATIVO') : 'DESABILITADO'}\n`);
         }
       }
     } catch (error) {
@@ -842,4 +932,18 @@ class TrailingStop {
   }
 }
 
-export default new TrailingStop();
+// Cria a instância
+const trailingStopInstance = new TrailingStop();
+
+// Adiciona os métodos estáticos à instância para garantir acesso
+trailingStopInstance.saveStateToFile = TrailingStop.saveStateToFile;
+trailingStopInstance.loadStateFromFile = TrailingStop.loadStateFromFile;
+trailingStopInstance.clearTrailingState = TrailingStop.clearTrailingState;
+trailingStopInstance.onPositionClosed = TrailingStop.onPositionClosed;
+trailingStopInstance.calculatePnL = TrailingStop.calculatePnL;
+trailingStopInstance.calculateInitialStopLossPrice = TrailingStop.calculateInitialStopLossPrice;
+trailingStopInstance.debug = TrailingStop.debug;
+trailingStopInstance.getTrailingStopConfig = TrailingStop.getTrailingStopConfig;
+trailingStopInstance.logTrailingStopConfig = TrailingStop.logTrailingStopConfig;
+
+export default trailingStopInstance;

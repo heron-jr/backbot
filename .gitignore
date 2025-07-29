@@ -32,3 +32,5 @@ coverage/
 backtest_results/
 
 docs/
+
+persistence/trailing_state.json
