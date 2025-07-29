@@ -4,10 +4,25 @@ import Capital from '../Backpack/Authenticated/Capital.js';
 
 class AccountController {
 
+  // Propriedades estáticas para gerenciar o cache
+  static accountCache = null;
+  static lastCacheTime = 0;
+  static cacheDuration = 10000; // 10 segundos em milissegundos
+  static capitalLogged = false; // Movido para estático para funcionar com cache
+
   async get(config = null) {
+    
+    const now = Date.now();
+    
+    // 1. VERIFICA O CACHE
+    if (AccountController.accountCache && (now - AccountController.lastCacheTime < AccountController.cacheDuration)) {
+      // Retorna os dados do cache silenciosamente
+      return AccountController.accountCache;
+    }
     
     try {
     
+    // 2. LÓGICA EXISTENTE (SE O CACHE FOR INVÁLIDO)
     // Determina a estratégia baseada na configuração ou variável de ambiente
     const strategy = config?.strategy || process.env.TRADING_STRATEGY || 'DEFAULT';
     
@@ -27,6 +42,10 @@ class AccountController {
     }
 
     const AUTHORIZED_MARKET = JSON.parse(process.env.AUTHORIZED_MARKET || '[]')
+    
+    // Log para debug (apenas quando não está usando cache)
+    console.log(`🔍 [ACCOUNT] AUTHORIZED_MARKET: ${JSON.stringify(AUTHORIZED_MARKET)}`);
+    console.log(`🔍 [ACCOUNT] Total de markets antes do filtro: ${markets.length}`);
 
     markets = markets.filter((el) => 
           el.marketType === "PERP" && 
@@ -44,6 +63,32 @@ class AccountController {
               tickSize: Number(el.filters.price.tickSize)
           }
       })
+      
+    // Log após o filtro (apenas quando não está usando cache)
+    console.log(`🔍 [ACCOUNT] Total de markets após filtro: ${markets.length}`);
+    console.log(`🔍 [ACCOUNT] Markets autorizados: ${markets.map(m => m.symbol).join(', ')}`);
+    
+    // Verificação especial para ENA_USDC_PERP (apenas se necessário)
+    const enaMarket = markets.find(m => m.symbol === 'ENA_USDC_PERP');
+    if (!enaMarket) {
+      // Só adiciona ENA_USDC_PERP se realmente for necessário (quando há posições abertas)
+      // Por enquanto, comentamos essa verificação automática para evitar logs desnecessários
+      // const allMarkets = await Markets.getMarkets();
+      // const enaOriginal = allMarkets.find(m => m.symbol === 'ENA_USDC_PERP');
+      // if (enaOriginal) {
+      //   console.log(`✅ [ACCOUNT] Adicionando ENA_USDC_PERP manualmente`);
+      //   const decimal_quantity = String(enaOriginal.filters.quantity.stepSize).includes(".") ? String(enaOriginal.filters.quantity.stepSize.split(".")[1]).length : 0;
+      //   const decimal_price = String(enaOriginal.filters.price.tickSize).includes(".") ? String(enaOriginal.filters.price.tickSize.split(".")[1]).length : 0;
+      //   
+      //   markets.push({
+      //     symbol: enaOriginal.symbol,
+      //     decimal_quantity: decimal_quantity,
+      //     decimal_price: decimal_price,
+      //     stepSize_quantity: Number(enaOriginal.filters.quantity.stepSize),
+      //     tickSize: Number(enaOriginal.filters.price.tickSize)
+      //   });
+      // }
+    }
 
     const makerFee = parseFloat(Accounts.futuresMakerFee) / 10000
     const leverage = parseInt(Accounts.leverageLimit)
@@ -51,13 +96,13 @@ class AccountController {
     const capitalAvailable = netEquityAvailable * leverage * 0.95
     
     // Log explicativo do cálculo do capital (apenas na primeira vez)
-    if (!this.capitalLogged) {
+    if (!AccountController.capitalLogged) {
       console.log(`\n📊 CÁLCULO DO CAPITAL:
    • Patrimônio Líquido Disponível: $${netEquityAvailable.toFixed(2)}
    • Alavancagem: ${leverage}x
    • Margem de segurança: 95%
    • Capital disponível: $${netEquityAvailable.toFixed(2)} × ${leverage} × 0.95 = $${capitalAvailable.toFixed(2)}`);
-      this.capitalLogged = true;
+      AccountController.capitalLogged = true;
     }
     
     // Usa configuração passada como parâmetro (prioridade) ou fallback para variável de ambiente
@@ -73,6 +118,10 @@ class AccountController {
         markets
     }
 
+    // 3. SALVA NO CACHE ANTES DE RETORNAR
+    AccountController.accountCache = obj;
+    AccountController.lastCacheTime = now;
+    
     return obj
 
     } catch (error) {
@@ -109,7 +158,33 @@ class AccountController {
    * Reseta os logs para permitir nova exibição
    */
   resetLogs() {
-    this.capitalLogged = false;
+    AccountController.capitalLogged = false;
+  }
+
+  /**
+   * Limpa o cache forçando uma nova busca de dados
+   */
+  static clearCache() {
+    AccountController.accountCache = null;
+    AccountController.lastCacheTime = 0;
+    console.log(`🔄 [ACCOUNT] Cache limpo - próxima chamada buscará dados frescos`);
+  }
+
+  /**
+   * Obtém informações sobre o estado do cache
+   */
+  static getCacheInfo() {
+    const now = Date.now();
+    const timeSinceLastCache = now - AccountController.lastCacheTime;
+    const isCacheValid = AccountController.accountCache && (timeSinceLastCache < AccountController.cacheDuration);
+    
+    return {
+      hasCache: !!AccountController.accountCache,
+      isCacheValid: isCacheValid,
+      timeSinceLastCache: timeSinceLastCache,
+      cacheDuration: AccountController.cacheDuration,
+      remainingTime: Math.max(0, AccountController.cacheDuration - timeSinceLastCache)
+    };
   }
 
 }

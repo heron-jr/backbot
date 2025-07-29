@@ -657,11 +657,38 @@ class OrderController {
     }
   }
 
-  static async forceClose(position) {
-    const Account = await AccountController.get()
-    const market = Account.markets.find((el) => {
+  static async forceClose(position, account = null) {
+    // Se account não foi fornecido, obtém da API
+    const Account = account || await AccountController.get();
+    
+    // Log detalhado para debug
+    console.log(`🔍 [FORCE_CLOSE] Procurando market para ${position.symbol}`);
+    console.log(`🔍 [FORCE_CLOSE] Total de markets disponíveis: ${Account.markets?.length || 0}`);
+    console.log(`🔍 [FORCE_CLOSE] Markets: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+    
+    let market = Account.markets.find((el) => {
         return el.symbol === position.symbol
     })
+    
+    // Se não encontrou, tenta uma busca case-insensitive
+    if (!market) {
+      const marketCaseInsensitive = Account.markets.find((el) => {
+          return el.symbol.toLowerCase() === position.symbol.toLowerCase()
+      })
+      if (marketCaseInsensitive) {
+        console.log(`⚠️ [FORCE_CLOSE] Market encontrado com case diferente para ${position.symbol}: ${marketCaseInsensitive.symbol}`);
+        market = marketCaseInsensitive;
+      }
+    }
+    
+    // Verifica se o market foi encontrado
+    if (!market) {
+      console.error(`❌ [FORCE_CLOSE] Market não encontrado para ${position.symbol}. Markets disponíveis: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+      throw new Error(`Market não encontrado para ${position.symbol}`);
+    }
+    
+    console.log(`✅ [FORCE_CLOSE] Market encontrado para ${position.symbol}: decimal_quantity=${market.decimal_quantity}`);
+    
     const isLong = parseFloat(position.netQuantity) > 0;
     const quantity = Math.abs(parseFloat(position.netQuantity));
     const decimal = market.decimal_quantity
@@ -708,12 +735,19 @@ class OrderController {
    * @param {number} partialPercentage - Porcentagem da posição para realizar
    * @returns {boolean} - Sucesso da operação
    */
-  static async takePartialProfit(position, partialPercentage = 50) {
+  static async takePartialProfit(position, partialPercentage = 50, account = null) {
     try {
-      const Account = await AccountController.get()
+      // Se account não foi fornecido, obtém da API
+      const Account = account || await AccountController.get();
       const market = Account.markets.find((el) => {
           return el.symbol === position.symbol
       })
+      
+      // Verifica se o market foi encontrado
+      if (!market) {
+        console.error(`❌ [TAKE_PARTIAL] Market não encontrado para ${position.symbol}. Markets disponíveis: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+        throw new Error(`Market não encontrado para ${position.symbol}`);
+      }
       
       const isLong = parseFloat(position.netQuantity) > 0;
       const totalQuantity = Math.abs(parseFloat(position.netQuantity));
@@ -1320,6 +1354,7 @@ class OrderController {
 
       // Calcula o preço de stop loss baseado na porcentagem definida
       const currentPrice = parseFloat(position.markPrice || position.lastPrice);
+      const entryPrice = parseFloat(position.entryPrice || 0);
       const leverage = Account.leverage || 1;
       
       // Carrega a porcentagem de stop loss do .env
@@ -1329,15 +1364,15 @@ class OrderController {
       // Se leverage = 10x e stop loss = 10%, então o preço deve mover apenas 1%
       const actualStopLossPct = baseStopLossPct / leverage;
       
-      // Calcula o preço de stop loss baseado na porcentagem definida
-      // Para LONG: stop loss ABAIXO do preço atual (preço cai = perda)
-      // Para SHORT: stop loss ACIMA do preço atual (preço sobe = perda)
+      // CORREÇÃO: Calcula o preço de stop loss baseado no PREÇO DE ENTRADA
+      // Para LONG: stop loss ABAIXO do preço de entrada (preço cai = perda)
+      // Para SHORT: stop loss ACIMA do preço de entrada (preço sobe = perda)
       const stopLossPrice = isLong 
-        ? currentPrice * (1 - actualStopLossPct / 100)  // LONG: preço menor
-        : currentPrice * (1 + actualStopLossPct / 100); // SHORT: preço maior
+        ? entryPrice * (1 - actualStopLossPct / 100)  // LONG: preço menor que entrada
+        : entryPrice * (1 + actualStopLossPct / 100); // SHORT: preço maior que entrada
 
       console.log(`🔧 [${accountId}] ${position.symbol}: Criando stop loss com porcentagem definida...`);
-      console.log(`📊 [${accountId}] ${position.symbol}: Preço atual: $${currentPrice.toFixed(6)}, Posição: ${isLong ? 'LONG' : 'SHORT'}, Alavancagem: ${leverage}x, Stop Loss: ${baseStopLossPct}%, Stop Real: ${actualStopLossPct.toFixed(2)}%, Preço calculado: $${stopLossPrice.toFixed(6)}`);
+      console.log(`📊 [${accountId}] ${position.symbol}: Preço de Entrada: $${entryPrice.toFixed(6)}, Preço Atual: $${currentPrice.toFixed(6)}, Posição: ${isLong ? 'LONG' : 'SHORT'}, Alavancagem: ${leverage}x, Stop Loss: ${baseStopLossPct}%, Stop Real: ${actualStopLossPct.toFixed(2)}%, Preço calculado: $${stopLossPrice.toFixed(6)}`);
 
       try {
         // Cria a ordem de stop loss como Market condicional
