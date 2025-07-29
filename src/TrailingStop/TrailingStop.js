@@ -20,6 +20,40 @@ class TrailingStop {
     }
   }
 
+  /**
+   * Versão estática da função calculatePnL para uso externo
+   * @param {object} position - Dados da posição
+   * @param {object} account - Dados da conta
+   * @returns {object} - Objeto com pnl e pnlPct
+   */
+  static calculatePnL(position, account) {
+    try { 
+      // PnL em dólar, que já estava correto.
+      const pnl = parseFloat(position.pnlUnrealized ?? '0');
+
+      // O 'netCost' aqui é tratado como o VALOR NOCIONAL da posição.
+      const notionalValue = Math.abs(parseFloat(position.netCost ?? '0'));
+      
+      // A base de custo real (MARGEM) é o valor nocional dividido pela alavancagem.
+      // Se a alavancagem for 0 ou não informada, consideramos 1 para evitar divisão por zero.
+      const leverage = Number(account?.leverage || position.leverage || 1);
+      const costBasis = notionalValue / (leverage || 1);
+
+      let pnlPct = 0;
+      if (costBasis > 0) {
+        pnlPct = (pnl / costBasis) * 100;
+      }
+
+      return {
+        pnl: pnl,
+        pnlPct: pnlPct,
+      };
+    } catch (error) {
+      console.error('[PNL_CALC] Erro ao calcular PnL:', error.message);
+      return { pnl: 0, pnlPct: 0 };
+    }
+  }
+
   constructor(strategyType = null) {
     const finalStrategyType = strategyType || 'DEFAULT';
     console.log(`🔧 [TRAILING_INIT] Inicializando TrailingStop com estratégia: ${finalStrategyType}`);
@@ -93,7 +127,7 @@ class TrailingStop {
       // Calcula PnL da posição
       const Account = await AccountController.get();
       const leverage = Account.leverage;
-      const { pnl, pnlPct } = this.calculatePnL(position, leverage);
+      const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
 
       // Trailing stop só é ativado se a posição estiver com lucro
       if (pnl <= 0) {
@@ -342,7 +376,7 @@ class TrailingStop {
    * @param {object} account - Dados da conta
    * @returns {object} - PnL em USD e porcentagem
    */
-  calculatePnL(position, leverage) {
+  calculatePnL(position, account) {
     try { 
       // PnL em dólar, que já estava correto.
       const pnl = parseFloat(position.pnlUnrealized ?? '0');
@@ -352,6 +386,7 @@ class TrailingStop {
       
       // A base de custo real (MARGEM) é o valor nocional dividido pela alavancagem.
       // Se a alavancagem for 0 ou não informada, consideramos 1 para evitar divisão por zero.
+      const leverage = Number(account?.leverage || position.leverage || 1);
       const costBasis = notionalValue / (leverage || 1);
 
       let pnlPct = 0;
@@ -415,7 +450,7 @@ class TrailingStop {
     try {
       const Account = await AccountController.get();
       const leverage = Account.leverage;
-      const { pnl, pnlPct } = this.calculatePnL(position, leverage);
+      const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
       
       // Configuração do stop loss por porcentagem (opcional)
       const MAX_NEGATIVE_PNL_STOP_PCT = process.env.MAX_NEGATIVE_PNL_STOP_PCT;
@@ -485,7 +520,7 @@ class TrailingStop {
     try {
       const Account = await AccountController.get();
       const leverage = Account.leverage;
-      const { pnl, pnlPct } = this.calculatePnL(position, leverage);
+      const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
       
       // Configuração do stop loss por porcentagem (opcional)
       const MAX_NEGATIVE_PNL_STOP_PCT = process.env.MAX_NEGATIVE_PNL_STOP_PCT;
@@ -549,61 +584,58 @@ class TrailingStop {
   async stopLoss() {
     try {
       const positions = await Futures.getOpenPositions();
-
+      
       if (!positions || positions.length === 0) {
         return;
       }
 
       TrailingStop.debug(`🔍 [TRAILING_MONITOR] Verificando ${positions.length} posições abertas...`);
 
+      // Obtém dados da conta uma vez para todas as posições
+      const Account = await AccountController.get();
+
       for (const position of positions) {
         // Atualiza o estado do trailing stop para a posição
         await this.updateTrailingStopForPosition(position);
 
-        // NOVA HIERARQUIA DE DECISÃO CONDICIONAL
+        // NOVA HIERARQUIA DE DECISÃO: Stop Loss SEMPRE é verificado primeiro
         const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
         const isTrailingActive = this.isTrailingStopActive(position.symbol);
         const trailingInfo = this.getTrailingStopInfo(position.symbol);
         let decision = null;
 
-        if (enableTrailingStop) {
-          // MODO TRAILING STOP: Desabilita completamente o Take Profit fixo
-          TrailingStop.debug(`🎯 [TRAILING_MODE] ${position.symbol}: Modo Trailing Stop ativo - Take Profit fixo DESABILITADO`);
-          
-          if (isTrailingActive) {
-            // Trailing Stop está ativo e no controle
-            TrailingStop.debug(`🚀 [TRAILING_ACTIVE] ${position.symbol}: Trailing Stop ATIVO - Monitorando posição`);
-            
-            decision = this.checkTrailingStopTrigger(position, trailingInfo);
-            
-            if (decision && decision.shouldClose) {
-              console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: Fechando por TRAILING STOP - ${decision.reason}`);
-              await OrderController.forceClose(position);
-              TrailingStop.onPositionClosed(position, 'trailing_stop');
-              continue;
-            }
-          } else {
-            // Trailing Stop não está ativo (posição com prejuízo ou sem lucro suficiente)
-            TrailingStop.debug(`⏳ [TRAILING_WAITING] ${position.symbol}: Aguardando posição ficar lucrativa para ativar trailing stop`);
-            
-            // Verifica apenas stop loss normal da estratégia (sem take profit fixo)
-            decision = this.stopLossStrategy.shouldClosePosition(position);
-            
-            if (decision && decision.shouldClose) {
-              console.log(`🛑 [STOP_LOSS_ONLY] ${position.symbol}: Fechando por stop loss normal - ${decision.reason}`);
-              await OrderController.forceClose(position);
-              TrailingStop.onPositionClosed(position, 'stop_loss');
-              continue;
-            }
+        // 1. PRIMEIRO: Sempre verifica Stop Loss (independente do Trailing Stop)
+        decision = this.stopLossStrategy.shouldClosePosition(position, Account);
+        
+        if (decision && decision.shouldClose) {
+          console.log(`🛑 [STOP_LOSS] ${position.symbol}: Fechando por stop loss - ${decision.reason}`);
+          await OrderController.forceClose(position);
+          TrailingStop.onPositionClosed(position, 'stop_loss');
+          continue;
+        }
 
-            if (decision && decision.shouldTakePartialProfit) {
-              console.log(`💰 [PARTIAL_PROFIT_ONLY] ${position.symbol}: Tomando profit parcial`);
-              await OrderController.takePartialProfit(position, decision.partialPercentage);
-              continue;
-            }
+        if (decision && decision.shouldTakePartialProfit) {
+          console.log(`💰 [PARTIAL_PROFIT] ${position.symbol}: Tomando profit parcial`);
+          await OrderController.takePartialProfit(position, decision.partialPercentage);
+          continue;
+        }
+
+        // 2. SEGUNDO: Se Trailing Stop está habilitado, verifica Trailing Stop
+        if (enableTrailingStop && isTrailingActive) {
+          TrailingStop.debug(`🎯 [TRAILING_MODE] ${position.symbol}: Verificando Trailing Stop`);
+          
+          decision = this.checkTrailingStopTrigger(position, trailingInfo);
+          
+          if (decision && decision.shouldClose) {
+            console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: Fechando por TRAILING STOP - ${decision.reason}`);
+            await OrderController.forceClose(position);
+            TrailingStop.onPositionClosed(position, 'trailing_stop');
+            continue;
           }
-        } else {
-          // MODO TAKE PROFIT FIXO: Usa apenas regras de Take Profit fixo
+        }
+
+        // 3. TERCEIRO: Se Trailing Stop NÃO está habilitado, verifica Take Profit fixo
+        if (!enableTrailingStop) {
           TrailingStop.debug(`📋 [PROFIT_MODE] ${position.symbol}: Modo Take Profit fixo ativo`);
           
           // Verifica se deve fechar por profit mínimo baseado nas taxas
@@ -630,22 +662,15 @@ class TrailingStop {
             TrailingStop.onPositionClosed(position, 'adx_crossover');
             continue;
           }
+        }
 
-          // Verifica stop loss normal da estratégia
-          decision = this.stopLossStrategy.shouldClosePosition(position);
-          
-          if (decision && decision.shouldClose) {
-            console.log(`🛑 [STOP_LOSS_FIXED] ${position.symbol}: Fechando por stop loss normal - ${decision.reason}`);
-            await OrderController.forceClose(position);
-            TrailingStop.onPositionClosed(position, 'stop_loss');
-            continue;
-          }
-
-          if (decision && decision.shouldTakePartialProfit) {
-            console.log(`💰 [PARTIAL_PROFIT_FIXED] ${position.symbol}: Tomando profit parcial`);
-            await OrderController.takePartialProfit(position, decision.partialPercentage);
-            continue;
-          }
+        // 4. QUARTO: Sempre verifica se precisa criar failsafe orders (stop loss de proteção)
+        // Esta verificação deve acontecer independente do Trailing Stop
+        try {
+          TrailingStop.debug(`🛡️ [FAILSAFE_CHECK] ${position.symbol}: Verificando stop loss de proteção...`);
+          await OrderController.validateAndCreateStopLoss(position, 'DEFAULT');
+        } catch (error) {
+          console.error(`❌ [FAILSAFE_ERROR] Erro ao validar/criar stop loss para ${position.symbol}:`, error.message);
         }
 
         // Log de monitoramento para posições que não foram fechadas
@@ -656,11 +681,16 @@ class TrailingStop {
             : ((trailingInfo.trailingStopPrice - currentPrice) / currentPrice * 100).toFixed(2);
           
           TrailingStop.debug(`📊 [TRAILING_MONITOR] ${position.symbol}: Trailing ativo - Preço: $${currentPrice.toFixed(4)}, Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância: ${distance}%`);
+        } else {
+          // Log para posições sem trailing stop ativo
+          const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
+          const pnl = TrailingStop.calculatePnL(position, Account);
+          TrailingStop.debug(`📊 [POSITION_MONITOR] ${position.symbol}: Preço: $${currentPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%, Trailing: ${enableTrailingStop ? (isTrailingActive ? 'ATIVO' : 'INATIVO') : 'DESABILITADO'}`);
         }
       }
-
     } catch (error) {
-      console.error('[TRAILING] Erro no stop loss:', error.message);
+      console.error(`❌ [TRAILING_ERROR] Erro no stopLoss:`, error.message);
+      throw error;
     }
   }
 

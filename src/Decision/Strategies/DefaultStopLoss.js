@@ -1,4 +1,5 @@
 import { BaseStopLoss } from './BaseStopLoss.js';
+import TrailingStop from '../../TrailingStop/TrailingStop.js';
 
 export class DefaultStopLoss extends BaseStopLoss {
   /**
@@ -8,23 +9,18 @@ export class DefaultStopLoss extends BaseStopLoss {
    * @param {object} marketData - Dados de mercado atuais
    * @returns {object|null} - Objeto com decisão de fechamento ou null se não deve fechar
    */
-  shouldClosePosition(position, account, marketData) {
+  shouldClosePosition(position, account) {
     try {
       // Validação inicial dos dados
       if (!this.validateData(position, account)) {
+        console.error(`❌ [STOP_LOSS_DEBUG] ${position.symbol}: Dados inválidos - position: ${!!position}, account: ${!!account}, symbol: ${position?.symbol}, netQuantity: ${position?.netQuantity}`);
         return null;
       }
 
       // Configurações do stop loss - SEMPRE usar porcentagem
       const MAX_NEGATIVE_PNL_STOP_PCT = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4);
-      const MINIMAL_VOLUME = Number(process.env.MINIMAL_VOLUME || 0.01);
 
-      // Configurações de take profit mínimo em tempo real
-      const MIN_TAKE_PROFIT_USD = Number(process.env.MIN_TAKE_PROFIT_USD || 0.5);
-      const MIN_TAKE_PROFIT_PCT = Number(process.env.MIN_TAKE_PROFIT_PCT || 0.5);
       const ENABLE_TP_VALIDATION = process.env.ENABLE_TP_VALIDATION === 'true';
-
-
       
       // Verifica se os valores são válidos
       if (isNaN(MAX_NEGATIVE_PNL_STOP_PCT)) {
@@ -40,21 +36,8 @@ export class DefaultStopLoss extends BaseStopLoss {
         return null;
       }
 
-      // Verifica volume mínimo (específico da estratégia DEFAULT)
-      // NOTA: A estratégia PRO_MAX não usa esta validação para evitar fechamento prematuro
-      // NOTA 2: Para contas com pouco capital e sem alavancagem, esta validação pode ser muito restritiva
-      // if (this.isVolumeBelowMinimum(position, MINIMAL_VOLUME)) {
-      //   return {
-      //     shouldClose: true,
-      //     reason: `VOLUME_MIN: Volume ${Number(position.netExposureNotional)} menor que mínimo ${MINIMAL_VOLUME}`,
-      //     type: 'VOLUME_MIN'
-      //   };
-      // }
-
       // Calcula PnL
-      const { pnl, pnlPct } = this.calculatePnL(position, account);
-
-
+      const { pnl, pnlPct } = TrailingStop.calculatePnL(position, account);
       
       // Verifica se o PnL é válido
       if (isNaN(pnl) || isNaN(pnlPct)) {
@@ -70,6 +53,9 @@ export class DefaultStopLoss extends BaseStopLoss {
       
       if (shouldCloseByPercentage) {
         console.log(`🚨 [STOP_LOSS] ${position.symbol}: Fechando por stop loss em %`);
+        console.log(`   • PnL atual: ${pnlPct.toFixed(2)}%`);
+        console.log(`   • Limite: ${MAX_NEGATIVE_PNL_STOP_PCT}%`);
+        console.log(`   • Diferença: ${(pnlPct - MAX_NEGATIVE_PNL_STOP_PCT).toFixed(2)}%`);
         return {
           shouldClose: true,
           reason: `PERCENTAGE: PnL ${pnlPct}% <= limite ${MAX_NEGATIVE_PNL_STOP_PCT}%`,
