@@ -476,23 +476,23 @@ class TrailingStop {
       }
 
       // Atualiza o trailing stop baseado na direção da posição
-              if (isLong) {
-          // Para posições LONG
-          // CORREÇÃO: Para LONG, sempre atualiza o preço máximo se o preço atual for maior
-          // Isso garante que o trailing stop funcione mesmo quando o preço oscila
-          if (currentPrice > trailingState.highestPrice || trailingState.highestPrice === null) {
+      if (isLong) {
+        // Para posições LONG
+        // CORREÇÃO: Para LONG, sempre atualiza o preço máximo se o preço atual for maior
+        // Isso garante que o trailing stop funcione mesmo quando o preço oscila
+        if (currentPrice > trailingState.highestPrice || trailingState.highestPrice === null) {
           trailingState.highestPrice = currentPrice;
           
-          // 1. Calcula o novo stop candidato com base no novo preço máximo
-          const newCandidateStopPrice = currentPrice * (1 - (trailingStopDistance / 100));
+          // CORREÇÃO: Calcula o trailing stop baseado no highestPrice registrado
+          const newTrailingStopPrice = trailingState.highestPrice * (1 - (trailingStopDistance / 100));
           
-          // 2. O stop final é o MAIOR valor entre o stop ATUAL e o novo candidato.
-          //    Isso garante que o stop SÓ SE MOVA PARA CIMA.
+          // O stop final é o MENOR valor entre o stop ATUAL e o novo candidato
+          // Para LONG: o trailing stop deve DIMINUIR conforme o preço sobe
           const currentStopPrice = trailingState.trailingStopPrice;
-          const finalStopPrice = Math.max(currentStopPrice, newCandidateStopPrice);
+          const finalStopPrice = Math.min(currentStopPrice, newTrailingStopPrice);
           
-          // 3. Atualiza o estado se o stop realmente se moveu
-          if (finalStopPrice > currentStopPrice) {
+          // Atualiza o estado se o stop realmente se moveu
+          if (finalStopPrice < currentStopPrice) {
             trailingState.trailingStopPrice = finalStopPrice;
             trailingState.activated = true;
             console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço melhorou para $${currentPrice.toFixed(4)}, Trailing Stop ajustado para $${finalStopPrice.toFixed(4)} (protegendo lucros)`);
@@ -513,15 +513,15 @@ class TrailingStop {
         if (currentPrice < trailingState.lowestPrice || trailingState.lowestPrice === null) {
           trailingState.lowestPrice = currentPrice;
           
-          // 1. Calcula o novo stop candidato com base no novo preço mínimo
-          const newCandidateStopPrice = currentPrice * (1 + (trailingStopDistance / 100));
+          // CORREÇÃO: Calcula o trailing stop baseado no lowestPrice registrado
+          const newTrailingStopPrice = trailingState.lowestPrice * (1 + (trailingStopDistance / 100));
           
-          // 2. O stop final é o MENOR valor entre o stop ATUAL e o novo candidato.
-          //    Isso garante que o stop SÓ SE MOVA PARA BAIXO.
+          // O stop final é o MENOR valor entre o stop ATUAL e o novo candidato
+          // Isso garante que o stop SÓ SE MOVA PARA BAIXO
           const currentStopPrice = trailingState.trailingStopPrice;
-          const finalStopPrice = Math.min(currentStopPrice, newCandidateStopPrice);
+          const finalStopPrice = Math.min(currentStopPrice, newTrailingStopPrice);
           
-          // 3. Atualiza o estado se o stop realmente se moveu
+          // Atualiza o estado se o stop realmente se moveu
           if (finalStopPrice < currentStopPrice) {
             trailingState.trailingStopPrice = finalStopPrice;
             trailingState.activated = true;
