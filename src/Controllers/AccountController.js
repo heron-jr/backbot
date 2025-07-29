@@ -48,47 +48,21 @@ class AccountController {
     console.log(`🔍 [ACCOUNT] Total de markets antes do filtro: ${markets.length}`);
 
     markets = markets.filter((el) => 
-          el.marketType === "PERP" && 
-          el.orderBookState === "Open" && 
-          (AUTHORIZED_MARKET.length === 0 || AUTHORIZED_MARKET.includes(el.symbol))).map((el) => {
-          
-          const decimal_quantity = String(el.filters.quantity.stepSize).includes(".") ? String(el.filters.quantity.stepSize.split(".")[1]).length : 0
-          const decimal_price = String(el.filters.price.tickSize).includes(".") ? String(el.filters.price.tickSize.split(".")[1]).length : 0
-          
-          return {
-              symbol: el.symbol,
-              decimal_quantity: decimal_quantity,
-              decimal_price: decimal_price,
-              stepSize_quantity: Number(el.filters.quantity.stepSize),
-              tickSize: Number(el.filters.price.tickSize)
-          }
-      })
-      
-    // Log após o filtro (apenas quando não está usando cache)
-    console.log(`🔍 [ACCOUNT] Total de markets após filtro: ${markets.length}`);
-    console.log(`🔍 [ACCOUNT] Markets autorizados: ${markets.map(m => m.symbol).join(', ')}`);
-    
-    // Verificação especial para ENA_USDC_PERP (apenas se necessário)
-    const enaMarket = markets.find(m => m.symbol === 'ENA_USDC_PERP');
-    if (!enaMarket) {
-      // Só adiciona ENA_USDC_PERP se realmente for necessário (quando há posições abertas)
-      // Por enquanto, comentamos essa verificação automática para evitar logs desnecessários
-      // const allMarkets = await Markets.getMarkets();
-      // const enaOriginal = allMarkets.find(m => m.symbol === 'ENA_USDC_PERP');
-      // if (enaOriginal) {
-      //   console.log(`✅ [ACCOUNT] Adicionando ENA_USDC_PERP manualmente`);
-      //   const decimal_quantity = String(enaOriginal.filters.quantity.stepSize).includes(".") ? String(enaOriginal.filters.quantity.stepSize.split(".")[1]).length : 0;
-      //   const decimal_price = String(enaOriginal.filters.price.tickSize).includes(".") ? String(enaOriginal.filters.price.tickSize.split(".")[1]).length : 0;
-      //   
-      //   markets.push({
-      //     symbol: enaOriginal.symbol,
-      //     decimal_quantity: decimal_quantity,
-      //     decimal_price: decimal_price,
-      //     stepSize_quantity: Number(enaOriginal.filters.quantity.stepSize),
-      //     tickSize: Number(enaOriginal.filters.price.tickSize)
-      //   });
-      // }
-    }
+        el.marketType === "PERP" && 
+        el.orderBookState === "Open" && 
+        (AUTHORIZED_MARKET.length === 0 || AUTHORIZED_MARKET.includes(el.symbol))).map((el) => {
+        
+        const decimal_quantity = String(el.filters.quantity.stepSize).includes(".") ? String(el.filters.quantity.stepSize.split(".")[1]).length : 0
+        const decimal_price = String(el.filters.price.tickSize).includes(".") ? String(el.filters.price.tickSize.split(".")[1]).length : 0
+        
+        return {
+            symbol: el.symbol,
+            decimal_quantity: decimal_quantity,
+            decimal_price: decimal_price,
+            stepSize_quantity: Number(el.filters.quantity.stepSize),
+            tickSize: Number(el.filters.price.tickSize)
+        }
+    })
 
     const makerFee = parseFloat(Accounts.futuresMakerFee) / 10000
     const leverage = parseInt(Accounts.leverageLimit)

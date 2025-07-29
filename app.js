@@ -359,9 +359,11 @@ async function startBot() {
       process.exit(1);
     }
 
-    // Carrega o estado do Trailing Stop da persistência
-    console.log('📂 [PERSISTENCE] Carregando estado do Trailing Stop...');
+    // Carrega o estado persistido do Trailing Stop
     await TrailingStop.loadStateFromFile();
+    
+    // Migração automática: cria estado para posições abertas existentes
+    await TrailingStop.backfillStateForOpenPositions();
 
     // Verifica se a estratégia foi definida via variável de ambiente
     const envStrategy = process.env.TRADING_STRATEGY;

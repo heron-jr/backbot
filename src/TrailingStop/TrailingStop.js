@@ -141,10 +141,14 @@ class TrailingStop {
    */
   static async backfillStateForOpenPositions() {
     try {
-      console.log(`🔄 [MIGRATION] Verificando posições abertas para migração do Trailing Stop...`);
+      console.log(`🔄 [MIGRATION] Iniciando migração do Trailing Stop...`);
       
-      // PRIMEIRO: Limpa estados obsoletos
-      await TrailingStop.cleanupObsoleteStates();
+      // PRIMEIRO: Limpa completamente o arquivo de persistência
+      console.log(`🧹 [MIGRATION] Limpando arquivo de persistência para dados frescos...`);
+      await TrailingStop.forceCleanupAllStates();
+      
+      // SEGUNDO: Carrega dados atuais das posições abertas
+      console.log(`📋 [MIGRATION] Obtendo posições abertas atuais...`);
       
       const positions = await Futures.getOpenPositions();
       if (!positions || positions.length === 0) {
@@ -173,7 +177,7 @@ class TrailingStop {
 
         console.log(`🔄 [MIGRATION] ${position.symbol}: Criando estado inicial do Trailing Stop...`);
 
-        // Calcula o preço de entrada
+        // Calcula o preço de entrada e atual
         const entryPrice = parseFloat(position.entryPrice || position.markPrice || 0);
         const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
         
@@ -190,15 +194,15 @@ class TrailingStop {
         // Calcula o stop loss inicial
         const initialStopLossPrice = TrailingStop.calculateInitialStopLossPrice(position, Account);
         
-        // Cria o estado inicial
+        // Cria o estado inicial com dados ATUAIS
         const initialState = {
           symbol: position.symbol,
           entryPrice: entryPrice,
           isLong: isLong,
           isShort: isShort,
           initialStopLossPrice: initialStopLossPrice,
-          highestPrice: isLong ? Math.max(entryPrice, currentPrice) : entryPrice,
-          lowestPrice: isShort ? Math.min(entryPrice, currentPrice) : entryPrice,
+          highestPrice: isLong ? currentPrice : null, // Usa preço atual para LONG
+          lowestPrice: isShort ? currentPrice : null, // Usa preço atual para SHORT
           trailingStopPrice: initialStopLossPrice,
           activated: false, // Só será ativado se a posição estiver com lucro
           createdAt: new Date().toISOString()
@@ -208,15 +212,15 @@ class TrailingStop {
         TrailingStop.trailingState.set(position.symbol, initialState);
         newStatesCreated++;
 
-        console.log(`✅ [MIGRATION] ${position.symbol}: Estado criado - Entry: $${entryPrice.toFixed(4)}, Stop Inicial: $${initialStopLossPrice.toFixed(4)}, Tipo: ${isLong ? 'LONG' : 'SHORT'}`);
+        console.log(`✅ [MIGRATION] ${position.symbol}: Estado criado com dados frescos - Entry: $${entryPrice.toFixed(4)}, Atual: $${currentPrice.toFixed(4)}, Stop Inicial: $${initialStopLossPrice.toFixed(4)}, Tipo: ${isLong ? 'LONG' : 'SHORT'}`);
       }
 
       if (newStatesCreated > 0) {
-        console.log(`💾 [MIGRATION] Salvando ${newStatesCreated} novos estados no arquivo...`);
+        console.log(`💾 [MIGRATION] Salvando ${newStatesCreated} estados frescos no arquivo...`);
         await TrailingStop.saveStateToFile();
-        console.log(`✅ [MIGRATION] Migração concluída: ${newStatesCreated} estados criados`);
+        console.log(`✅ [MIGRATION] Migração concluída: ${newStatesCreated} estados criados com dados atuais`);
       } else {
-        console.log(`ℹ️ [MIGRATION] Nenhum novo estado necessário`);
+        console.log(`ℹ️ [MIGRATION] Nenhum novo estado necessário - arquivo limpo e atualizado`);
       }
 
     } catch (error) {
