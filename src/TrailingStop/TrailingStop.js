@@ -54,6 +54,36 @@ class TrailingStop {
     }
   }
 
+  /**
+   * Calcula o preço de stop loss inicial baseado na configuração
+   * @param {object} position - Dados da posição
+   * @param {object} account - Dados da conta
+   * @returns {number} - Preço de stop loss inicial
+   */
+  static calculateInitialStopLossPrice(position, account) {
+    try {
+      const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
+      const leverage = Number(account?.leverage || position.leverage || 1);
+      const baseStopLossPct = Math.abs(Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -10));
+      
+      // Calcula a porcentagem real considerando a alavancagem
+      const actualStopLossPct = baseStopLossPct / leverage;
+      
+      // Determina se é LONG ou SHORT
+      const isLong = parseFloat(position.netQuantity) > 0;
+      
+      // Calcula o preço de stop loss inicial
+      const initialStopLossPrice = isLong 
+        ? currentPrice * (1 - actualStopLossPct / 100)  // LONG: preço menor
+        : currentPrice * (1 + actualStopLossPct / 100); // SHORT: preço maior
+      
+      return initialStopLossPrice;
+    } catch (error) {
+      console.error(`[INITIAL_STOP] Erro ao calcular stop loss inicial para ${position.symbol}:`, error.message);
+      return 0;
+    }
+  }
+
   constructor(strategyType = null) {
     const finalStrategyType = strategyType || 'DEFAULT';
     console.log(`🔧 [TRAILING_INIT] Inicializando TrailingStop com estratégia: ${finalStrategyType}`);
@@ -131,7 +161,16 @@ class TrailingStop {
 
       // Trailing stop só é ativado se a posição estiver com lucro
       if (pnl <= 0) {
-        // Remove estado se posição não está mais lucrativa
+        // NÃO remove o estado se posição não está mais lucrativa
+        // O Trailing Stop, uma vez ativado, deve permanecer ativo até a posição ser fechada
+        // Isso evita que a posição fique "órfã" sem proteção
+        let trailingState = TrailingStop.trailingState.get(position.symbol);
+        if (trailingState && trailingState.activated) {
+          TrailingStop.debug(`📊 [TRAILING_HOLD] ${position.symbol}: Posição em prejuízo mas Trailing Stop mantido ativo - Stop: $${trailingState.trailingStopPrice?.toFixed(4) || 'N/A'}`);
+          return trailingState;
+        }
+        
+        // Só remove se nunca foi ativado
         TrailingStop.clearTrailingState(position.symbol);
         return null;
       }
@@ -162,9 +201,13 @@ class TrailingStop {
       let trailingState = TrailingStop.trailingState.get(position.symbol);
       
       if (!trailingState) {
+        // Calcula o stop loss inicial
+        const initialStopLossPrice = TrailingStop.calculateInitialStopLossPrice(position, Account);
+        
         // Inicializa o estado - LOG ÚNICO DE ATIVAÇÃO
         trailingState = {
           entryPrice: entryPrice,
+          initialStopLossPrice: initialStopLossPrice, // Stop loss inicial calculado
           trailingStopPrice: null,
           highestPrice: isLong ? entryPrice : null,
           lowestPrice: isShort ? entryPrice : null,
@@ -174,7 +217,7 @@ class TrailingStop {
           initialized: false // Novo campo para controlar logs
         };
         TrailingStop.trailingState.set(position.symbol, trailingState);
-        console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO. Preço de Entrada: $${entryPrice.toFixed(4)}`);
+        console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO. Preço de Entrada: $${entryPrice.toFixed(4)}, Stop Inicial: $${initialStopLossPrice.toFixed(4)}`);
         trailingState.initialized = true;
       }
 
@@ -187,19 +230,24 @@ class TrailingStop {
           // Calcula novo trailing stop price
           const newTrailingStopPrice = currentPrice * (1 - (trailingStopDistance / 100));
           
+          // O novo stop é o MAIOR valor entre o stop inicial e o novo stop calculado
+          // Isso garante que o stop NUNCA se mova para trás
+          const finalStopPrice = Math.max(trailingState.initialStopLossPrice, newTrailingStopPrice);
+          
           // Só atualiza se o novo stop for maior que o anterior (trailing stop só se move a favor)
-          if (!trailingState.trailingStopPrice || newTrailingStopPrice > trailingState.trailingStopPrice) {
-            trailingState.trailingStopPrice = newTrailingStopPrice;
+          if (!trailingState.trailingStopPrice || finalStopPrice > trailingState.trailingStopPrice) {
+            trailingState.trailingStopPrice = finalStopPrice;
             trailingState.activated = true;
-            console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço Máximo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
+            console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço Máximo: $${currentPrice.toFixed(4)}, Novo Stop: $${finalStopPrice.toFixed(4)} (baseado em stop inicial: $${trailingState.initialStopLossPrice.toFixed(4)})`);
           }
         } else if (pnl > 0 && !trailingState.activated) {
           // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
-          // ativa com o preço atual como base
+          // ativa com o preço atual como base, mas respeitando o stop inicial
           const newTrailingStopPrice = currentPrice * (1 - (trailingStopDistance / 100));
-          trailingState.trailingStopPrice = newTrailingStopPrice;
+          const finalStopPrice = Math.max(trailingState.initialStopLossPrice, newTrailingStopPrice);
+          trailingState.trailingStopPrice = finalStopPrice;
           trailingState.activated = true;
-          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: LONG - Ativando trailing stop com lucro existente. Preço: $${currentPrice.toFixed(4)}, Stop: $${newTrailingStopPrice.toFixed(4)}`);
+          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: LONG - Ativando trailing stop com lucro existente. Preço: $${currentPrice.toFixed(4)}, Stop: $${finalStopPrice.toFixed(4)}`);
         }
       } else if (isShort) {
         // Para posições SHORT
@@ -209,19 +257,24 @@ class TrailingStop {
           // Calcula novo trailing stop price
           const newTrailingStopPrice = currentPrice * (1 + (trailingStopDistance / 100));
           
+          // O novo stop é o MENOR valor entre o stop inicial e o novo stop calculado
+          // Isso garante que o stop NUNCA se mova para trás
+          const finalStopPrice = Math.min(trailingState.initialStopLossPrice, newTrailingStopPrice);
+          
           // Só atualiza se o novo stop for menor que o anterior (trailing stop só se move a favor)
-          if (!trailingState.trailingStopPrice || newTrailingStopPrice < trailingState.trailingStopPrice) {
-            trailingState.trailingStopPrice = newTrailingStopPrice;
+          if (!trailingState.trailingStopPrice || finalStopPrice < trailingState.trailingStopPrice) {
+            trailingState.trailingStopPrice = finalStopPrice;
             trailingState.activated = true;
-            console.log(`📉 [TRAILING_UPDATE] ${position.symbol}: SHORT - Preço Mínimo: $${currentPrice.toFixed(4)}, Novo Stop: $${newTrailingStopPrice.toFixed(4)}`);
+            console.log(`📉 [TRAILING_UPDATE] ${position.symbol}: SHORT - Preço Mínimo: $${currentPrice.toFixed(4)}, Novo Stop: $${finalStopPrice.toFixed(4)} (baseado em stop inicial: $${trailingState.initialStopLossPrice.toFixed(4)})`);
           }
         } else if (pnl > 0 && !trailingState.activated) {
           // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
-          // ativa com o preço atual como base
+          // ativa com o preço atual como base, mas respeitando o stop inicial
           const newTrailingStopPrice = currentPrice * (1 + (trailingStopDistance / 100));
-          trailingState.trailingStopPrice = newTrailingStopPrice;
+          const finalStopPrice = Math.min(trailingState.initialStopLossPrice, newTrailingStopPrice);
+          trailingState.trailingStopPrice = finalStopPrice;
           trailingState.activated = true;
-          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: SHORT - Ativando trailing stop com lucro existente. Preço: $${currentPrice.toFixed(4)}, Stop: $${newTrailingStopPrice.toFixed(4)}`);
+          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: SHORT - Ativando trailing stop com lucro existente. Preço: $${currentPrice.toFixed(4)}, Stop: $${finalStopPrice.toFixed(4)}`);
         }
       }
 
@@ -598,13 +651,14 @@ class TrailingStop {
         // Atualiza o estado do trailing stop para a posição
         await this.updateTrailingStopForPosition(position);
 
-        // NOVA HIERARQUIA DE DECISÃO: Stop Loss SEMPRE é verificado primeiro
+        // NOVA HIERARQUIA UNIFICADA: Trailing Stop tem prioridade total quando ativo
         const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
         const isTrailingActive = this.isTrailingStopActive(position.symbol);
         const trailingInfo = this.getTrailingStopInfo(position.symbol);
         let decision = null;
 
-        // 1. PRIMEIRO: Sempre verifica Stop Loss (independente do Trailing Stop)
+        // 1. PRIMEIRO: Sempre verifica Stop Loss principal (MAX_NEGATIVE_PNL_STOP_PCT)
+        // Esta verificação é independente e sempre ativa para proteção máxima
         decision = this.stopLossStrategy.shouldClosePosition(position, Account);
         
         if (decision && decision.shouldClose) {
@@ -620,9 +674,9 @@ class TrailingStop {
           continue;
         }
 
-        // 2. SEGUNDO: Se Trailing Stop está habilitado, verifica Trailing Stop
+        // 2. SEGUNDO: Se Trailing Stop está ATIVO, ele é o ÚNICO responsável pela saída
         if (enableTrailingStop && isTrailingActive) {
-          TrailingStop.debug(`🎯 [TRAILING_MODE] ${position.symbol}: Verificando Trailing Stop`);
+          TrailingStop.debug(`🎯 [TRAILING_MODE] ${position.symbol}: Trailing Stop ATIVO - verificando gatilho`);
           
           decision = this.checkTrailingStopTrigger(position, trailingInfo);
           
@@ -632,10 +686,14 @@ class TrailingStop {
             TrailingStop.onPositionClosed(position, 'trailing_stop');
             continue;
           }
+          
+          // Se Trailing Stop está ativo, IGNORA completamente as regras de Take Profit fixo
+          // O Trailing Stop é o único responsável pela saída por lucro
+          TrailingStop.debug(`📊 [TRAILING_ACTIVE] ${position.symbol}: Trailing Stop ativo - ignorando regras de Take Profit fixo`);
         }
 
-        // 3. TERCEIRO: Se Trailing Stop NÃO está habilitado, verifica Take Profit fixo
-        if (!enableTrailingStop) {
+        // 3. TERCEIRO: Se Trailing Stop NÃO está ativo, verifica Take Profit fixo
+        if (!enableTrailingStop || !isTrailingActive) {
           TrailingStop.debug(`📋 [PROFIT_MODE] ${position.symbol}: Modo Take Profit fixo ativo`);
           
           // Verifica se deve fechar por profit mínimo baseado nas taxas

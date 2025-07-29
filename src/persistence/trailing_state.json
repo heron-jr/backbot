@@ -1,0 +1,28 @@
+[
+    [
+      "ETH_USDC_PERP",
+      {
+        "entryPrice": 3808.39,
+        "trailingStopPrice": 3701.8906,
+        "highestPrice": 3777.43,
+        "lowestPrice": null,
+        "isLong": true,
+        "isShort": false,
+        "activated": true,
+        "initialized": true
+      }
+    ],
+    [
+      "ENA_USDC_PERP",
+      {
+        "entryPrice": 0.6134,
+        "trailingStopPrice": 0.58763,
+        "highestPrice": null,
+        "lowestPrice": 0.5761,
+        "isLong": false,
+        "isShort": true,
+        "activated": true,
+        "initialized": true
+      }
+    ]
+  ]
