@@ -169,7 +169,7 @@ class OrderController {
             continue; // Pula posições em pares não autorizados
           }
           
-          // SEMPRE valida e cria stop loss para todas as posições
+          // SEMPRE valida e cria stop loss para todas as posições AUTORIZADAS
           await OrderController.validateAndCreateStopLoss(position, accountId);
           
           // Log de debug para monitoramento
@@ -1305,7 +1305,8 @@ class OrderController {
       const Account = await AccountController.get();
       const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
       if (!marketInfo) {
-        console.error(`❌ [${accountId}] Market info não encontrada para ${position.symbol}`);
+        // Par não autorizado - retorna silenciosamente sem tentar criar stop loss
+        OrderController.debug(`ℹ️ [${accountId}] ${position.symbol}: Par não autorizado - pulando criação de stop loss`);
         return false;
       }
 
@@ -2135,7 +2136,7 @@ class OrderController {
             continue; // Pula posições em pares não autorizados
           }
           
-          // SEMPRE valida e cria stop loss para todas as posições
+          // SEMPRE valida e cria stop loss para todas as posições AUTORIZADAS
           await OrderController.validateAndCreateStopLoss(position, accountId);
           
           // Log de debug para monitoramento

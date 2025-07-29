@@ -667,8 +667,16 @@ class TrailingStop {
         // 4. QUARTO: Sempre verifica se precisa criar failsafe orders (stop loss de proteção)
         // Esta verificação deve acontecer independente do Trailing Stop
         try {
-          TrailingStop.debug(`🛡️ [FAILSAFE_CHECK] ${position.symbol}: Verificando stop loss de proteção...`);
-          await OrderController.validateAndCreateStopLoss(position, 'DEFAULT');
+          // Verifica se o par está autorizado antes de tentar criar stop loss
+          const Account = await AccountController.get();
+          const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+          
+          if (!marketInfo) {
+            TrailingStop.debug(`ℹ️ [MANUAL_POSITION] ${position.symbol}: Par não autorizado - pulando criação de stop loss`);
+          } else {
+            TrailingStop.debug(`🛡️ [FAILSAFE_CHECK] ${position.symbol}: Verificando stop loss de proteção...`);
+            await OrderController.validateAndCreateStopLoss(position, 'DEFAULT');
+          }
         } catch (error) {
           console.error(`❌ [FAILSAFE_ERROR] Erro ao validar/criar stop loss para ${position.symbol}:`, error.message);
         }
