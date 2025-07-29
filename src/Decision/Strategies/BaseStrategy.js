@@ -86,46 +86,50 @@ export class BaseStrategy {
   }
 
   /**
-   * Calcula preços de stop e target baseados em bandas VWAP
+   * Calcula preços de stop e target baseados em configurações do .env
    * @param {object} data - Dados de mercado
    * @param {number} price - Preço atual
    * @param {boolean} isLong - Se é posição long
-   * @param {number} percentVwap - Percentual para target (padrão 0.95)
+   * @param {number} stopLossPct - Percentual de stop loss (do .env)
+   * @param {number} takeProfitPct - Percentual de take profit (do .env)
    * @returns {object|null} - Objeto com stop e target ou null se inválido
    */
-  calculateStopAndTarget(data, price, isLong, percentVwap = 0.95) {
-    const bands = [...data.vwap.lowerBands, ...data.vwap.upperBands]
-      .map(Number)
-      .sort((a, b) => a - b);
+  calculateStopAndTarget(data, price, isLong, stopLossPct, takeProfitPct) {
+    // Validação dos parâmetros
+    if (!stopLossPct || !takeProfitPct) {
+      console.error('❌ [BASE_STRATEGY] Parâmetros de stop/target inválidos:', { stopLossPct, takeProfitPct });
+      return null;
+    }
 
-    const bandBelow = bands.filter(b => b < price);
-    const bandAbove = bands.filter(b => b > price);
-
-    if (bandAbove.length === 0 || bandBelow.length === 0) return null;
+    // Converte percentuais para decimais
+    const stopLossDecimal = Math.abs(stopLossPct) / 100;
+    const takeProfitDecimal = Math.abs(takeProfitPct) / 100;
 
     let stop, target;
 
-    // CORREÇÃO: Usa percentual fixo para stop mais próximo
-    const stopPercentage = 0.015; // 1.5% do preço atual
-    const targetPercentage = 0.025; // 2.5% do preço atual
-
     if (isLong) {
-      // Stop: 1.5% abaixo do preço atual (mais próximo)
-      stop = price * (1 - stopPercentage);
+      // Stop: abaixo do preço atual
+      stop = price * (1 - stopLossDecimal);
       
-      // Target: 2.5% acima do preço atual (mais distante)
-      target = price * (1 + targetPercentage);
+      // Target: acima do preço atual
+      target = price * (1 + takeProfitDecimal);
     } else {
-      // Stop: 1.5% acima do preço atual (mais próximo)
-      stop = price * (1 + stopPercentage);
+      // Stop: acima do preço atual
+      stop = price * (1 + stopLossDecimal);
       
-      // Target: 2.5% abaixo do preço atual (mais distante)
-      target = price * (1 - targetPercentage);
+      // Target: abaixo do preço atual
+      target = price * (1 - takeProfitDecimal);
     }
 
     // Valida se os valores fazem sentido
-    if (isLong && (stop >= price || target <= price)) return null;
-    if (!isLong && (stop <= price || target >= price)) return null;
+    if (isLong && (stop >= price || target <= price)) {
+      console.error('❌ [BASE_STRATEGY] Valores inválidos para LONG:', { price, stop, target });
+      return null;
+    }
+    if (!isLong && (stop <= price || target >= price)) {
+      console.error('❌ [BASE_STRATEGY] Valores inválidos para SHORT:', { price, stop, target });
+      return null;
+    }
 
     return { stop, target };
   }
