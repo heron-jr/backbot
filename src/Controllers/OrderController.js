@@ -249,7 +249,7 @@ class OrderController {
           const { pnl, pnlPct } = TrailingStop.calculatePnL(position, leverage);
           
           const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
-          console.log(`📋 [MANUAL_POSITION] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa estimada: $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL: $${pnl.toFixed(6)} (${pnlPct.toFixed(3)}%) | ⚠️ Par não configurado`);
+          OrderController.debug(`📋 [MANUAL_POSITION] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa estimada: $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL: $${pnl.toFixed(6)} (${pnlPct.toFixed(3)}%) | ⚠️ Par não configurado`);
           continue; // Pula criação de ordens para pares não autorizados
         }
         
@@ -284,7 +284,7 @@ class OrderController {
           const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
           
           if (!marketInfo) {
-            console.log(`ℹ️ [MANUAL_POSITION] ${position.symbol}: Par não autorizado - pulando criação de ordens automáticas`);
+            OrderController.debug(`ℹ️ [MANUAL_POSITION] ${position.symbol}: Par não autorizado - pulando criação de ordens automáticas`);
             continue; // Pula posições em pares não autorizados
           }
           
