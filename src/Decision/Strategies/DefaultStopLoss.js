@@ -1,7 +1,21 @@
 import { BaseStopLoss } from './BaseStopLoss.js';
 import TrailingStop from '../../TrailingStop/TrailingStop.js';
+import ColorLogger from '../../Utils/ColorLogger.js';
 
 export class DefaultStopLoss extends BaseStopLoss {
+  // Instância do ColorLogger para logs coloridos
+  static colorLogger = new ColorLogger('STOP', 'LOSS');
+
+  /**
+   * Função de debug condicional
+   * @param {string} message - Mensagem de debug
+   */
+  static debug(message) {
+    if (process.env.LOG_TYPE === 'debug') {
+      console.log(message);
+    }
+  }
+
   /**
    * Implementação do stop loss para estratégia DEFAULT
    * @param {object} position - Dados da posição
@@ -11,6 +25,12 @@ export class DefaultStopLoss extends BaseStopLoss {
    */
   shouldClosePosition(position, account) {
     try {
+      const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
+
+      if (enableTrailingStop) {
+        return null;
+      }
+
       // Validação inicial dos dados
       if (!this.validateData(position, account)) {
         console.error(`❌ [STOP_LOSS_DEBUG] ${position.symbol}: Dados inválidos - position: ${!!position}, account: ${!!account}, symbol: ${position?.symbol}, netQuantity: ${position?.netQuantity}`);
@@ -18,7 +38,7 @@ export class DefaultStopLoss extends BaseStopLoss {
       }
 
       // Configurações do stop loss - SEMPRE usar porcentagem
-      const MAX_NEGATIVE_PNL_STOP_PCT = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4);
+      const MAX_NEGATIVE_PNL_STOP_PCT = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
 
       const ENABLE_TP_VALIDATION = process.env.ENABLE_TP_VALIDATION === 'true';
       
@@ -66,7 +86,7 @@ export class DefaultStopLoss extends BaseStopLoss {
       }
 
       // Monitoramento de take profit mínimo em tempo real (se habilitada)
-      if (ENABLE_TP_VALIDATION && pnl > 0) {
+      if (ENABLE_TP_VALIDATION && pnl > 0 && !enableTrailingStop) {
         const takeProfitMonitoring = this.monitorTakeProfitMinimum(position, account);
         
         if (takeProfitMonitoring && takeProfitMonitoring.shouldTakePartialProfit) {
@@ -74,7 +94,6 @@ export class DefaultStopLoss extends BaseStopLoss {
         }
       }
 
-      // Não deve fechar
       return null;
 
     } catch (error) {

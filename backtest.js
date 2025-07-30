@@ -243,24 +243,24 @@ async function runRealBacktest(strategy) {
     
     // CORREÇÃO: Parâmetros de estratégia carregados do .env
     // Stop Loss e Take Profit
-    maxNegativePnlStopPct: Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4),
-    minTakeProfitPct: Number(process.env.MIN_TAKE_PROFIT_PCT || 0.5),
-    minProfitPercentage: Number(process.env.MIN_PROFIT_PERCENTAGE || 0),
+    maxNegativePnlStopPct: Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT),
+    minTakeProfitPct: Number(process.env.MIN_TAKE_PROFIT_PCT),
+    minProfitPercentage: Number(process.env.MIN_PROFIT_PERCENTAGE),
     
     // Configurações de volume
-    capitalPercentage: Number(process.env.ACCOUNT1_CAPITAL_PERCENTAGE || 10),
-    investmentPerTrade: Number(process.env.INVESTMENT_PER_TRADE || 100),
+    capitalPercentage: Number(process.env.ACCOUNT1_CAPITAL_PERCENTAGE),
+    investmentPerTrade: Number(process.env.INVESTMENT_PER_TRADE),
     
     // Configurações de execução
-    fee: Number(process.env.FEE || 0.0004),
-    slippage: Number(process.env.SLIPPAGE || 0.0001),
-    maxConcurrentTrades: Number(process.env.MAX_OPEN_TRADES || 5),
+    fee: Number(process.env.FEE),
+    slippage: Number(process.env.SLIPPAGE),
+    maxConcurrentTrades: Number(process.env.MAX_OPEN_TRADES),
     enableStopLoss: process.env.ENABLE_STOP_LOSS !== 'false',
     enableTakeProfit: process.env.ENABLE_TAKE_PROFIT !== 'false',
     
     // Configurações de trailing stop
     enableTrailingStop: process.env.ENABLE_TRAILING_STOP === 'true',
-    trailingStopDistance: Number(process.env.TRAILING_STOP_DISTANCE || 0.01),
+    trailingStopDistance: Number(process.env.TRAILING_STOP_DISTANCE),
     
     // CORREÇÃO: Dados SEMPRE reais (sem dados sintéticos)
     useSyntheticData: false,
@@ -269,19 +269,19 @@ async function runRealBacktest(strategy) {
     // Configurações específicas da estratégia do .env
     strategyConfig: {
       // DEFAULT
-      defaultStopLoss: Number(process.env.DEFAULT_STOP_LOSS || 0.02),
-      defaultTakeProfit: Number(process.env.DEFAULT_TAKE_PROFIT || 0.04),
+      defaultStopLoss: Number(process.env.DEFAULT_STOP_LOSS),
+      defaultTakeProfit: Number(process.env.DEFAULT_TAKE_PROFIT),
       
       // PRO_MAX
-      proMaxStopLoss: Number(process.env.PRO_MAX_STOP_LOSS || 0.015),
-      proMaxTakeProfit: Number(process.env.PRO_MAX_TAKE_PROFIT || 0.03),
-      proMaxTrailingStop: Number(process.env.PRO_MAX_TRAILING_STOP || 0.01),
+      proMaxStopLoss: Number(process.env.PRO_MAX_STOP_LOSS),
+      proMaxTakeProfit: Number(process.env.PRO_MAX_TAKE_PROFIT),
+      proMaxTrailingStop: Number(process.env.PRO_MAX_TRAILING_STOP),
       
       // CYPHERPUNK
-      cypherpunkAmbientTimeframe: process.env.CYPHERPUNK_AMBIENT_TIMEFRAME || ambientTimeframe,
-      cypherpunkActionTimeframe: process.env.CYPHERPUNK_ACTION_TIMEFRAME || actionTimeframe,
-      cypherpunkRiskRewardRatio: Number(process.env.CYPHERPUNK_RISK_REWARD_RATIO || 2.5),
-      cypherpunkMaxRiskPerTrade: Number(process.env.CYPHERPUNK_MAX_RISK_PER_TRADE || 2)
+      cypherpunkAmbientTimeframe: process.env.CYPHERPUNK_AMBIENT_TIMEFRAME,
+      cypherpunkActionTimeframe: process.env.CYPHERPUNK_ACTION_TIMEFRAME,
+      cypherpunkRiskRewardRatio: Number(process.env.CYPHERPUNK_RISK_REWARD_RATIO),
+      cypherpunkMaxRiskPerTrade: Number(process.env.CYPHERPUNK_MAX_RISK_PER_TRADE)
     }
   };
 

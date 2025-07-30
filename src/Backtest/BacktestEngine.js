@@ -16,7 +16,7 @@ export class BacktestEngine {
       leverage: config.leverage || 1, // Alavancagem (1x = sem alavancagem)
       minProfitPercentage: config.minProfitPercentage || 0, // Profit mínimo em % (0 = apenas vs taxas)
       // FIX: Configurações do bot real sincronizadas
-      maxNegativePnlStopPct: Number(config.maxNegativePnlStopPct || process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4),
+      maxNegativePnlStopPct: Number(config.maxNegativePnlStopPct || process.env.MAX_NEGATIVE_PNL_STOP_PCT),
       minTakeProfitPct: Number(config.minTakeProfitPct || process.env.MIN_TAKE_PROFIT_PCT || 0.5),
       enableTrailingStop: config.enableTrailingStop !== false,
       trailingStopDistance: config.trailingStopDistance || 0.01, // 1% por padrão

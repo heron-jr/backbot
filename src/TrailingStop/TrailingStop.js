@@ -5,6 +5,7 @@ import PnlController from '../Controllers/PnlController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import AccountController from '../Controllers/AccountController.js';
 import { validateLeverageForSymbol, clearLeverageAdjustLog } from '../utils/Utils.js';
+import ColorLogger from '../Utils/ColorLogger.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -26,6 +27,9 @@ class TrailingStop {
   // Gerenciador de estado do trailing stop para cada posição
   static trailingState = new Map(); // Ex: { 'SOL_USDC_PERP': { trailingStopPrice: 180.50, highestPrice: 182.00, lowestPrice: 175.00 } }
   static trailingModeLogged = new Set(); // Cache para logs de modo Trailing Stop
+
+  // Instância do ColorLogger para logs coloridos
+  static colorLogger = new ColorLogger('TRAILING', 'STOP');
 
   // Caminho para o arquivo de persistência
   static persistenceFilePath = path.join(process.cwd(), 'persistence', 'trailing_state.json');
@@ -936,6 +940,8 @@ class TrailingStop {
 
   async stopLoss() {
     try {
+      const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
+      
       const positions = await Futures.getOpenPositions();
       
       if (!positions || positions.length === 0) {
@@ -948,33 +954,26 @@ class TrailingStop {
       const Account = await AccountController.get();
 
       for (const position of positions) {
-        // 1. VERIFICAÇÃO DE STOP LOSS PRINCIPAL (PRIORIDADE ZERO - SEMPRE ATIVA)
-        // Esta verificação é independente e sempre ativa para proteção máxima
         const stopLossDecision = this.stopLossStrategy.shouldClosePosition(position, Account);
-        
-        if (stopLossDecision && stopLossDecision.shouldClose) {
+
+        if (!enableTrailingStop && stopLossDecision && stopLossDecision.shouldClose) {
           console.log(`🛑 [STOP_LOSS] ${position.symbol}: Fechando por stop loss principal - ${stopLossDecision.reason}`);
           await OrderController.forceClose(position, Account);
           await TrailingStop.onPositionClosed(position, 'stop_loss');
-          continue; // Pula para a próxima posição
+          continue;
         }
 
-        if (stopLossDecision && stopLossDecision.shouldTakePartialProfit) {
+        if (!enableTrailingStop && stopLossDecision && stopLossDecision.shouldTakePartialProfit) {
           console.log(`💰 [PARTIAL_PROFIT] ${position.symbol}: Tomando profit parcial`);
           await OrderController.takePartialProfit(position, stopLossDecision.partialPercentage, Account);
-          continue; // Pula para a próxima posição
+          continue;
         }
-
-        // 2. VERIFICAÇÃO DE MODO DE SAÍDA POR LUCRO (A CORREÇÃO CENTRAL)
-        const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
 
         if (enableTrailingStop) {
-          // MODO TRAILING STOP
-          // Log do modo Trailing Stop apenas uma vez por símbolo
-        if (!TrailingStop.trailingModeLogged.has(position.symbol)) {
-          console.log(`🎯 [TRAILING_MODE] ${position.symbol}: Modo Trailing Stop ativo`);
-          TrailingStop.trailingModeLogged.add(position.symbol);
-        }
+          if (!TrailingStop.trailingModeLogged.has(position.symbol)) {
+            console.log(`🎯 [TRAILING_MODE] ${position.symbol}: Modo Trailing Stop ativo`);
+            TrailingStop.trailingModeLogged.add(position.symbol);
+          }
           
           // Atualiza o estado do trailing stop para a posição
           await this.updateTrailingStopForPosition(position);
@@ -991,7 +990,7 @@ class TrailingStop {
               console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: Fechando por TRAILING STOP - ${trailingDecision.reason}`);
               await OrderController.forceClose(position, Account);
               await TrailingStop.onPositionClosed(position, 'trailing_stop');
-              continue; // Pula para a próxima posição
+              continue;
             }
             
             // Log de monitoramento para trailing stop ativo
@@ -1001,60 +1000,57 @@ class TrailingStop {
               ? ((currentPrice - trailingInfo.trailingStopPrice) / currentPrice * 100).toFixed(2)
               : ((trailingInfo.trailingStopPrice - currentPrice) / currentPrice * 100).toFixed(2);
             
-            console.log(`📊 [TRAILING_MONITOR] ${position.symbol}: Trailing ativo - ${priceType}: $${currentPrice.toFixed(4)}, Trailing Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância até Stop: ${distance}%\n`);
+            TrailingStop.colorLogger.trailingActive(`${position.symbol}: Trailing ativo - ${priceType}: $${currentPrice.toFixed(4)}, Trailing Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância até Stop: ${distance}%\n`);
           } else {
-                    // Trailing Stop habilitado mas não ativo para esta posição
-        const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
-        const priceType = position.markPrice ? 'Mark Price' : 'Last Price';
-        const pnl = TrailingStop.calculatePnL(position, Account);
-        const entryPrice = parseFloat(position.entryPrice || 0);
-        
-        // Mensagem user-friendly explicando por que o Trailing Stop não está ativo
-        if (pnl.pnlPct < 0) {
-          console.log(`📊 [TRAILING_WAITING] ${position.symbol}: Trailing Stop aguardando posição ficar lucrativa - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}% (prejuízo)\n`);
-        } else {
-          console.log(`📊 [TRAILING_WAITING] ${position.symbol}: Trailing Stop aguardando ativação - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%\n`);
-        }
+            // Trailing Stop habilitado mas não ativo para esta posição
+            const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
+            const priceType = position.markPrice ? 'Mark Price' : 'Last Price';
+            const pnl = TrailingStop.calculatePnL(position, Account);
+            const entryPrice = parseFloat(position.entryPrice || 0);
+            
+            // Mensagem user-friendly explicando por que o Trailing Stop não está ativo
+            if (pnl.pnlPct < 0) {
+              TrailingStop.colorLogger.trailingWaitingProfitable(`${position.symbol}: Trailing Stop aguardando posição ficar lucrativa - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}% (prejuízo)\n`);
+            } else {
+              TrailingStop.colorLogger.trailingWaitingActivation(`${position.symbol}: Trailing Stop aguardando ativação - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%\n`);
+            }
           }
-          
-          // IMPORTANTE: Se Trailing Stop está habilitado, IGNORA COMPLETAMENTE as regras de Take Profit fixo
-          // O Trailing Stop é o único responsável pela saída por lucro
-          
         } else {
           // MODO TAKE PROFIT FIXO
-          console.log(`📋 [PROFIT_MODE] ${position.symbol}: Modo Take Profit fixo ativo`);
+          // IMPORTANTE: Se Trailing Stop está habilitado, IGNORA COMPLETAMENTE as regras de Take Profit fixo
+          // O Trailing Stop é o único responsável pela saída por lucro
+          TrailingStop.colorLogger.profitFixed(`${position.symbol}: Modo Take Profit fixo ativo`);
           
           // Verifica se deve fechar por profit mínimo configurado (prioridade maior)
           if (await this.shouldCloseForConfiguredProfit(position)) {
-            console.log(`✅ [PROFIT_FIXED] ${position.symbol}: Fechando por profit mínimo configurado`);
+            TrailingStop.colorLogger.profitClose(`${position.symbol}: Fechando por profit mínimo configurado`);
             await OrderController.forceClose(position, Account);
             await TrailingStop.onPositionClosed(position, 'profit_configured');
-            continue; // Pula para a próxima posição
+            continue;
           }
 
           // Verifica se deve fechar por profit mínimo baseado nas taxas
           if (await this.shouldCloseForMinimumProfit(position)) {
-            console.log(`✅ [PROFIT_FIXED] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
+            TrailingStop.colorLogger.profitClose(`${position.symbol}: Fechando por profit mínimo baseado em taxas`);
             await OrderController.forceClose(position, Account);
             await TrailingStop.onPositionClosed(position, 'profit_minimum');
-            continue; // Pula para a próxima posição
+            continue;
           }
 
           // Verifica ADX crossover para estratégia PRO_MAX
           const adxCrossoverDecision = await this.checkADXCrossover(position);
           if (adxCrossoverDecision && adxCrossoverDecision.shouldClose) {
-            console.log(`🔄 [ADX_CROSSOVER] ${position.symbol}: ${adxCrossoverDecision.reason}`);
+            TrailingStop.colorLogger.adxCrossover(`${position.symbol}: ${adxCrossoverDecision.reason}`);
             await OrderController.forceClose(position, Account);
             await TrailingStop.onPositionClosed(position, 'adx_crossover');
-            continue; // Pula para a próxima posição
+            continue;
           }
           
-          // Log de monitoramento para modo Take Profit fixo
           const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
           const priceType = position.markPrice ? 'Mark Price' : 'Last Price';
           const pnl = TrailingStop.calculatePnL(position, Account);
           const entryPrice = parseFloat(position.entryPrice || 0);
-          console.log(`📊 [PROFIT_MONITOR] ${position.symbol}: Take Profit fixo - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%\n`);
+          TrailingStop.colorLogger.profitMonitor(`${position.symbol}: Take Profit fixo - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%\n`);
         }
 
         // 3. VERIFICAÇÃO DE FAILSAFE ORDERS (sempre executada, independente do modo)
