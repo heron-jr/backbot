@@ -183,6 +183,78 @@ class ColorLogger {
     const cyanColor = '\x1b[36m'; // Ciano
     console.log(`${cyanColor}🚨 [TRAILING_MODE] ${message}${this.resetColor}`);
   }
+
+  /**
+   * Log de Trailing Stop em hold/proteção (VERMELHO)
+   */
+  trailingHold(message) {
+    if (this.pauseLogs) return;
+    const redColor = '\x1b[31m'; // Vermelho
+    console.log(`${redColor}📊 [TRAILING_HOLD] ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de Trailing Stop ativo verificando gatilho (VERDE BRILHANTE)
+   */
+  trailingActiveCheck(message) {
+    if (this.pauseLogs) return;
+    const brightGreenColor = '\x1b[92m'; // Verde brilhante
+    console.log(`${brightGreenColor}📊 [TRAILING_ACTIVE] ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de Trailing Stop trigger/gatilho ativado (VERMELHO BRILHANTE)
+   */
+  trailingTrigger(message) {
+    if (this.pauseLogs) return;
+    const brightRedColor = '\x1b[91m'; // Vermelho brilhante
+    console.log(`${brightRedColor}🚨 [TRAILING_TRIGGER] ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de Trailing Stop ativado (VERDE BRILHANTE)
+   */
+  trailingActivated(message) {
+    if (this.pauseLogs) return;
+    const brightGreenColor = '\x1b[92m'; // Verde brilhante
+    console.log(`${brightGreenColor}✅ [TRAILING_ACTIVATED] ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de Trailing Stop atualizado (AZUL)
+   */
+  trailingUpdate(message) {
+    if (this.pauseLogs) return;
+    const blueColor = '\x1b[34m'; // Azul
+    console.log(`${blueColor}📈 [TRAILING_UPDATE] ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de Trailing Stop ativando (AMARELO)
+   */
+  trailingActivate(message) {
+    if (this.pauseLogs) return;
+    const yellowColor = '\x1b[33m'; // Amarelo
+    console.log(`${yellowColor}🎯 [TRAILING_ACTIVATE] ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de Trailing Stop cleanup (CINZA)
+   */
+  trailingCleanup(message) {
+    if (this.pauseLogs) return;
+    const grayColor = '\x1b[90m'; // Cinza
+    console.log(`${grayColor}🧹 [TRAILING_CLEANUP] ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de configuração do Trailing Stop (CIANO)
+   */
+  trailingConfig(message) {
+    if (this.pauseLogs) return;
+    const cyanColor = '\x1b[36m'; // Ciano
+    console.log(`${cyanColor}✅ [TRAILING_CONFIG] ${message}${this.resetColor}`);
+  }
 }
 
 export default ColorLogger; 

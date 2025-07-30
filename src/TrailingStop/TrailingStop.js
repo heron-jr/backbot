@@ -104,7 +104,7 @@ class TrailingStop {
       
       // Log das posições carregadas
       for (const [symbol, state] of TrailingStop.trailingState.entries()) {
-        console.log(`📊 [PERSISTENCE] ${symbol}: Stop: $${state.trailingStopPrice?.toFixed(4) || 'N/A'}, Ativo: ${state.activated}`);
+        console.log(`📊 [PERSISTENCE] ${symbol}: Trailing Stop: $${state.trailingStopPrice?.toFixed(4) || 'N/A'}, Ativo: ${state.activated}`);
       }
     } catch (error) {
       console.error(`❌ [PERSISTENCE] Erro ao carregar estado do trailing stop:`, error.message);
@@ -356,7 +356,7 @@ class TrailingStop {
     if (TrailingStop.trailingState.has(symbol)) {
       const state = TrailingStop.trailingState.get(symbol);
       TrailingStop.trailingState.delete(symbol);
-      console.log(`🧹 [TRAILING_CLEANUP] ${symbol}: Estado limpo (${reason}) - Stop: $${state?.trailingStopPrice?.toFixed(4) || 'N/A'}`);
+      TrailingStop.colorLogger.trailingCleanup(`${symbol}: Estado limpo (${reason}) - Trailing Stop: $${state?.trailingStopPrice?.toFixed(4) || 'N/A'}`);
       
       // Remove do cache de logs também
       TrailingStop.trailingModeLogged.delete(symbol);
@@ -457,7 +457,7 @@ class TrailingStop {
         // Isso evita que a posição fique "órfã" sem proteção
         let trailingState = TrailingStop.trailingState.get(position.symbol);
         if (trailingState && trailingState.activated) {
-                      console.log(`📊 [TRAILING_HOLD] ${position.symbol}: Posição em prejuízo mas Trailing Stop mantido ativo para proteção - Stop: $${trailingState.trailingStopPrice?.toFixed(4) || 'N/A'}`);
+          TrailingStop.colorLogger.trailingHold(`${position.symbol}: Posição em prejuízo mas Trailing Stop mantido ativo para proteção - Trailing Stop: $${trailingState.trailingStopPrice?.toFixed(4) || 'N/A'}`);
           return trailingState;
         }
         
@@ -508,7 +508,7 @@ class TrailingStop {
           initialized: false // Novo campo para controlar logs
         };
         TrailingStop.trailingState.set(position.symbol, trailingState);
-        console.log(`✅ [TRAILING_ACTIVATED] ${position.symbol}: Trailing Stop ATIVADO! Posição lucrativa detectada - Preço de Entrada: $${entryPrice.toFixed(4)}, Preço Atual: $${currentPrice.toFixed(4)}, Stop Inicial: $${initialStopLossPrice.toFixed(4)}`);
+        TrailingStop.colorLogger.trailingActivated(`${position.symbol}: Trailing Stop ATIVADO! Posição lucrativa detectada - Preço de Entrada: $${entryPrice.toFixed(4)}, Preço Atual: $${currentPrice.toFixed(4)}, Stop Inicial: $${initialStopLossPrice.toFixed(4)}`);
         trailingState.initialized = true;
       }
 
@@ -525,7 +525,7 @@ class TrailingStop {
           if (finalStopPrice > currentStopPrice) {
               trailingState.trailingStopPrice = finalStopPrice;
               trailingState.activated = true;
-              console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço melhorou para $${currentPrice.toFixed(4)}, Novo Stop MOVIDO para: $${finalStopPrice.toFixed(4)}`);
+              TrailingStop.colorLogger.trailingUpdate(`${position.symbol}: LONG - Preço melhorou para $${currentPrice.toFixed(4)}, Novo Stop MOVIDO para: $${finalStopPrice.toFixed(4)}`);
           }
         }
       } else if (isShort) {
@@ -540,7 +540,7 @@ class TrailingStop {
           if (finalStopPrice < currentStopPrice) {
             trailingState.trailingStopPrice = finalStopPrice;
             trailingState.activated = true;
-            console.log(`📉 [TRAILING_UPDATE] ${position.symbol}: SHORT - Preço melhorou para $${currentPrice.toFixed(4)}, Trailing Stop ajustado para $${finalStopPrice.toFixed(4)} (protegendo lucros)`);
+            TrailingStop.colorLogger.trailingUpdate(`${position.symbol}: SHORT - Preço melhorou para $${currentPrice.toFixed(4)}, Trailing Stop ajustado para $${finalStopPrice.toFixed(4)} (protegendo lucros)`);
           }
         }
         
@@ -549,7 +549,7 @@ class TrailingStop {
           const finalStopPrice = Math.min(trailingState.initialStopLossPrice, newTrailingStopPrice);
           trailingState.trailingStopPrice = finalStopPrice;
           trailingState.activated = true;
-          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: SHORT - Ativando Trailing Stop com lucro existente! Preço: $${currentPrice.toFixed(4)}, Stop inicial: $${finalStopPrice.toFixed(4)}`);
+          TrailingStop.colorLogger.trailingActivate(`${position.symbol}: SHORT - Ativando Trailing Stop com lucro existente! Preço: $${currentPrice.toFixed(4)}, Stop inicial: $${finalStopPrice.toFixed(4)}`);
         }
       }
 
@@ -588,18 +588,18 @@ class TrailingStop {
         // Para LONG: fecha se preço atual <= trailing stop price
         if (currentPrice <= trailingState.trailingStopPrice) {
           shouldClose = true;
-          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} <= stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} <= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
         }
       } else if (trailingState.isShort) {
         // Para SHORT: fecha se preço atual >= trailing stop price
         if (currentPrice >= trailingState.trailingStopPrice) {
           shouldClose = true;
-          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} >= stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} >= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
         }
       }
 
       if (shouldClose) {
-        console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: GATILHO ATIVADO! Preço atual $${currentPrice.toFixed(4)} cruzou o stop em $${trailingState.trailingStopPrice.toFixed(4)}.`);
+        TrailingStop.colorLogger.trailingTrigger(`${position.symbol}: GATILHO ATIVADO! Preço atual $${currentPrice.toFixed(4)} cruzou o stop em $${trailingState.trailingStopPrice.toFixed(4)}.`);
         return {
           shouldClose: true,
           reason: reason,
@@ -956,7 +956,7 @@ class TrailingStop {
       for (const position of positions) {
         const stopLossDecision = this.stopLossStrategy.shouldClosePosition(position, Account);
 
-        if (!enableTrailingStop && stopLossDecision && stopLossDecision.shouldClose) {
+        if (stopLossDecision && stopLossDecision.shouldClose) {
           console.log(`🛑 [STOP_LOSS] ${position.symbol}: Fechando por stop loss principal - ${stopLossDecision.reason}`);
           await OrderController.forceClose(position, Account);
           await TrailingStop.onPositionClosed(position, 'stop_loss');
@@ -983,11 +983,11 @@ class TrailingStop {
           const trailingInfo = this.getTrailingStopInfo(position.symbol);
           
           if (isTrailingActive) {
-            console.log(`📊 [TRAILING_ACTIVE] ${position.symbol}: Trailing Stop ativo - verificando gatilho`);
+            TrailingStop.colorLogger.trailingActiveCheck(`${position.symbol}: Trailing Stop ativo - verificando gatilho`);
             
             const trailingDecision = this.checkTrailingStopTrigger(position, trailingInfo);
             if (trailingDecision && trailingDecision.shouldClose) {
-              console.log(`🚨 [TRAILING_TRIGGER] ${position.symbol}: Fechando por TRAILING STOP - ${trailingDecision.reason}`);
+              TrailingStop.colorLogger.trailingTrigger(`${position.symbol}: Fechando por TRAILING STOP - ${trailingDecision.reason}`);
               await OrderController.forceClose(position, Account);
               await TrailingStop.onPositionClosed(position, 'trailing_stop');
               continue;
@@ -995,16 +995,26 @@ class TrailingStop {
             
             // Log de monitoramento para trailing stop ativo
             const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
-            const priceType = position.markPrice ? 'Mark Price' : 'Last Price';
+            const priceType = position.markPrice ? 'Current Price' : 'Last Price';
             const distance = trailingInfo.isLong 
               ? ((currentPrice - trailingInfo.trailingStopPrice) / currentPrice * 100).toFixed(2)
               : ((trailingInfo.trailingStopPrice - currentPrice) / currentPrice * 100).toFixed(2);
             
-            TrailingStop.colorLogger.trailingActive(`${position.symbol}: Trailing ativo - ${priceType}: $${currentPrice.toFixed(4)}, Trailing Stop: $${trailingInfo.trailingStopPrice.toFixed(4)}, Distância até Stop: ${distance}%\n`);
+              const direction = trailingInfo.isLong ? 'LONG' : 'SHORT';
+              const priceRecordLabel = trailingInfo.isLong ? 'Preço Máximo' : 'Preço Mínimo';
+              const priceRecordValue = trailingInfo.isLong ? trailingInfo.highestPrice : trailingInfo.lowestPrice;
+              
+              TrailingStop.colorLogger.trailingActive(
+                  `${position.symbol} (${direction}): Trailing ativo - ` +
+                  `${priceType}: $${currentPrice.toFixed(4)}, ` +
+                  `TrailingStop: $${trailingInfo.trailingStopPrice.toFixed(4)}, ` +
+                  `${priceRecordLabel}: $${priceRecordValue.toFixed(4)}, ` +
+                  `Distância até Stop: ${distance}%\n`
+              );
           } else {
             // Trailing Stop habilitado mas não ativo para esta posição
             const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
-            const priceType = position.markPrice ? 'Mark Price' : 'Last Price';
+            const priceType = position.markPrice ? 'Current Price' : 'Last Price';
             const pnl = TrailingStop.calculatePnL(position, Account);
             const entryPrice = parseFloat(position.entryPrice || 0);
             
@@ -1047,7 +1057,7 @@ class TrailingStop {
           }
           
           const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
-          const priceType = position.markPrice ? 'Mark Price' : 'Last Price';
+          const priceType = position.markPrice ? 'Current Price' : 'Last Price';
           const pnl = TrailingStop.calculatePnL(position, Account);
           const entryPrice = parseFloat(position.entryPrice || 0);
           TrailingStop.colorLogger.profitMonitor(`${position.symbol}: Take Profit fixo - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%\n`);
@@ -1146,13 +1156,13 @@ class TrailingStop {
     const config = TrailingStop.getTrailingStopConfig();
     
     if (config.isValid) {
-      console.log(`✅ [TRAILING_CONFIG] Trailing Stop configurado corretamente:`);
-      console.log(`   - Habilitado: ${config.enabled}`);
-      console.log(`   - Distância: ${config.distance}%`);
+      TrailingStop.colorLogger.trailingConfig(`Trailing Stop configurado corretamente:`);
+      TrailingStop.colorLogger.trailingConfig(`   - Habilitado: ${config.enabled}`);
+      TrailingStop.colorLogger.trailingConfig(`   - Distância: ${config.distance}%`);
     } else {
-      console.log(`⚠️ [TRAILING_CONFIG] Trailing Stop não configurado ou inválido:`);
-      console.log(`   - ENABLE_TRAILING_STOP: ${config.config.ENABLE_TRAILING_STOP}`);
-      console.log(`   - TRAILING_STOP_DISTANCE: ${config.config.TRAILING_STOP_DISTANCE}`);
+      TrailingStop.colorLogger.trailingConfig(`Trailing Stop não configurado ou inválido:`);
+      TrailingStop.colorLogger.trailingConfig(`   - ENABLE_TRAILING_STOP: ${config.config.ENABLE_TRAILING_STOP}`);
+      TrailingStop.colorLogger.trailingConfig(`   - TRAILING_STOP_DISTANCE: ${config.config.TRAILING_STOP_DISTANCE}`);
     }
   }
 }
