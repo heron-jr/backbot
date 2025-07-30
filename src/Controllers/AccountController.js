@@ -42,10 +42,6 @@ class AccountController {
     }
 
     const AUTHORIZED_MARKET = JSON.parse(process.env.AUTHORIZED_MARKET || '[]')
-    
-    // Log para debug (apenas quando não está usando cache)
-    console.log(`🔍 [ACCOUNT] AUTHORIZED_MARKET: ${JSON.stringify(AUTHORIZED_MARKET)}`);
-    console.log(`🔍 [ACCOUNT] Total de markets antes do filtro: ${markets.length}`);
 
     markets = markets.filter((el) => 
         el.marketType === "PERP" && 
