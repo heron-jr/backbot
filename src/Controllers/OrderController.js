@@ -2,6 +2,7 @@ import Order from '../Backpack/Authenticated/Order.js';
 import Futures from '../Backpack/Authenticated/Futures.js';
 import AccountController from './AccountController.js';
 import Utils from '../utils/Utils.js';
+import { validateLeverageForSymbol } from '../utils/Utils.js';
 import Markets from '../Backpack/Public/Markets.js';
 import TrailingStop from '../TrailingStop/TrailingStop.js';
 
@@ -1355,12 +1356,22 @@ class OrderController {
       // Calcula o preço de stop loss baseado na porcentagem definida
       const currentPrice = parseFloat(position.markPrice || position.lastPrice);
       const entryPrice = parseFloat(position.entryPrice || 0);
-      const leverage = Account.leverage || 1;
+      
+      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
+      if (!Account.leverage) {
+        console.error(`❌ [STOP_LOSS_ERROR] ${position.symbol}: Alavancagem não encontrada na Account`);
+        return false;
+      }
+      
+      const rawLeverage = Account.leverage;
+      
+      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
       
       // Carrega a porcentagem de stop loss do .env
       const baseStopLossPct = Math.abs(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
       
-      // Calcula a porcentagem real considerando a alavancagem
+      // Calcula a porcentagem real considerando a alavancagem validada
       // Se leverage = 10x e stop loss = 10%, então o preço deve mover apenas 1%
       const actualStopLossPct = baseStopLossPct / leverage;
       

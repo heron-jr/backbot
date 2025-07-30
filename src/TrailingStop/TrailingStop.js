@@ -4,6 +4,7 @@ import { StopLossFactory } from '../Decision/Strategies/StopLossFactory.js';
 import PnlController from '../Controllers/PnlController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import AccountController from '../Controllers/AccountController.js';
+import { validateLeverageForSymbol, clearLeverageAdjustLog } from '../utils/Utils.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -281,10 +282,21 @@ class TrailingStop {
   static calculateInitialStopLossPrice(position, account) {
     try {
       const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
-      const leverage = Number(account?.leverage || position.leverage || 1);
+      
+      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
+      if (!account?.leverage) {
+        console.error(`❌ [STOP_LOSS_ERROR] ${position.symbol}: Alavancagem não encontrada na Account`);
+        return null;
+      }
+      
+      const rawLeverage = Number(account.leverage);
+      
+      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      
       const baseStopLossPct = Math.abs(Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -10));
       
-      // Calcula a porcentagem real considerando a alavancagem
+      // Calcula a porcentagem real considerando a alavancagem validada
       const actualStopLossPct = baseStopLossPct / leverage;
       
       // Determina se é LONG ou SHORT
@@ -354,6 +366,9 @@ class TrailingStop {
   static async onPositionClosed(position, closeReason) {
     if (position && position.symbol) {
       await TrailingStop.clearTrailingState(position.symbol, `posição fechada: ${closeReason}`);
+      
+      // Remove do cache de logs de ajuste de alavancagem
+      clearLeverageAdjustLog(position.symbol);
     }
   }
 
@@ -370,6 +385,9 @@ class TrailingStop {
       
       // Limpa o cache de logs também
       TrailingStop.trailingModeLogged.clear();
+      
+      // Limpa o cache de logs de ajuste de alavancagem
+      clearLeverageAdjustLog();
       
       // Remove o arquivo de persistência se existir
       try {
@@ -410,7 +428,18 @@ class TrailingStop {
 
       // Calcula PnL da posição
       const Account = await AccountController.get();
-      const leverage = Account.leverage;
+      
+      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
+      if (!Account.leverage) {
+        console.error(`❌ [TRAILING_ERROR] ${position.symbol}: Alavancagem não encontrada na Account`);
+        return null;
+      }
+      
+      const rawLeverage = Account.leverage;
+      
+      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      
       const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
 
       // Trailing stop só é ativado se a posição estiver com lucro
@@ -767,7 +796,18 @@ class TrailingStop {
   async shouldCloseForMinimumProfit(position) {
     try {
       const Account = await AccountController.get();
-      const leverage = Account.leverage;
+      
+      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
+      if (!Account.leverage) {
+        console.error(`❌ [PROFIT_CHECK] ${position.symbol}: Alavancagem não encontrada na Account`);
+        return false;
+      }
+      
+      const rawLeverage = Account.leverage;
+      
+      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      
       const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
       
       // Configuração do stop loss por porcentagem (opcional)
@@ -837,7 +877,18 @@ class TrailingStop {
   async shouldCloseForConfiguredProfit(position) {
     try {
       const Account = await AccountController.get();
-      const leverage = Account.leverage;
+      
+      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
+      if (!Account.leverage) {
+        console.error(`❌ [CONFIG_PROFIT] ${position.symbol}: Alavancagem não encontrada na Account`);
+        return false;
+      }
+      
+      const rawLeverage = Account.leverage;
+      
+      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      
       const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
       
       // Configuração do stop loss por porcentagem (opcional)
