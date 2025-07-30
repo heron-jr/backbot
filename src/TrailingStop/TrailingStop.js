@@ -10,6 +10,19 @@ import path from 'path';
 
 class TrailingStop {
 
+  constructor(strategyType = null) {
+    const finalStrategyType = strategyType || 'DEFAULT';
+    console.log(`🔧 [TRAILING_INIT] Inicializando TrailingStop com estratégia: ${finalStrategyType}`);
+    this.stopLossStrategy = StopLossFactory.createStopLoss(finalStrategyType);
+    console.log(`🔧 [TRAILING_INIT] Stop loss strategy criada: ${this.stopLossStrategy.constructor.name}`);
+    this.lastVolumeCheck = 0;
+    this.cachedVolume = null;
+    this.volumeCacheTimeout = 24 * 60 * 60 * 1000; // 24 horas em ms
+    
+    // Loga a configuração do trailing stop
+    TrailingStop.logTrailingStopConfig();
+  }
+
   // Gerenciador de estado do trailing stop para cada posição
   static trailingState = new Map(); // Ex: { 'SOL_USDC_PERP': { trailingStopPrice: 180.50, highestPrice: 182.00, lowestPrice: 175.00 } }
   static trailingModeLogged = new Set(); // Cache para logs de modo Trailing Stop
@@ -314,19 +327,6 @@ class TrailingStop {
     }
   }
 
-  constructor(strategyType = null) {
-    const finalStrategyType = strategyType || 'DEFAULT';
-    console.log(`🔧 [TRAILING_INIT] Inicializando TrailingStop com estratégia: ${finalStrategyType}`);
-    this.stopLossStrategy = StopLossFactory.createStopLoss(finalStrategyType);
-    console.log(`🔧 [TRAILING_INIT] Stop loss strategy criada: ${this.stopLossStrategy.constructor.name}`);
-    this.lastVolumeCheck = 0;
-    this.cachedVolume = null;
-    this.volumeCacheTimeout = 24 * 60 * 60 * 1000; // 24 horas em ms
-    
-    // Loga a configuração do trailing stop
-    TrailingStop.logTrailingStopConfig();
-  }
-
   /**
    * Re-inicializa o stop loss com uma nova estratégia
    * @param {string} strategyType - Novo tipo de estratégia
@@ -506,51 +506,29 @@ class TrailingStop {
 
       // Atualiza o trailing stop baseado na direção da posição
       if (isLong) {
-        // Para posições LONG
-        // CORREÇÃO: Para LONG, sempre atualiza o preço máximo se o preço atual for maior
-        // Isso garante que o trailing stop funcione mesmo quando o preço oscila
         if (currentPrice > trailingState.highestPrice || trailingState.highestPrice === null) {
           trailingState.highestPrice = currentPrice;
-          
-          // CORREÇÃO: Calcula o trailing stop baseado no highestPrice registrado
-          const newTrailingStopPrice = trailingState.highestPrice * (1 - (trailingStopDistance / 100));
-          
-          // O stop final é o MENOR valor entre o stop ATUAL e o novo candidato
-          // Para LONG: o trailing stop deve DIMINUIR conforme o preço sobe
-          const currentStopPrice = trailingState.trailingStopPrice;
-          const finalStopPrice = Math.min(currentStopPrice, newTrailingStopPrice);
-          
-          // Atualiza o estado se o stop realmente se moveu
-          if (finalStopPrice < currentStopPrice) {
-            trailingState.trailingStopPrice = finalStopPrice;
-            trailingState.activated = true;
-            console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço melhorou para $${currentPrice.toFixed(4)}, Trailing Stop ajustado para $${finalStopPrice.toFixed(4)} (protegendo lucros)`);
-          }
-        } else if (pnl > 0 && !trailingState.activated) {
-          // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
-          // ativa com o preço atual como base
+      
           const newTrailingStopPrice = currentPrice * (1 - (trailingStopDistance / 100));
-          const finalStopPrice = Math.max(trailingState.initialStopLossPrice, newTrailingStopPrice);
-          trailingState.trailingStopPrice = finalStopPrice;
-          trailingState.activated = true;
-          console.log(`🎯 [TRAILING_ACTIVATE] ${position.symbol}: LONG - Ativando trailing stop com lucro existente. Preço: $${currentPrice.toFixed(4)}, Stop: $${finalStopPrice.toFixed(4)}`);
+          const currentStopPrice = trailingState.trailingStopPrice;
+      
+          const finalStopPrice = Math.max(currentStopPrice, newTrailingStopPrice);
+      
+          if (finalStopPrice > currentStopPrice) {
+              trailingState.trailingStopPrice = finalStopPrice;
+              trailingState.activated = true;
+              console.log(`📈 [TRAILING_UPDATE] ${position.symbol}: LONG - Preço melhorou para $${currentPrice.toFixed(4)}, Novo Stop MOVIDO para: $${finalStopPrice.toFixed(4)}`);
+          }
         }
       } else if (isShort) {
-        // Para posições SHORT
-        // CORREÇÃO: Para SHORT, sempre atualiza o preço mínimo se o preço atual for menor
-        // Isso garante que o trailing stop funcione mesmo quando o preço oscila
         if (currentPrice < trailingState.lowestPrice || trailingState.lowestPrice === null) {
           trailingState.lowestPrice = currentPrice;
           
-          // CORREÇÃO: Calcula o trailing stop baseado no lowestPrice registrado
           const newTrailingStopPrice = trailingState.lowestPrice * (1 + (trailingStopDistance / 100));
           
-          // O stop final é o MENOR valor entre o stop ATUAL e o novo candidato
-          // Isso garante que o stop SÓ SE MOVA PARA BAIXO
           const currentStopPrice = trailingState.trailingStopPrice;
           const finalStopPrice = Math.min(currentStopPrice, newTrailingStopPrice);
           
-          // Atualiza o estado se o stop realmente se moveu
           if (finalStopPrice < currentStopPrice) {
             trailingState.trailingStopPrice = finalStopPrice;
             trailingState.activated = true;
@@ -559,8 +537,6 @@ class TrailingStop {
         }
         
         if (pnl > 0 && !trailingState.activated) {
-          // Se a posição está com lucro mas o trailing stop ainda não foi ativado,
-          // ativa com o preço atual como base
           const newTrailingStopPrice = currentPrice * (1 + (trailingStopDistance / 100));
           const finalStopPrice = Math.min(trailingState.initialStopLossPrice, newTrailingStopPrice);
           trailingState.trailingStopPrice = finalStopPrice;
