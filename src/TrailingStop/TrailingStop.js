@@ -268,8 +268,12 @@ class TrailingStop {
       
       // A base de custo real (MARGEM) é o valor nocional dividido pela alavancagem.
       // Se a alavancagem for 0 ou não informada, consideramos 1 para evitar divisão por zero.
-      const leverage = Number(account?.leverage || position.leverage || 1);
-      const costBasis = notionalValue / (leverage || 1);
+      const rawLeverage = Number(account?.leverage);
+      
+      // CORREÇÃO: Valida a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      
+      const costBasis = notionalValue / leverage;
 
       let pnlPct = 0;
       if (costBasis > 0) {
@@ -709,8 +713,12 @@ class TrailingStop {
       
       // A base de custo real (MARGEM) é o valor nocional dividido pela alavancagem.
       // Se a alavancagem for 0 ou não informada, consideramos 1 para evitar divisão por zero.
-      const leverage = Number(account?.leverage || position.leverage || 1);
-      const costBasis = notionalValue / (leverage || 1);
+      const rawLeverage = Number(account?.leverage);
+      
+      // CORREÇÃO: Valida a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      
+      const costBasis = notionalValue / leverage;
 
       let pnlPct = 0;
       if (costBasis > 0) {
