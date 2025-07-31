@@ -101,8 +101,31 @@ export class BaseStrategy {
       return null;
     }
 
-    // Converte percentuais para decimais
-    const stopLossDecimal = Math.abs(stopLossPct) / 100;
+    // CORREÇÃO CRÍTICA: Obtém a alavancagem da conta para calcular o stop loss correto
+    let leverage = 1; // Default
+    try {
+      // Importa dinamicamente para evitar dependência circular
+      const { validateLeverageForSymbol } = await import('../../Utils/Utils.js');
+      const AccountController = await import('../../Controllers/AccountController.js');
+      
+      const Account = await AccountController.default.get();
+      if (Account && Account.leverage) {
+        const rawLeverage = Account.leverage;
+        leverage = validateLeverageForSymbol(data.market.symbol, rawLeverage);
+        console.log(`🔧 [BASE_STRATEGY] ${data.market.symbol}: Alavancagem ${rawLeverage}x -> ${leverage}x (validada)`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ [BASE_STRATEGY] ${data.market.symbol}: Erro ao obter alavancagem, usando 1x: ${error.message}`);
+    }
+
+    // CORREÇÃO CRÍTICA: Calcula o stop loss real considerando a alavancagem
+    const baseStopLossPct = Math.abs(stopLossPct);
+    const actualStopLossPct = baseStopLossPct / leverage;
+    
+    console.log(`🔧 [BASE_STRATEGY] ${data.market.symbol}: Stop Loss - Bruto: ${baseStopLossPct}%, Real: ${actualStopLossPct.toFixed(2)}% (leverage ${leverage}x)`);
+
+    // Converte percentuais para decimais (usando o valor corrigido pela alavancagem)
+    const stopLossDecimal = actualStopLossPct / 100;
     const takeProfitDecimal = Math.abs(takeProfitPct) / 100;
 
     let stop, target;
