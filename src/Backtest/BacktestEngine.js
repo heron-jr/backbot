@@ -16,7 +16,7 @@ export class BacktestEngine {
       leverage: config.leverage || 1, // Alavancagem (1x = sem alavancagem)
       minProfitPercentage: config.minProfitPercentage || 0, // Profit mínimo em % (0 = apenas vs taxas)
       // FIX: Configurações do bot real sincronizadas
-      maxNegativePnlStopPct: Number(config.maxNegativePnlStopPct || process.env.MAX_NEGATIVE_PNL_STOP_PCT || -4),
+      maxNegativePnlStopPct: Number(config.maxNegativePnlStopPct || process.env.MAX_NEGATIVE_PNL_STOP_PCT),
       minTakeProfitPct: Number(config.minTakeProfitPct || process.env.MIN_TAKE_PROFIT_PCT || 0.5),
       enableTrailingStop: config.enableTrailingStop !== false,
       trailingStopDistance: config.trailingStopDistance || 0.01, // 1% por padrão
@@ -26,6 +26,9 @@ export class BacktestEngine {
       ambientTimeframe: config.ambientTimeframe || '1h', // Timeframe da estratégia
       actionTimeframe: config.actionTimeframe || '5m', // Timeframe de ação
       dataFormat: config.dataFormat || 'STANDARD', // NOVO: Formato dos dados recebidos
+      
+      // NOVO: Modo de Auditoria para diagnosticar por que não há trades
+      isAuditing: config.isAuditing || false,
       ...config
     };
     
@@ -563,21 +566,41 @@ export class BacktestEngine {
           ...strategyConfig
         };
         
+        // NOVO: Passa configuração de auditoria para a estratégia
+        const auditConfig = {
+          ...envConfig,
+          isAuditing: this.config.isAuditing
+        };
+        
         const decision = await strategy.analyzeTrade(
           this.config.fee,
           data,
           this.config.investmentPerTrade,
           0, // media_rsi (não usado no backtest)
-          envConfig
+          auditConfig
         );
         
-        if (decision) {
+        // NOVO: Tratamento de pacotes de auditoria
+        if (decision && decision.auditInfo) {
+          // É um pacote de auditoria
+          console.log('\n🔍 PACOTE DE AUDITORIA:');
+          console.log(JSON.stringify(decision, null, 2));
+          
+          // Verifica se a decisão foi aprovada
+          if (decision.finalDecision.decision === 'APPROVED') {
+            // Converte o pacote de auditoria em decisão de trading
+            const tradingDecision = this.convertAuditToTradingDecision(decision, data);
+            if (tradingDecision) {
+              await this.openPosition(symbol, tradingDecision, timestamp);
+            }
+          }
+        } else if (decision) {
+          // É uma decisão normal de trading
           await this.openPosition(symbol, decision, timestamp);
         }
       } catch (error) {
         this.logger.error(`❌ Erro ao analisar ${symbol}: ${error.message}`);
       }
-    }
     }
   }
 
@@ -663,6 +686,114 @@ export class BacktestEngine {
       if (data) {
         position.currentPrice = parseFloat(data.marketPrice);
       }
+    }
+  }
+
+  /**
+   * NOVO: Converte pacote de auditoria em decisão de trading
+   * @param {object} auditPackage - Pacote de auditoria
+   * @param {object} data - Dados de mercado
+   * @returns {object|null} - Decisão de trading ou null
+   */
+  convertAuditToTradingDecision(auditPackage, data) {
+    try {
+      // Extrai informações do pacote de auditoria
+      const { finalDecision, inputData } = auditPackage;
+      
+      if (finalDecision.decision !== 'APPROVED') {
+        return null;
+      }
+      
+      // Reconstrói a decisão de trading baseada nos dados de auditoria
+      const currentPrice = parseFloat(inputData.currentPrice);
+      
+      // Calcula stop e target baseado nos indicadores
+      const signals = this.reconstructSignalsFromAudit(auditPackage);
+      if (!signals) {
+        return null;
+      }
+      
+      const stopTarget = this.calculateStopAndTargetFromAudit(auditPackage, currentPrice, signals.isLong);
+      if (!stopTarget) {
+        return null;
+      }
+      
+      return {
+        action: signals.isLong ? 'long' : 'short',
+        entry: currentPrice,
+        stop: stopTarget.stop,
+        target: stopTarget.target,
+        timestamp: auditPackage.auditInfo.timestamp
+      };
+      
+    } catch (error) {
+      this.logger.error(`❌ Erro ao converter auditoria para decisão: ${error.message}`);
+      return null;
+    }
+  }
+  
+  /**
+   * Reconstrói sinais a partir do pacote de auditoria
+   */
+  reconstructSignalsFromAudit(auditPackage) {
+    try {
+      // Procura pela camada de análise de sinais no trace
+      const signalLayer = auditPackage.validationTrace.find(layer => 
+        layer.layer === '2. Análise de Sinais'
+      );
+      
+      if (!signalLayer || signalLayer.status !== 'PASS') {
+        return null;
+      }
+      
+      // Extrai informações do sinal da avaliação
+      const evaluation = signalLayer.evaluation;
+      const isLong = evaluation.includes('LONG');
+      const signalType = evaluation.includes('GREEN') ? 'GREEN' : 'RED';
+      
+      return {
+        hasSignal: true,
+        isLong,
+        signalType
+      };
+      
+    } catch (error) {
+      this.logger.error(`❌ Erro ao reconstruir sinais: ${error.message}`);
+      return null;
+    }
+  }
+  
+  /**
+   * Calcula stop e target a partir do pacote de auditoria
+   */
+  calculateStopAndTargetFromAudit(auditPackage, currentPrice, isLong) {
+    try {
+      // Procura pela camada de cálculo de stop e target no trace
+      const stopTargetLayer = auditPackage.validationTrace.find(layer => 
+        layer.layer === '6. Cálculo de Stop e Target'
+      );
+      
+      if (!stopTargetLayer || stopTargetLayer.status !== 'PASS') {
+        return null;
+      }
+      
+      // Extrai valores da avaliação
+      const evaluation = stopTargetLayer.evaluation;
+      const stopMatch = evaluation.match(/Stop: \$([\d.]+)/);
+      const targetMatch = evaluation.match(/Target: \$([\d.]+)/);
+      
+      if (!stopMatch || !targetMatch) {
+        return null;
+      }
+      
+      return {
+        stop: parseFloat(stopMatch[1]),
+        target: parseFloat(targetMatch[1])
+      };
+      
+    } catch (error) {
+      this.logger.error(`❌ Erro ao calcular stop/target: ${error.message}`);
+      return null;
     }
   }
 

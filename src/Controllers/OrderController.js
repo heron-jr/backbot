@@ -2,6 +2,7 @@ import Order from '../Backpack/Authenticated/Order.js';
 import Futures from '../Backpack/Authenticated/Futures.js';
 import AccountController from './AccountController.js';
 import Utils from '../utils/Utils.js';
+import { validateLeverageForSymbol } from '../utils/Utils.js';
 import Markets from '../Backpack/Public/Markets.js';
 import TrailingStop from '../TrailingStop/TrailingStop.js';
 
@@ -10,11 +11,18 @@ class OrderController {
   // Armazena ordens de entrada pendentes para monitoramento POR CONTA (apenas estratégia PRO_MAX)
   static pendingEntryOrdersByAccount = {};
 
-  // Contador estático para evitar loop infinito
+  // Contador de tentativas de stop loss por símbolo
   static stopLossAttempts = null;
-  
-  // Cache para posições que já têm stop loss validado
+
+  // Cache de posições que já foram validadas para stop loss
   static validatedStopLossPositions = new Set();
+
+  // Lock para criação de stop loss (evita múltiplas criações simultâneas)
+  static stopLossCreationInProgress = new Set(); // Armazena os símbolos que estão com uma criação de SL em andamento
+
+  // Cache de verificação de stop loss para evitar múltiplas chamadas desnecessárias
+  static stopLossCheckCache = new Map(); // { symbol: { lastCheck: timestamp, hasStopLoss: boolean } }
+  static stopLossCheckCacheTimeout = 30000; // 30 segundos de cache
 
   /**
    * Adiciona ordem de entrada para monitoramento (apenas estratégia PRO_MAX)
@@ -108,6 +116,13 @@ class OrderController {
           // Log detalhado de taxa total e PnL atual
           const Account = await AccountController.get();
           const marketInfo = Account.markets.find(m => m.symbol === market);
+          
+          // Verifica se marketInfo existe antes de acessar a propriedade fee
+          if (!marketInfo) {
+            console.warn(`⚠️ [MONITOR-${accountId}] Market info não encontrada para ${market}, usando fee padrão`);
+            return; // Retorna se não encontrar as informações do mercado
+          }
+          
           const fee = marketInfo.fee || process.env.FEE || 0.0004;
           const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
           const currentPrice = parseFloat(position.markPrice);
@@ -120,109 +135,13 @@ class OrderController {
           
           // Usa a função calculatePnL do TrailingStop para calcular o PnL corretamente
           const leverage = Account.leverage;
-          const { pnl, pnlPct } = TrailingStop.calculatePnL(position, leverage);
+          const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
           
-          console.log(`[MONITOR][${accountId}] ${market} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
-          // Posição foi aberta, delega para método dedicado
-          await OrderController.handlePositionOpenedForProMax(market, position, orderData, accountId);
-          OrderController.removePendingEntryOrder(market, accountId);
-        } else {
-          // Verifica timeout da ordem (10 minutos)
-          const ORDER_TIMEOUT_MINUTES = Number(process.env.ORDER_TIMEOUT_MINUTES || 10);
-          const orderAgeMinutes = (Date.now() - orderData.createdAt) / (1000 * 60);
-          
-          if (orderAgeMinutes >= ORDER_TIMEOUT_MINUTES) {
-            console.log(`⏰ [MONITOR-${accountId}] ${market}: Ordem expirou após ${orderAgeMinutes.toFixed(1)} minutos (limite: ${ORDER_TIMEOUT_MINUTES} min)`);
-            console.log(`🟡 [INFO] ${market}: A ordem com desconto (LIMIT) não foi executada em ${orderAgeMinutes.toFixed(1)} minutos...`);
-            console.log(`[AÇÃO] ${market}: Cancelando e acionando plano B com ordem a MERCADO.`);
-            
-            try {
-              // Cancela apenas ordens de entrada (não reduceOnly)
-              const openOrders = await Order.getOpenOrders(market);
-              const entryOrders = openOrders && openOrders.filter(o => {
-                // IMPORTANTE: Só cancela ordens de ENTRADA (não reduceOnly)
-                const isEntryOrder = !o.reduceOnly;
-                const isLimitOrder = o.orderType === 'Limit';
-                const isCorrectSymbol = o.symbol === market;
-                const isNotStopLoss = !o.stopLossTriggerPrice && !o.stopLossLimitPrice;
-                const isNotTakeProfit = !o.takeProfitTriggerPrice && !o.takeProfitLimitPrice;
-                const isPending = o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled';
-                
-                // Só cancela se for ordem de entrada (não reduceOnly) e não for stop/take profit
-                return isEntryOrder && isLimitOrder && isCorrectSymbol && isNotStopLoss && isNotTakeProfit && isPending;
-              });
-              
-              if (entryOrders && entryOrders.length > 0) {
-                console.log(`🔄 [MONITOR-${accountId}] ${market}: Cancelando ${entryOrders.length} ordem(ns) de entrada antiga(s) (ordens reduceOnly não são afetadas)`);
-                
-                // Cancela todas as ordens de entrada antigas
-                const cancelPromises = entryOrders.map(order => 
-                  Order.cancelOpenOrder(market, order.orderId, order.clientId)
-                );
-                
-                await Promise.all(cancelPromises);
-                console.log(`✅ [MONITOR-${accountId}] ${market}: Ordens antigas canceladas com sucesso`);
-                
-                // Remove do monitoramento
-                OrderController.removePendingEntryOrder(market, accountId);
-              } else {
-                console.log(`ℹ️ [MONITOR-${accountId}] ${market}: Nenhuma ordem encontrada para cancelar`);
-                OrderController.removePendingEntryOrder(market, accountId);
-              }
-            } catch (cancelError) {
-              console.error(`❌ [MONITOR-${accountId}] ${market}: Erro ao cancelar ordens antigas:`, cancelError.message);
-            }
-          } else {
-            // Verifica se a ordem ainda existe (não foi cancelada)
-            try {
-              const openOrders = await Order.getOpenOrders(market);
-              const hasEntryOrder = openOrders && openOrders.some(o => {
-                const isEntryOrder = !o.reduceOnly;
-                const isLimitOrder = o.orderType === 'Limit';
-                const isCorrectSymbol = o.symbol === market;
-                const isNotStopLoss = !o.stopLossTriggerPrice && !o.stopLossLimitPrice;
-                const isNotTakeProfit = !o.takeProfitTriggerPrice && !o.takeProfitLimitPrice;
-                const isPending = o.status === 'Pending' || o.status === 'New' || o.status === 'PartiallyFilled';
-                return isEntryOrder && isLimitOrder && isCorrectSymbol && isNotStopLoss && isNotTakeProfit && isPending;
-              });
-              if (!hasEntryOrder) {
-                OrderController.removePendingEntryOrder(market, accountId);
-              }
-            } catch (orderError) {
-              console.warn(`⚠️ [MONITOR-${accountId}] Falha ao verificar ordens de ${market}, mantendo no monitoramento...`);
-            }
-          }
+          const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
+          OrderController.debug(`📋 [MANUAL_POSITION] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa estimada: $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL: $${pnl.toFixed(6)} (${pnlPct.toFixed(3)}%) | ⚠️ Par não configurado`);
+          continue; // Pula criação de ordens para pares não autorizados
         }
-      }
-      
-    } catch (error) {
-      console.error(`❌ [${accountId}] Erro no monitoramento de ordens pendentes:`, error.message);
-    }
-  }
-
-  /**
-   * Verifica se há posições abertas que não estão sendo monitoradas
-   */
-  static async checkForUnmonitoredPositions(accountId) {
-    try {
-      // Define as variáveis de ambiente corretas baseado no accountId
-      if (accountId === 'CONTA2') {
-        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
-        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
-      } else {
-        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
-        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
-      }
-
-      const positions = await Futures.getOpenPositions() || [];
-      
-      if (positions.length === 0) {
-        return;
-      }
-      // Logar todas as posições abertas (monitoradas ou não)
-      for (const position of positions) {
-        const Account = await AccountController.get();
-        const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+        
         const fee = marketInfo.fee || process.env.FEE || 0.0004;
         const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
         const currentPrice = parseFloat(position.markPrice);
@@ -235,37 +154,48 @@ class OrderController {
         
         // Usa a função calculatePnL do TrailingStop para calcular o PnL corretamente
         const leverage = Account.leverage;
-        const { pnl, pnlPct } = TrailingStop.calculatePnL(position, leverage);
+        const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
         
         const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
-        console.log(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
+        OrderController.debug(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
       }
       
       // Verifica se há posições que não estão sendo monitoradas
-      const accountOrders = OrderController.pendingEntryOrdersByAccount[accountId] || {};
-      const monitoredMarkets = Object.keys(accountOrders);
+      const pendingAccountOrders = OrderController.pendingEntryOrdersByAccount[accountId] || {};
+      const monitoredMarkets = Object.keys(pendingAccountOrders);
       const unmonitoredPositions = positions.filter(pos => !monitoredMarkets.includes(pos.symbol));
       
       if (unmonitoredPositions.length > 0) {
         // Verifica se já foram criados alvos para essas posições (evita loop infinito)
         for (const position of unmonitoredPositions) {
+          // Verifica se o par está autorizado antes de tentar criar ordens
+          const Account = await AccountController.get();
+          const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+          
+          if (!marketInfo) {
+            OrderController.debug(`ℹ️ [MANUAL_POSITION] ${position.symbol}: Par não autorizado - pulando criação de ordens automáticas`);
+            continue; // Pula posições em pares não autorizados
+          }
+          
+          // SEMPRE valida e cria stop loss para todas as posições AUTORIZADAS
+          await OrderController.validateAndCreateStopLoss(position, accountId);
+          
+          // Log de debug para monitoramento
+          OrderController.debug(`🛡️ [MONITOR] ${position.symbol}: Stop loss validado/criado`);
+          
           // Verifica se já existem ordens de take profit para esta posição
           const existingOrders = await Order.getOpenOrders(position.symbol);
           const hasTakeProfitOrders = existingOrders && existingOrders.some(order => 
             order.takeProfitTriggerPrice || order.takeProfitLimitPrice
           );
           
-          if (hasTakeProfitOrders) {
-            // Verifica se já validamos o stop loss desta posição
-            const positionKey = `${accountId}_${position.symbol}`;
-            if (!OrderController.validatedStopLossPositions.has(positionKey)) {
-              // Mesmo com take profits, valida se existe stop loss
-              await OrderController.validateAndCreateStopLoss(position, accountId);
-            }
-            continue;
+          if (!hasTakeProfitOrders) {
+            // Cria take profit orders apenas se não existirem
+            await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
+            OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders criados`);
+          } else {
+            OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders já existem`);
           }
-          
-          await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
         }
       }
       
@@ -732,11 +662,38 @@ class OrderController {
     }
   }
 
-  static async forceClose(position) {
-    const Account = await AccountController.get()
-    const market = Account.markets.find((el) => {
+  static async forceClose(position, account = null) {
+    // Se account não foi fornecido, obtém da API
+    const Account = account || await AccountController.get();
+    
+    // Log detalhado para debug
+    console.log(`🔍 [FORCE_CLOSE] Procurando market para ${position.symbol}`);
+    console.log(`🔍 [FORCE_CLOSE] Total de markets disponíveis: ${Account.markets?.length || 0}`);
+    console.log(`🔍 [FORCE_CLOSE] Markets: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+    
+    let market = Account.markets.find((el) => {
         return el.symbol === position.symbol
     })
+    
+    // Se não encontrou, tenta uma busca case-insensitive
+    if (!market) {
+      const marketCaseInsensitive = Account.markets.find((el) => {
+          return el.symbol.toLowerCase() === position.symbol.toLowerCase()
+      })
+      if (marketCaseInsensitive) {
+        console.log(`⚠️ [FORCE_CLOSE] Market encontrado com case diferente para ${position.symbol}: ${marketCaseInsensitive.symbol}`);
+        market = marketCaseInsensitive;
+      }
+    }
+    
+    // Verifica se o market foi encontrado
+    if (!market) {
+      console.error(`❌ [FORCE_CLOSE] Market não encontrado para ${position.symbol}. Markets disponíveis: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+      throw new Error(`Market não encontrado para ${position.symbol}`);
+    }
+    
+    console.log(`✅ [FORCE_CLOSE] Market encontrado para ${position.symbol}: decimal_quantity=${market.decimal_quantity}`);
+    
     const isLong = parseFloat(position.netQuantity) > 0;
     const quantity = Math.abs(parseFloat(position.netQuantity));
     const decimal = market.decimal_quantity
@@ -760,9 +717,30 @@ class OrderController {
     const exitFee = exitValue * fee;
     console.log(`[LOG][FEE] Fechamento: ${position.symbol} | Valor: $${exitValue.toFixed(2)} | Fee saída: $${exitFee.toFixed(6)} (${(fee * 100).toFixed(4)}%)`);
     // Cancela ordens pendentes para este símbolo
-    if (closeResult) {
-      await this.cancelPendingOrders(position.symbol);
-    }
+            if (closeResult) {
+          await this.cancelPendingOrders(position.symbol);
+          // Cancela ordens de segurança (failsafe)
+          await OrderController.cancelFailsafeOrders(position.symbol, 'DEFAULT');
+          
+          // Limpa o estado do trailing stop após fechar a posição
+          try {
+            const TrailingStop = (await import('../TrailingStop/TrailingStop.js')).default;
+            TrailingStop.clearTrailingState(position.symbol);
+          } catch (error) {
+            console.error(`[FORCE_CLOSE] Erro ao limpar trailing state para ${position.symbol}:`, error.message);
+          }
+          
+          // Limpeza automática de ordens órfãs para este símbolo
+          try {
+            console.log(`🧹 [FORCE_CLOSE] ${position.symbol}: Verificando ordens órfãs após fechamento...`);
+            const orphanResult = await OrderController.monitorAndCleanupOrphanedStopLoss('DEFAULT');
+            if (orphanResult.orphaned > 0) {
+              console.log(`🧹 [FORCE_CLOSE] ${position.symbol}: ${orphanResult.orphaned} ordens órfãs limpas após fechamento`);
+            }
+          } catch (error) {
+            console.error(`[FORCE_CLOSE] Erro ao limpar ordens órfãs para ${position.symbol}:`, error.message);
+          }
+        }
 
     return closeResult;
   }
@@ -773,12 +751,19 @@ class OrderController {
    * @param {number} partialPercentage - Porcentagem da posição para realizar
    * @returns {boolean} - Sucesso da operação
    */
-  static async takePartialProfit(position, partialPercentage = 50) {
+  static async takePartialProfit(position, partialPercentage = 50, account = null) {
     try {
-      const Account = await AccountController.get()
+      // Se account não foi fornecido, obtém da API
+      const Account = account || await AccountController.get();
       const market = Account.markets.find((el) => {
           return el.symbol === position.symbol
       })
+      
+      // Verifica se o market foi encontrado
+      if (!market) {
+        console.error(`❌ [TAKE_PARTIAL] Market não encontrado para ${position.symbol}. Markets disponíveis: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+        throw new Error(`Market não encontrado para ${position.symbol}`);
+      }
       
       const isLong = parseFloat(position.netQuantity) > 0;
       const totalQuantity = Math.abs(parseFloat(position.netQuantity));
@@ -798,6 +783,16 @@ class OrderController {
       const partialResult = await Order.executeOrder(body);
       
       if (partialResult) {
+        // Se o take profit parcial fechou toda a posição, limpa o trailing state
+        const remainingQuantity = totalQuantity - partialQuantity;
+        if (remainingQuantity <= 0) {
+          try {
+            const TrailingStop = (await import('../TrailingStop/TrailingStop.js')).default;
+            TrailingStop.clearTrailingState(position.symbol);
+          } catch (error) {
+            console.error(`[TAKE_PARTIAL] Erro ao limpar trailing state para ${position.symbol}:`, error.message);
+          }
+        }
         return true;
       } else {
         return false;
@@ -865,12 +860,18 @@ class OrderController {
       };
 
       // Reanalisa o trade com dados atualizados
-      const decision = await strategy.analyzeTrade({
-        symbol: market,
-        currentPrice: currentPrice,
-        indicators: data,
-        config: originalSignalData.config || {}
-      });
+      const fee = marketInfo.fee || process.env.FEE || 0.0004;
+      const investmentUSD = parseFloat(process.env.INVESTMENT_USD || 5);
+      const media_rsi = parseFloat(process.env.MEDIA_RSI || 50);
+      
+      const decision = await strategy.analyzeTrade(
+        fee,
+        data,
+        investmentUSD,
+        media_rsi,
+        originalSignalData.config || {},
+        'NEUTRAL' // btcTrend - assume neutro para revalidação
+      );
 
       // Verifica se o sinal ainda é válido
       const isStillValid = decision && decision.action && decision.action === originalSignalData.action;
@@ -906,6 +907,22 @@ class OrderController {
       console.log(`\n🚀 [${accountId}] ${market}: Iniciando execução híbrida`);
       console.log(`📊 [${accountId}] ${market}: Preço de entrada: $${entryPrice.toFixed(6)} | Quantidade: ${quantity} | Valor: $${orderValue.toFixed(2)}`);
       
+      // Calcula preços de stop loss e take profit
+      const stopPrice = parseFloat(stop);
+      const targetPrice = parseFloat(target);
+      
+      // Verifica se o Trailing Stop está habilitado para determinar se deve criar Take Profit fixo
+      const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
+      
+      console.log(`🛡️ [${accountId}] ${market}: Configurando ordens de segurança integradas`);
+      console.log(`   • Stop Loss: $${stopPrice.toFixed(6)}`);
+      
+      if (enableTrailingStop) {
+        console.log(`   • Take Profit: Será gerenciado dinamicamente pelo Trailing Stop`);
+      } else {
+        console.log(`   • Take Profit: $${targetPrice.toFixed(6)} (fixo na corretora)`);
+      }
+      
       const body = {
         symbol: market,
         side,
@@ -913,10 +930,21 @@ class OrderController {
         postOnly: true,
         quantity,
         price: finalPrice,
+        // Parâmetros de stop loss integrados (sempre criados)
+        stopLossTriggerBy: "LastPrice",
+        stopLossTriggerPrice: formatPrice(stopPrice),
+        stopLossLimitPrice: formatPrice(stopPrice),
         timeInForce: "GTC",
         selfTradePrevention: "RejectTaker",
         clientId: Math.floor(Math.random() * 1000000)
       };
+      
+      // Adiciona parâmetros de take profit APENAS se o Trailing Stop estiver desabilitado
+      if (!enableTrailingStop) {
+        body.takeProfitTriggerBy = "LastPrice";
+        body.takeProfitTriggerPrice = formatPrice(targetPrice);
+        body.takeProfitLimitPrice = formatPrice(targetPrice);
+      }
       
       // 1. Envia ordem LIMIT (post-only)
       console.log(`🟡 [${accountId}] ${market}: Enviando ordem LIMIT (post-only) para minimizar taxas...`);
@@ -1001,6 +1029,8 @@ class OrderController {
       
       if (filled) {
         console.log(`✅ [SUCESSO] ${market}: Ordem LIMIT executada normalmente em ${timeoutSec} segundos.`);
+        console.log(`🛡️ [SUCESSO] ${market}: Ordens de segurança (SL/TP) já configuradas na ordem principal!`);
+        
         return { success: true, type: 'LIMIT', limitResult };
       }
       
@@ -1082,6 +1112,7 @@ class OrderController {
         
         console.log(`✅ [SUCESSO] ${market}: Operação aberta com sucesso via fallback a MERCADO!`);
         console.log(`📊 [${accountId}] ${market}: Preço de execução: $${executionPrice.toFixed(6)} | Slippage: ${slippage.toFixed(3)}%`);
+        console.log(`⚠️ [AVISO] ${market}: Ordem a MERCADO não inclui SL/TP automático. Considere usar ordem LIMIT para proteção automática.`);
         
         // Estatística de fallback
         if (OrderController.totalHybridOrders % 50 === 0) {
@@ -1293,144 +1324,112 @@ class OrderController {
    * @returns {boolean} - True se stop loss foi criado ou já existia
    */
   static async validateAndCreateStopLoss(position, accountId) {
-    
+    const symbol = position.symbol;
+
+    // 1. VERIFICA O LOCK
+    if (OrderController.stopLossCreationInProgress.has(symbol)) {
+      return false;
+    }
+
     try {
-      // Define as variáveis de ambiente corretas baseado no accountId
-      if (accountId === 'CONTA2') {
-        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
-        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
-      } else {
-        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
-        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
-      }
+      // 2. ADQUIRE O LOCK
+      OrderController.stopLossCreationInProgress.add(symbol);
 
-      // Verifica se já existe stop loss para esta posição
-      const existingOrders = await Order.getOpenOrders(position.symbol);
-      
-      const hasStopLoss = existingOrders && existingOrders.some(order => 
-        order.status === 'TriggerPending' && order.reduceOnly
-      );
-
-      if (hasStopLoss) {
-        // Se já validamos esta posição, não loga novamente
-        const positionKey = `${accountId}_${position.symbol}`;
-        if (!OrderController.validatedStopLossPositions.has(positionKey)) {
-          console.log(`ℹ️ [${accountId}] ${position.symbol}: Stop loss já existe`);
-          OrderController.validatedStopLossPositions.add(positionKey);
-        }
-        return true;
-      }
-
-      console.log(`⚠️ [${accountId}] ${position.symbol}: Stop loss não encontrado, criando...`);
-
-      // Busca informações do mercado
+      // Verifica se o par está autorizado antes de tentar criar stop loss
       const Account = await AccountController.get();
       const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
       if (!marketInfo) {
-        console.error(`❌ [${accountId}] Market info não encontrada para ${position.symbol}`);
+        // Par não autorizado - retorna silenciosamente sem tentar criar stop loss
+        OrderController.debug(`ℹ️ [${accountId}] ${position.symbol}: Par não autorizado - pulando criação de stop loss`);
         return false;
       }
 
-      const decimal_quantity = marketInfo.decimal_quantity;
-      const decimal_price = marketInfo.decimal_price;
+      // Verifica se já existe uma ordem de stop loss para esta posição
+      const hasStopLossOrders = await OrderController.hasExistingStopLoss(position.symbol, position);
 
-      // Preço real de entrada
-      const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
-      const isLong = parseFloat(position.netQuantity) > 0;
-      const totalQuantity = Math.abs(Number(position.netQuantity));
-
-      // Calcula stop loss usando a estratégia apropriada
-      const strategyName = accountId === 'CONTA2' ? 'PRO_MAX' : 'DEFAULT';
-      const { ProMaxStrategy, DefaultStrategy } = await import('../Decision/Strategies/ProMaxStrategy.js');
-      const strategy = strategyName === 'PRO_MAX' ? new ProMaxStrategy() : new DefaultStrategy();
-
-      // Usa timeframe padrão
-      const timeframe = process.env.TIME || '5m';
-      const candles = await Markets.getKLines(position.symbol, timeframe, 30);
-      const { calculateIndicators } = await import('../Decision/Indicators.js');
-      const indicators = calculateIndicators(candles);
-      const data = { ...indicators, market: marketInfo, marketPrice: entryPrice };
-      const action = isLong ? 'long' : 'short';
-
-      let stop;
-      if (strategyName === 'PRO_MAX') {
-        const stopAndTargets = strategy.calculateStopAndMultipleTargets(data, entryPrice, action);
-        if (stopAndTargets && stopAndTargets.stop) {
-          stop = stopAndTargets.stop;
-        }
-      } else {
-        const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong);
-        if (stopAndTarget && stopAndTarget.stop) {
-          stop = stopAndTarget.stop;
-        }
-      }
-
-      // Se não conseguiu calcular o stop, força o cálculo do ATR e recalcula
-      if (!stop || isNaN(parseFloat(stop))) {
-        console.log(`⚠️ [${accountId}] ${position.symbol}: ATR não disponível, calculando manualmente...`);
-        
-        // Calcula ATR manualmente se não estiver disponível
-        if (!data.atr || !data.atr.atr || data.atr.atr <= 0) {
-          const atrValue = this.calculateATR(candles, 14); // ATR de 14 períodos
-          if (atrValue && atrValue > 0) {
-            data.atr = { atr: atrValue };
-            console.log(`📊 [${accountId}] ${position.symbol}: ATR calculado: ${atrValue.toFixed(6)}`);
-            
-            // Recalcula o stop loss com o ATR calculado
-            if (strategyName === 'PRO_MAX') {
-              const stopAndTargets = strategy.calculateStopAndMultipleTargets(data, entryPrice, action);
-              if (stopAndTargets && stopAndTargets.stop) {
-                stop = stopAndTargets.stop;
-              }
-            } else {
-              const stopAndTarget = strategy.calculateStopAndTarget(data, entryPrice, isLong);
-              if (stopAndTarget && stopAndTarget.stop) {
-                stop = stopAndTarget.stop;
-              }
-            }
-          }
-        }
-      }
-
-      // Se ainda não conseguiu calcular, erro crítico
-      if (!stop || isNaN(parseFloat(stop))) {
-        console.error(`❌ [${accountId}] ${position.symbol}: Falha crítica ao calcular stop loss. ATR e fallback não disponíveis.`);
-        return false;
-      }
-
-      // Cria a ordem de stop loss simples com reduceOnly
-      const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
-      const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
-      
-      // Ordem simples de limite com reduceOnly para fechar a posição no stop loss
-      const stopBody = {
-        symbol: position.symbol,
-        side: isLong ? 'Ask' : 'Bid', // Para LONG, vende (Ask) para fechar. Para SHORT, compra (Bid) para fechar
-        orderType: 'Limit',
-        postOnly: true,
-        reduceOnly: true,
-        quantity: formatQuantity(totalQuantity),
-        price: formatPrice(stop),
-        timeInForce: 'GTC',
-        clientId: Math.floor(Math.random() * 1000000) + 9999
-      };
-
-      const stopResult = await Order.executeOrder(stopBody);
-      
-      if (stopResult && !stopResult.error) {
-        console.log(`✅ [${accountId}] ${position.symbol}: Stop loss criado - Preço: ${stop.toFixed(6)}, Quantidade: ${totalQuantity}`);
-        // Adiciona ao cache de posições validadas
-        const positionKey = `${accountId}_${position.symbol}`;
-        OrderController.validatedStopLossPositions.add(positionKey);
+      if (hasStopLossOrders) {
         return true;
-      } else {
-        console.log(`⚠️ [${accountId}] ${position.symbol}: Não foi possível criar stop loss. Motivo: ${stopResult && stopResult.error ? stopResult.error : 'desconhecido'}`);
+      }
+
+      // Verifica se a posição tem quantidade suficiente
+      const totalQuantity = Math.abs(parseFloat(position.netQuantity));
+      if (totalQuantity <= 0) {
+        console.log(`⚠️ [${accountId}] ${position.symbol}: Quantidade inválida para stop loss: ${totalQuantity}`);
+        return false;
+      }
+
+      // Obtém informações do mercado
+      const { decimal_price, decimal_quantity } = marketInfo;
+
+      // Determina se é LONG ou SHORT
+      const isLong = parseFloat(position.netQuantity) > 0;
+
+      // Calcula o preço de stop loss baseado na porcentagem definida
+      const currentPrice = parseFloat(position.markPrice || position.lastPrice);
+      const entryPrice = parseFloat(position.entryPrice || 0);
+      
+      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
+      if (!Account.leverage) {
+        console.error(`❌ [STOP_LOSS_ERROR] ${position.symbol}: Alavancagem não encontrada na Account`);
+        return false;
+      }
+      
+      const rawLeverage = Account.leverage;
+      
+      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
+      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      
+      const baseStopLossPct = Math.abs(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
+      
+      // Calcula a porcentagem real considerando a alavancagem validada
+      // Se leverage = 10x e stop loss = 10%, então o preço deve mover apenas 1%
+      const actualStopLossPct = baseStopLossPct / leverage;
+      
+      const stopLossPrice = isLong 
+        ? entryPrice * (1 - actualStopLossPct / 100)  
+        : entryPrice * (1 + actualStopLossPct / 100); 
+
+      try {
+        const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+        const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+        
+        const stopBody = {
+          symbol: position.symbol,
+          side: isLong ? 'Ask' : 'Bid', 
+          orderType: 'Market', 
+          reduceOnly: true, 
+          quantity: formatQuantity(totalQuantity),
+          triggerPrice: formatPrice(stopLossPrice), 
+          triggerQuantity: formatQuantity(totalQuantity), 
+          timeInForce: 'GTC',
+          clientId: Math.floor(Math.random() * 1000000) + 9999
+        };
+
+        console.log(`🔄 [${accountId}] ${position.symbol}: Criando stop loss - Trigger Price: $${stopLossPrice.toFixed(6)}`);
+        
+        const stopResult = await Order.executeOrder(stopBody);
+        
+        if (stopResult && !stopResult.error) {
+          console.log(`✅ [${accountId}] ${position.symbol}: Stop loss criado com sucesso! - Trigger: $${stopLossPrice.toFixed(6)}, Quantidade: ${totalQuantity}`);
+          const positionKey = `${accountId}_${position.symbol}`;
+          OrderController.validatedStopLossPositions.add(positionKey);
+          OrderController.clearStopLossCheckCache(position.symbol);
+          return true;
+        } else {
+          const errorMsg = stopResult && stopResult.error ? stopResult.error : 'desconhecido';
+          console.log(`❌ [${accountId}] ${position.symbol}: Falha ao criar stop loss - Erro: ${errorMsg}`);
+          return false;
+        }
+      } catch (error) {
+        console.log(`❌ [${accountId}] ${position.symbol}: Erro ao criar stop loss: ${error.message}`);
         return false;
       }
 
     } catch (error) {
       console.error(`❌ [${accountId}] Erro ao validar/criar stop loss para ${position.symbol}:`, error.message);
       return false;
+    } finally {
+      OrderController.stopLossCreationInProgress.delete(symbol);
     }
   }
 
@@ -1528,27 +1527,783 @@ class OrderController {
     }
   }
 
-}
+  /**
+   * Cria ordens de segurança (failsafe) para uma posição recém-aberta
+   * Implementa cálculo correto considerando alavancagem
+   * @param {object} position - Dados da posição
+   * @param {string} accountId - ID da conta
+   * @returns {object} - Resultado da criação das ordens
+   */
+  static async createFailsafeOrders(position, accountId = 'DEFAULT') {
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
 
-// Função utilitária para decidir fechamento seguro
-function shouldCloseByProfitOrFees(entryPrice, currentPrice, quantity, fee, minProfitPct) {
-  const entryValue = entryPrice * quantity;
-  const currentValue = currentPrice * quantity;
-  let pnl = currentValue - entryValue;
-  const entryFee = entryValue * fee;
-  const exitFee = currentValue * fee;
-  const totalFees = entryFee + exitFee;
-  const netProfit = pnl - totalFees;
-  const netProfitPct = entryValue > 0 ? (netProfit / entryValue) * 100 : 0;
-  if (minProfitPct === 0) {
-    // Só fecha se lucro líquido >= taxas totais
-    return netProfit > 0 && netProfit >= totalFees;
-  } else {
-    // Fecha se lucro percentual >= mínimo configurado
-    return netProfit > 0 && netProfitPct >= minProfitPct;
+      // Busca informações do mercado
+      const Account = await AccountController.get();
+      const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+      if (!marketInfo) {
+        console.error(`❌ [FAILSAFE] Market info não encontrada para ${position.symbol}`);
+        return { error: 'Market info não encontrada' };
+      }
+
+      // VERIFICAÇÃO ADICIONAL: Verifica se já existe stop loss antes de criar
+      const hasStopLossOrders = await OrderController.hasExistingStopLoss(position.symbol, position);
+
+      if (hasStopLossOrders) {
+        console.log(`✅ [FAILSAFE] ${position.symbol}: Stop loss já existe, pulando criação de failsafe orders`);
+        return { success: true, message: 'Stop loss já existe' };
+      }
+
+      const decimal_quantity = marketInfo.decimal_quantity;
+      const decimal_price = marketInfo.decimal_price;
+
+      // 1. Obter os dados necessários da posição e da configuração
+      const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+      const leverage = parseFloat(position.leverage || Account.leverage || 20); // Fallback para 20x se não disponível
+      const targetProfitPct = parseFloat(process.env.MIN_PROFIT_PERCENTAGE || 0.5); // ex: 0.5
+      const stopLossPct = Math.abs(parseFloat(process.env.MAX_NEGATIVE_PNL_STOP_PCT || 4.0)); // ex: 4.0 (usa valor absoluto)
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const totalQuantity = Math.abs(Number(position.netQuantity));
+
+      // Debug das variáveis de ambiente
+      console.log(`🔍 [FAILSAFE_VARS] ${position.symbol}: Variáveis de configuração`);
+      console.log(`   • MIN_PROFIT_PERCENTAGE: ${process.env.MIN_PROFIT_PERCENTAGE || 'não definido'} -> ${targetProfitPct}%`);
+      console.log(`   • MAX_NEGATIVE_PNL_STOP_PCT: ${process.env.MAX_NEGATIVE_PNL_STOP_PCT || 'não definido'} -> ${stopLossPct}%`);
+      console.log(`   • Leverage: ${leverage}x`);
+
+      // 2. Calcular os preços de gatilho considerando alavancagem
+      let takeProfitPrice;
+      let stopLossPrice;
+
+      if (isLong) { // Se a posição for de COMPRA (LONG)
+        // O lucro acontece quando o preço sobe
+        takeProfitPrice = entryPrice * (1 + (targetProfitPct / 100) / leverage);
+        // A perda acontece quando o preço cai
+        stopLossPrice = entryPrice * (1 - (stopLossPct / 100) / leverage);
+      } else { // Se a posição for de VENDA (SHORT)
+        // O lucro acontece quando o preço cai (take profit abaixo do preço de entrada)
+        takeProfitPrice = entryPrice * (1 - (targetProfitPct / 100) / leverage);
+        // A perda acontece quando o preço sobe (stop loss acima do preço de entrada)
+        stopLossPrice = entryPrice * (1 + (stopLossPct / 100) / leverage);
+      }
+
+      // Log adicional para debug da lógica
+      console.log(`🔍 [FAILSAFE_LOGIC] ${position.symbol}: Lógica de cálculo`);
+      console.log(`   • Posição: ${isLong ? 'LONG' : 'SHORT'} (quantidade: ${position.netQuantity})`);
+      console.log(`   • Para ${isLong ? 'LONG' : 'SHORT'}: TP ${isLong ? 'acima' : 'abaixo'} do preço, SL ${isLong ? 'abaixo' : 'acima'} do preço`);
+
+      // 3. Logar os preços calculados para verificação
+      console.log(`🛡️ [FAILSAFE_CALC] ${position.symbol}: Entry=${entryPrice.toFixed(6)}, Leverage=${leverage}x`);
+      console.log(`  -> TP Target: ${targetProfitPct}% -> Preço Alvo: $${takeProfitPrice.toFixed(6)}`);
+      console.log(`  -> SL Target: ${stopLossPct}% -> Preço Alvo: $${stopLossPrice.toFixed(6)}`);
+
+      // Valida se os preços são válidos
+      if (stopLossPrice <= 0 || takeProfitPrice <= 0) {
+        console.error(`❌ [FAILSAFE] ${position.symbol}: Preços calculados inválidos - SL: ${stopLossPrice}, TP: ${takeProfitPrice}`);
+        return { error: 'Preços calculados inválidos' };
+      }
+
+      // Valida distância mínima dos preços (0.1% do preço de entrada)
+      const minDistance = entryPrice * 0.001; // 0.1%
+      const currentPrice = parseFloat(position.markPrice || entryPrice);
+      
+      console.log(`🔍 [FAILSAFE_DEBUG] ${position.symbol}: Validando distâncias mínimas`);
+      console.log(`   • Preço atual: $${currentPrice.toFixed(6)}`);
+      console.log(`   • Distância mínima: $${minDistance.toFixed(6)}`);
+      
+      const slDistance = Math.abs(stopLossPrice - currentPrice);
+      const tpDistance = Math.abs(takeProfitPrice - currentPrice);
+      
+      console.log(`   • Distância SL: $${slDistance.toFixed(6)} (${slDistance < minDistance ? 'MUITO PRÓXIMO' : 'OK'})`);
+      console.log(`   • Distância TP: $${tpDistance.toFixed(6)} (${tpDistance < minDistance ? 'MUITO PRÓXIMO' : 'OK'})`);
+      
+      if (slDistance < minDistance) {
+        console.warn(`⚠️ [FAILSAFE] ${position.symbol}: Stop Loss muito próximo do preço atual (${slDistance.toFixed(6)} < ${minDistance.toFixed(6)})`);
+        const newStopLossPrice = currentPrice + (isLong ? -minDistance : minDistance);
+        console.warn(`   • Ajustando Stop Loss de ${stopLossPrice.toFixed(6)} para ${newStopLossPrice.toFixed(6)}`);
+        stopLossPrice = newStopLossPrice;
+      }
+      
+      if (tpDistance < minDistance) {
+        console.warn(`⚠️ [FAILSAFE] ${position.symbol}: Take Profit muito próximo do preço atual (${tpDistance.toFixed(6)} < ${minDistance.toFixed(6)})`);
+        const newTakeProfitPrice = currentPrice + (isLong ? minDistance : -minDistance);
+        console.warn(`   • Ajustando Take Profit de ${takeProfitPrice.toFixed(6)} para ${newTakeProfitPrice.toFixed(6)}`);
+        takeProfitPrice = newTakeProfitPrice;
+      }
+
+      // Funções de formatação
+      const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+      const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+
+      // Verifica se o Trailing Stop está habilitado para determinar se deve criar Take Profit fixo
+      const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
+      
+      console.log(`🛡️ [FAILSAFE] ${position.symbol}: Criando ordens de segurança`);
+      console.log(`   • Preço de entrada: $${entryPrice.toFixed(6)}`);
+      console.log(`   • Stop Loss: $${stopLossPrice.toFixed(6)} (${stopLossPct}% com ${leverage}x leverage)`);
+      
+      if (enableTrailingStop) {
+        console.log(`   • Take Profit: Será gerenciado dinamicamente pelo Trailing Stop`);
+      } else {
+        console.log(`   • Take Profit: $${takeProfitPrice.toFixed(6)} (${targetProfitPct}% com ${leverage}x leverage)`);
+      }
+      console.log(`   • Quantidade: ${totalQuantity}`);
+
+      // 4. Cria ordem de Stop Loss (STOP_MARKET com reduceOnly) - SEMPRE criada
+      const stopLossBody = {
+        symbol: position.symbol,
+        side: isLong ? 'Ask' : 'Bid', // Para LONG, vende (Ask) para fechar. Para SHORT, compra (Bid) para fechar
+        orderType: 'Limit',
+        reduceOnly: true,
+        quantity: formatQuantity(totalQuantity),
+        price: formatPrice(stopLossPrice),
+        stopLossTriggerBy: 'LastPrice',
+        stopLossTriggerPrice: formatPrice(stopLossPrice),
+        stopLossLimitPrice: formatPrice(stopLossPrice),
+        timeInForce: 'GTC',
+        selfTradePrevention: 'RejectTaker',
+        clientId: Math.floor(Math.random() * 1000000) + 1001
+      };
+
+      // 5. Cria ordem de Take Profit APENAS se o Trailing Stop estiver desabilitado
+      let takeProfitBody = null;
+      if (!enableTrailingStop) {
+        takeProfitBody = {
+          symbol: position.symbol,
+          side: isLong ? 'Ask' : 'Bid', // Para LONG, vende (Ask) para fechar. Para SHORT, compra (Bid) para fechar
+          orderType: 'Limit',
+          reduceOnly: true,
+          quantity: formatQuantity(totalQuantity),
+          price: formatPrice(takeProfitPrice),
+          takeProfitTriggerBy: 'LastPrice',
+          takeProfitTriggerPrice: formatPrice(takeProfitPrice),
+          takeProfitLimitPrice: formatPrice(takeProfitPrice),
+          timeInForce: 'GTC',
+          selfTradePrevention: 'RejectTaker',
+          clientId: Math.floor(Math.random() * 1000000) + 1002
+        };
+      }
+
+      // 6. Envia ordens para a corretora
+      const stopLossResult = await Order.executeOrder(stopLossBody);
+      let takeProfitResult = null;
+      
+      if (takeProfitBody) {
+        takeProfitResult = await Order.executeOrder(takeProfitBody);
+      }
+
+      // 7. Verifica resultados
+      let successCount = 0;
+      let errorMessages = [];
+
+      if (stopLossResult && !stopLossResult.error) {
+        console.log(`✅ [FAILSAFE] ${position.symbol}: Stop Loss criado - OrderID: ${stopLossResult.orderId || 'N/A'}`);
+        successCount++;
+      } else {
+        const error = stopLossResult?.error || 'desconhecido';
+        console.log(`❌ [FAILSAFE] ${position.symbol}: Stop Loss FALHOU - Motivo: ${error}`);
+        errorMessages.push(`Stop Loss: ${error}`);
+      }
+
+      if (enableTrailingStop) {
+        // Se o Trailing Stop está ativo, não criamos Take Profit fixo
+        console.log(`ℹ️ [FAILSAFE] ${position.symbol}: Take Profit será gerenciado dinamicamente pelo Trailing Stop`);
+      } else if (takeProfitResult && !takeProfitResult.error) {
+        console.log(`✅ [FAILSAFE] ${position.symbol}: Take Profit criado - OrderID: ${takeProfitResult.orderId || 'N/A'}`);
+        successCount++;
+      } else if (takeProfitResult && takeProfitResult.error) {
+        const error = takeProfitResult.error || 'desconhecido';
+        console.log(`❌ [FAILSAFE] ${position.symbol}: Take Profit FALHOU - Motivo: ${error}`);
+        errorMessages.push(`Take Profit: ${error}`);
+      }
+
+      // 8. Log final
+      if (enableTrailingStop) {
+        // Quando Trailing Stop está ativo, só precisamos do Stop Loss
+        if (successCount === 1) {
+          console.log(`🛡️ [FAILSAFE] ${position.symbol}: Ordem de segurança criada com sucesso!`);
+          console.log(`   • Stop Loss em $${stopLossPrice.toFixed(6)}`);
+          console.log(`   • Take Profit será gerenciado dinamicamente pelo Trailing Stop`);
+          return { success: true, stopLossResult, takeProfitResult: null };
+        } else {
+          console.log(`❌ [FAILSAFE] ${position.symbol}: Falha ao criar Stop Loss`);
+          return { error: errorMessages.join(', ') };
+        }
+      } else {
+        // Quando Trailing Stop está desabilitado, precisamos de ambas as ordens
+        if (successCount === 2) {
+          console.log(`🛡️ [FAILSAFE] ${position.symbol}: Ordens de segurança criadas com sucesso!`);
+          console.log(`   • Stop Loss em $${stopLossPrice.toFixed(6)}`);
+          console.log(`   • Take Profit em $${takeProfitPrice.toFixed(6)}`);
+          return { success: true, stopLossResult, takeProfitResult };
+        } else if (successCount === 1) {
+          console.log(`⚠️ [FAILSAFE] ${position.symbol}: Apenas uma ordem de segurança foi criada`);
+          return { partial: true, stopLossResult, takeProfitResult, errors: errorMessages };
+        } else {
+          console.log(`❌ [FAILSAFE] ${position.symbol}: Falha ao criar ordens de segurança`);
+          return { error: errorMessages.join(', ') };
+        }
+      }
+
+    } catch (error) {
+      console.error(`❌ [FAILSAFE] Erro ao criar ordens de segurança para ${position.symbol}:`, error.message);
+      return { error: error.message };
+    }
   }
+
+  /**
+   * Detecta quando uma posição foi aberta e cria ordens de segurança
+   * @param {string} market - Símbolo do mercado
+   * @param {string} accountId - ID da conta
+   * @param {object} orderResult - Resultado da ordem de entrada
+   * @returns {object} - Resultado da criação das ordens de segurança
+   */
+  static async detectPositionOpenedAndCreateFailsafe(market, accountId, orderResult) {
+    try {
+      // Aguarda um momento para a posição ser registrada
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Busca posições abertas
+      const positions = await Futures.getOpenPositions();
+      const position = positions?.find(p => p.symbol === market && Math.abs(Number(p.netQuantity)) > 0);
+
+      if (!position) {
+        console.log(`⚠️ [FAILSAFE] ${market}: Posição não encontrada após abertura`);
+        return { error: 'Posição não encontrada' };
+      }
+
+      console.log(`🎯 [FAILSAFE] ${market}: Posição detectada, criando ordens de segurança...`);
+      
+      // Cria ordens de segurança
+      const failsafeResult = await OrderController.createFailsafeOrders(position, accountId);
+      
+      if (failsafeResult.success) {
+        console.log(`🛡️ [FAILSAFE] ${market}: Rede de segurança ativada com sucesso!`);
+      } else if (failsafeResult.partial) {
+        console.log(`⚠️ [FAILSAFE] ${market}: Rede de segurança parcialmente ativada`);
+      } else {
+        console.log(`❌ [FAILSAFE] ${market}: Falha ao ativar rede de segurança`);
+      }
+
+      return failsafeResult;
+
+    } catch (error) {
+      console.error(`❌ [FAILSAFE] Erro ao detectar posição aberta para ${market}:`, error.message);
+      return { error: error.message };
+    }
+  }
+
+  /**
+   * Cancela ordens de segurança (failsafe) para um símbolo
+   * @param {string} symbol - Símbolo do mercado
+   * @param {string} accountId - ID da conta
+   * @returns {boolean} - True se as ordens foram canceladas com sucesso
+   */
+  static async cancelFailsafeOrders(symbol, accountId = 'DEFAULT') {
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      // Busca ordens abertas para o símbolo
+      const openOrders = await Order.getOpenOrders(symbol);
+      
+      if (!openOrders || openOrders.length === 0) {
+        return true;
+      }
+
+      // Filtra apenas ordens de segurança (stop loss e take profit com reduceOnly)
+      const failsafeOrders = openOrders.filter(order => {
+        const isReduceOnly = order.reduceOnly;
+        const hasStopLoss = order.stopLossTriggerPrice || order.stopLossLimitPrice;
+        const hasTakeProfit = order.takeProfitTriggerPrice || order.takeProfitLimitPrice;
+        const isPending = order.status === 'Pending' || order.status === 'New' || order.status === 'PartiallyFilled' || order.status === 'TriggerPending';
+        
+        return isReduceOnly && (hasStopLoss || hasTakeProfit) && isPending;
+      });
+
+      if (failsafeOrders.length === 0) {
+        console.log(`ℹ️ [FAILSAFE] ${symbol}: Nenhuma ordem de segurança encontrada para cancelar`);
+        return true;
+      }
+
+      console.log(`🛡️ [FAILSAFE] ${symbol}: Cancelando ${failsafeOrders.length} ordem(ns) de segurança...`);
+
+      // Cancela todas as ordens de segurança
+      const cancelPromises = failsafeOrders.map(order => 
+        Order.cancelOpenOrder(symbol, order.orderId, order.clientId)
+      );
+      
+      const cancelResults = await Promise.all(cancelPromises);
+      const successfulCancels = cancelResults.filter(result => result !== null).length;
+      
+      if (successfulCancels > 0) {
+        console.log(`✅ [FAILSAFE] ${symbol}: ${successfulCancels} ordem(ns) de segurança cancelada(s) com sucesso`);
+        return true;
+      } else {
+        console.log(`❌ [FAILSAFE] ${symbol}: Falha ao cancelar ordens de segurança`);
+        return false;
+      }
+
+    } catch (error) {
+      console.error(`❌ [FAILSAFE] Erro ao cancelar ordens de segurança para ${symbol}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Verifica se existem ordens de segurança ativas para um símbolo
+   * @param {string} symbol - Símbolo do mercado
+   * @param {string} accountId - ID da conta
+   * @returns {object} - { hasStopLoss: boolean, hasTakeProfit: boolean, orders: array }
+   */
+  static async checkFailsafeOrders(symbol, accountId = 'DEFAULT') {
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      // Busca ordens abertas para o símbolo
+      const openOrders = await Order.getOpenOrders(symbol);
+      
+      if (!openOrders || openOrders.length === 0) {
+        return { hasStopLoss: false, hasTakeProfit: false, orders: [] };
+      }
+
+      // Filtra ordens de segurança
+      const failsafeOrders = openOrders.filter(order => {
+        const isReduceOnly = order.reduceOnly;
+        const hasStopLoss = order.stopLossTriggerPrice || order.stopLossLimitPrice;
+        const hasTakeProfit = order.takeProfitTriggerPrice || order.takeProfitLimitPrice;
+        const isPending = order.status === 'Pending' || order.status === 'New' || order.status === 'PartiallyFilled' || order.status === 'TriggerPending';
+        
+        return isReduceOnly && (hasStopLoss || hasTakeProfit) && isPending;
+      });
+
+      const hasStopLoss = failsafeOrders.some(order => order.stopLossTriggerPrice || order.stopLossLimitPrice);
+      const hasTakeProfit = failsafeOrders.some(order => order.takeProfitTriggerPrice || order.takeProfitLimitPrice);
+
+      return { hasStopLoss, hasTakeProfit, orders: failsafeOrders };
+
+    } catch (error) {
+      console.error(`❌ [FAILSAFE] Erro ao verificar ordens de segurança para ${symbol}:`, error.message);
+      return { hasStopLoss: false, hasTakeProfit: false, orders: [] };
+    }
+  }
+
+  /**
+   * Monitora e recria ordens de segurança se necessário
+   * @param {string} accountId - ID da conta
+   * @returns {object} - Resultado do monitoramento
+   */
+  static async monitorAndRecreateFailsafeOrders(accountId = 'DEFAULT') {
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      // Busca posições abertas
+      const positions = await Futures.getOpenPositions();
+      
+      if (!positions || positions.length === 0) {
+        return { checked: 0, recreated: 0 };
+      }
+
+      let checked = 0;
+      let recreated = 0;
+
+      for (const position of positions) {
+        if (Math.abs(Number(position.netQuantity)) === 0) continue;
+
+        checked++;
+        const symbol = position.symbol;
+
+        // Verifica se existem ordens de segurança
+        const failsafeStatus = await OrderController.checkFailsafeOrders(symbol, accountId);
+        
+        // VERIFICAÇÃO ADICIONAL: Verifica se já existe stop loss antes de recriar
+        const hasStopLossOrders = await OrderController.hasExistingStopLoss(symbol, position);
+
+        if (hasStopLossOrders && failsafeStatus.hasStopLoss) {
+          console.log(`✅ [FAILSAFE] ${symbol}: Stop loss já existe, não recriando`);
+          continue;
+        }
+        
+        if (!failsafeStatus.hasStopLoss || !failsafeStatus.hasTakeProfit) {
+          console.log(`⚠️ [FAILSAFE] ${symbol}: Ordens de segurança incompletas detectadas`);
+          console.log(`   • Stop Loss: ${failsafeStatus.hasStopLoss ? '✅' : '❌'}`);
+          console.log(`   • Take Profit: ${failsafeStatus.hasTakeProfit ? '✅' : '❌'}`);
+          
+          // Recria ordens de segurança
+          const recreateResult = await OrderController.createFailsafeOrders(position, accountId);
+          
+          if (recreateResult.success) {
+            console.log(`✅ [FAILSAFE] ${symbol}: Ordens de segurança recriadas com sucesso`);
+            recreated++;
+          } else {
+            console.log(`❌ [FAILSAFE] ${symbol}: Falha ao recriar ordens de segurança`);
+          }
+        }
+      }
+
+      if (checked > 0) {
+        console.log(`🛡️ [FAILSAFE] Monitoramento concluído: ${checked} posições verificadas, ${recreated} redes de segurança recriadas`);
+      }
+
+      return { checked, recreated };
+
+    } catch (error) {
+      console.error(`❌ [FAILSAFE] Erro no monitoramento de ordens de segurança:`, error.message);
+      return { checked: 0, recreated: 0, error: error.message };
+    }
+  }
+
+  /**
+   * Função de debug condicional
+   * @param {string} message - Mensagem de debug
+   */
+  static debug(message) {
+    if (process.env.LOG_TYPE === 'debug') {
+      console.log(message);
+    }
+  }
+
+  /**
+   * Verifica se há posições abertas que não estão sendo monitoradas
+   */
+  static async checkForUnmonitoredPositions(accountId) {
+    try {
+      // Define as variáveis de ambiente corretas baseado no accountId
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      // Cache para evitar verificações excessivas
+      const cacheKey = `unmonitored_${accountId}`;
+      const cached = OrderController.stopLossCheckCache.get(cacheKey);
+      const now = Date.now();
+      
+      if (cached && (now - cached.lastCheck) < 10000) { // 10 segundos de cache para verificações de posições
+        return; // Pula verificação se feita recentemente
+      }
+
+      // Busca posições abertas
+      const positions = await Futures.getOpenPositions() || [];
+      
+      if (positions.length === 0) {
+        return;
+      }
+      
+      // Atualiza cache de verificação
+      OrderController.stopLossCheckCache.set(cacheKey, {
+        lastCheck: now,
+        hasStopLoss: false
+      });
+
+      // Logar todas as posições abertas (monitoradas ou não)
+      for (const position of positions) {
+        const Account = await AccountController.get();
+        const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+        
+        // Verifica se marketInfo existe antes de acessar a propriedade fee
+        if (!marketInfo) {
+          // Posição manual em par não autorizado - usa configurações padrão
+          const defaultFee = parseFloat(process.env.FEE || 0.0004);
+          const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+          const currentPrice = parseFloat(position.markPrice);
+          const quantity = Math.abs(Number(position.netQuantity));
+          const orderValue = entryPrice * quantity;
+          const exitValue = currentPrice * quantity;
+          const entryFee = orderValue * defaultFee;
+          const exitFee = exitValue * defaultFee;
+          const totalFee = entryFee + exitFee;
+          
+          // Usa a função calculatePnL do TrailingStop para calcular o PnL corretamente
+          const leverage = Account.leverage;
+          const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
+          
+          const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
+          OrderController.debug(`📋 [MANUAL_POSITION] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa estimada: $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL: $${pnl.toFixed(6)} (${pnlPct.toFixed(3)}%) | ⚠️ Par não configurado`);
+          continue; // Pula criação de ordens para pares não autorizados
+        }
+        
+        const fee = marketInfo.fee || process.env.FEE || 0.0004;
+        const entryPrice = parseFloat(position.avgEntryPrice || position.entryPrice || position.markPrice);
+        const currentPrice = parseFloat(position.markPrice);
+        const quantity = Math.abs(Number(position.netQuantity));
+        const orderValue = entryPrice * quantity;
+        const exitValue = currentPrice * quantity;
+        const entryFee = orderValue * fee;
+        const exitFee = exitValue * fee;
+        const totalFee = entryFee + exitFee;
+        
+        // Usa a função calculatePnL do TrailingStop para calcular o PnL corretamente
+        const leverage = Account.leverage;
+        const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
+        
+        const percentFee = orderValue > 0 ? (totalFee / orderValue) * 100 : 0;
+        OrderController.debug(`[MONITOR][ALL] ${position.symbol} | Volume: $${orderValue.toFixed(2)} | Taxa total estimada (entrada+saída): $${totalFee.toFixed(6)} (≈ ${percentFee.toFixed(2)}%) | PnL atual: $${pnl.toFixed(6)} | PnL%: ${pnlPct.toFixed(3)}%`);
+      }
+      
+      // Verifica se há posições que não estão sendo monitoradas
+      const pendingAccountOrders = OrderController.pendingEntryOrdersByAccount[accountId] || {};
+      const monitoredMarkets = Object.keys(pendingAccountOrders);
+      const unmonitoredPositions = positions.filter(pos => !monitoredMarkets.includes(pos.symbol));
+      
+      if (unmonitoredPositions.length > 0) {
+        // Verifica se já foram criados alvos para essas posições (evita loop infinito)
+        for (const position of unmonitoredPositions) {
+          // Verifica se o par está autorizado antes de tentar criar ordens
+          const Account = await AccountController.get();
+          const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
+          
+          if (!marketInfo) {
+            OrderController.debug(`ℹ️ [MANUAL_POSITION] ${position.symbol}: Par não autorizado - pulando criação de ordens automáticas`);
+            continue; // Pula posições em pares não autorizados
+          }
+          
+          // SEMPRE valida e cria stop loss para todas as posições AUTORIZADAS
+          await OrderController.validateAndCreateStopLoss(position, accountId);
+          
+          // Log de debug para monitoramento
+          OrderController.debug(`🛡️ [MONITOR] ${position.symbol}: Stop loss validado/criado`);
+          
+          // Verifica se já existem ordens de take profit para esta posição
+          const existingOrders = await Order.getOpenOrders(position.symbol);
+          const hasTakeProfitOrders = existingOrders && existingOrders.some(order => 
+            order.takeProfitTriggerPrice || order.takeProfitLimitPrice
+          );
+          
+          if (!hasTakeProfitOrders) {
+            // Cria take profit orders apenas se não existirem
+            await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
+            OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders criados`);
+          } else {
+            OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders já existem`);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.warn(`⚠️ [MONITOR-${accountId}] Falha ao verificar posições não monitoradas:`, error.message);
+    }
+  }
+
+  /**
+   * Verifica se já existe uma ordem de stop loss para uma posição
+   * @param {string} symbol - Símbolo do mercado
+   * @param {object} position - Dados da posição
+   * @returns {boolean} - True se já existe stop loss
+   */
+  static async hasExistingStopLoss(symbol, position) {
+    try {
+      // Verifica cache primeiro
+      const cacheKey = `${symbol}_${position.netQuantity > 0 ? 'LONG' : 'SHORT'}`;
+      const cached = OrderController.stopLossCheckCache.get(cacheKey);
+      const now = Date.now();
+      
+      if (cached && (now - cached.lastCheck) < OrderController.stopLossCheckCacheTimeout) {
+        // Usa resultado do cache se ainda é válido
+        return cached.hasStopLoss;
+      }
+
+      const existingOrders = await Order.getOpenOrders(symbol);
+      
+      if (!existingOrders || existingOrders.length === 0) {
+        // Atualiza cache
+        OrderController.stopLossCheckCache.set(cacheKey, {
+          lastCheck: now,
+          hasStopLoss: false
+        });
+        return false;
+      }
+
+      const hasStopLossOrders = existingOrders.some(order => {
+        // Verifica se é uma ordem de stop loss (reduceOnly + side correto)
+        const isReduceOnly = order.reduceOnly;
+        const correctSide = order.side === (parseFloat(position.netQuantity) > 0 ? 'Ask' : 'Bid');
+        const isPending = order.status === 'Pending' || order.status === 'New' || order.status === 'PartiallyFilled' || order.status === 'TriggerPending';
+        
+        // Verifica se tem trigger de stop loss ou é uma ordem de stop loss
+        const hasStopLossTrigger = order.stopLossTriggerPrice || order.stopLossLimitPrice;
+        const isStopLossOrder = hasStopLossTrigger || (isReduceOnly && correctSide);
+        
+        return isPending && isStopLossOrder;
+      });
+
+      // Atualiza cache
+      OrderController.stopLossCheckCache.set(cacheKey, {
+        lastCheck: now,
+        hasStopLoss: hasStopLossOrders
+      });
+
+      return hasStopLossOrders;
+    } catch (error) {
+      console.error(`❌ [STOP_LOSS_CHECK] Erro ao verificar stop loss existente para ${symbol}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Limpa o cache de verificação de stop loss para um símbolo específico
+   * @param {string} symbol - Símbolo do mercado
+   */
+  static clearStopLossCheckCache(symbol) {
+    const keysToDelete = [];
+    for (const [key, value] of OrderController.stopLossCheckCache.entries()) {
+      if (key.startsWith(symbol + '_')) {
+        keysToDelete.push(key);
+      }
+    }
+    
+    keysToDelete.forEach(key => {
+      OrderController.stopLossCheckCache.delete(key);
+    });
+    
+    if (keysToDelete.length > 0) {
+      console.log(`🧹 [CACHE] Cache de stop loss limpo para ${symbol} (${keysToDelete.length} entradas)`);
+    }
+  }
+
+  /**
+   * Monitora e limpa ordens de stop loss órfãs (quando a posição não existe mais)
+   * @param {string} accountId - ID da conta
+   * @returns {object} - Resultado da limpeza
+   */
+  /**
+   * Monitora e limpa ordens de stop loss órfãs
+   * @param {string} accountId - ID da conta para monitorar
+   * @returns {object} Resultado da operação
+   */
+  static async monitorAndCleanupOrphanedStopLoss(accountId) {
+    try {
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      const positions = await Futures.getOpenPositions() || [];
+      
+      const Account = await AccountController.get();
+      const configuredSymbols = Account.markets.map(m => m.symbol);
+      
+      let totalOrphanedOrders = 0;
+      let totalCancelledOrders = 0;
+      const errors = [];
+
+      for (const symbol of configuredSymbols) {
+        try {
+          const openOrders = await Order.getOpenOrders(symbol);
+          
+          if (!openOrders || openOrders.length === 0) {
+            continue; // Pula símbolos sem ordens
+          }
+
+          const stopLossOrders = openOrders.filter(order => {
+            return order.reduceOnly === true;
+          });
+
+          if (stopLossOrders.length === 0) {
+            continue; // Pula se não há ordens de stop loss
+          }
+
+          const position = positions.find(p => p.symbol === symbol);
+          
+          if (!position || Math.abs(Number(position.netQuantity)) === 0) {
+            console.log(`🧹 [ORPHAN_MONITOR] ${symbol}: POSIÇÃO FECHADA - ${stopLossOrders.length} ordens de stop loss órfãs detectadas`);
+            
+            totalOrphanedOrders += stopLossOrders.length;
+
+            for (const order of stopLossOrders) {
+              const orderId = order.id;
+
+              try {
+                const cancelResult = await Order.cancelOpenOrder(symbol, orderId);
+                
+                if (cancelResult && !cancelResult.error) {
+                  totalCancelledOrders++;
+                  
+                  OrderController.clearStopLossCheckCache(symbol);
+                } else {
+                  const errorMsg = cancelResult?.error || 'desconhecido';
+                  console.log(`❌ [ORPHAN_MONITOR] ${symbol}: Falha ao cancelar ordem órfã - OrderID: ${orderId}, Erro: ${errorMsg}`);
+                  errors.push(`${symbol} (${orderId}): ${errorMsg}`);
+                }
+              } catch (error) {
+                console.error(`❌ [ORPHAN_MONITOR] Erro ao cancelar ordem ${orderId} para ${symbol}:`, error.message);
+                errors.push(`${symbol} (${orderId}): ${error.message}`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`❌ [ORPHAN_MONITOR] Erro ao verificar ordens para ${symbol}:`, error.message);
+          errors.push(`${symbol}: ${error.message}`);
+        }
+      }
+
+      if (totalOrphanedOrders > 0) {
+        console.log(`🧹 [ORPHAN_MONITOR] Monitoramento concluído:`);
+        console.log(`   • Ordens órfãs detectadas: ${totalOrphanedOrders}`);
+        console.log(`   • Ordens canceladas: ${totalCancelledOrders}`);
+        console.log(`   • Erros: ${errors.length}`);
+        
+        if (errors.length > 0) {
+          console.log(`   • Detalhes dos erros: ${errors.join(', ')}`);
+        }
+      } else {
+        console.log(`🧹 [ORPHAN_MONITOR] Nenhuma ordem órfã encontrada`);
+      }
+
+      return { 
+        orphaned: totalOrphanedOrders, 
+        cancelled: totalCancelledOrders, 
+        errors 
+      };
+
+    } catch (error) {
+      console.error(`❌ [ORPHAN_MONITOR] Erro no monitoramento de ordens órfãs:`, error.message);
+      return { orphaned: 0, cancelled: 0, errors: [error.message] };
+    }
+  }
+
+  /**
+   * Alias para monitorAndCleanupOrphanedStopLoss - Monitora e limpa ordens condicionais órfãs
+   * @param {string} accountId - ID da conta para monitorar
+   * @returns {object} Resultado da operação
+   */
+  static async cleanupOrphanedConditionalOrders(accountId = 'DEFAULT') {
+    return await OrderController.monitorAndCleanupOrphanedStopLoss(accountId);
+  }
+
 }
 
 export default OrderController;
-
-

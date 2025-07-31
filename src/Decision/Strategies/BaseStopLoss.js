@@ -1,3 +1,5 @@
+import TrailingStop from '../../TrailingStop/TrailingStop.js';
+
 export class BaseStopLoss {
   /**
    * Analisa se uma posição deve ser fechada baseado na estratégia
@@ -18,41 +20,6 @@ export class BaseStopLoss {
    */
   validateData(position, account) {
     return !!(position && account && position.symbol && position.netQuantity);
-  }
-
-  /**
-   * Calcula PnL e porcentagem de uma posição
-   * @param {object} position - Dados da posição
-   * @param {object} account - Dados da conta
-   * @returns {object} - Objeto com pnl e pnlPct
-   */
-  calculatePnL(position, account) {
-    // Usa pnlUnrealized diretamente (sem subtrair fees para manter consistência)
-    const pnl = Number(position.pnlUnrealized || 0);
-    
-    // CORREÇÃO: Usa initialMargin como base para calcular a porcentagem real
-    // initialMargin é o valor real investido (considerando alavancagem)
-    const initialMargin = Number(position.initialMargin || 0);
-    
-    // Fallback para outros campos se initialMargin não estiver disponível
-    const notional = Number(position.netExposureNotional || 0);
-    const leverage = Number(position.leverage || 1);
-    const marginReal = notional / leverage;
-    const netCost = Math.abs(Number(position.netCost || 0));
-    
-    // Calcula PnL baseado no valor real investido (initialMargin tem prioridade)
-    let pnlPct;
-    if (initialMargin > 0) {
-      pnlPct = (pnl / initialMargin) * 100;
-    } else if (netCost > 0) {
-      pnlPct = (pnl / netCost) * 100;
-    } else if (marginReal > 0) {
-      pnlPct = (pnl / marginReal) * 100;
-    } else {
-      pnlPct = (pnl / notional) * 100;
-    }
-    
-    return { pnl, pnlPct: Number(pnlPct.toFixed(2)) };
   }
 
   /**
@@ -79,7 +46,8 @@ export class BaseStopLoss {
         return null;
       }
 
-      const { pnl, pnlPct } = this.calculatePnL(position, account);
+      // Usa a função calculatePnL do TrailingStop
+      const { pnl, pnlPct } = TrailingStop.calculatePnL(position, account);
       
       // Só monitora se há lucro
       if (pnl <= 0) {

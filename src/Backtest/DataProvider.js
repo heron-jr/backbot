@@ -10,15 +10,6 @@ export class DataProvider {
   }
 
   /**
-<<<<<<< Updated upstream
-   * Obtém dados históricos de múltiplos símbolos com suporte a períodos longos
-   * @param {Array} symbols - Lista de símbolos para buscar
-   * @param {string} interval - Intervalo dos candles (1m, 5m, 15m, 1h, 4h, 1d)
-   * @param {number} days - Número de dias para buscar
-   * @param {number} startTime - Timestamp de início (opcional)
-   * @param {number} endTime - Timestamp de fim (opcional)
-   * @returns {object} - Dados históricos organizados por símbolo
-=======
    * REFATORADO: Obtém dados históricos com suporte a modo High-Fidelity
    * @param {Array} symbols - Lista de símbolos
    * @param {string} interval - Timeframe da estratégia (AMBIENT)
@@ -27,25 +18,19 @@ export class DataProvider {
    * @param {Date} startTime - Data de início (opcional)
    * @param {Date} endTime - Data de fim (opcional)
    * @returns {object} - Dados históricos por símbolo (formato varia conforme modo)
->>>>>>> Stashed changes
    */
-  async getHistoricalData(symbols, interval = '1h', days = 30, startTime = null, endTime = null) {
+  async getHistoricalData(symbols, interval = '1h', days = 30, startTime = null, endTime = null, simulationMode = 'STANDARD') {
     try {
-<<<<<<< Updated upstream
-      this.logger.info(`📊 Obtendo dados históricos REAIS para ${symbols.length} símbolos...`);
-      this.logger.info(`📅 Período: ${days} dias | Intervalo: ${interval}`);
-=======
       this.logger.info(`📊 Obtendo dados históricos para ${symbols.length} símbolos`);
       this.logger.info(`⏰ Timeframe: ${interval} | Período: ${days} dias | Modo: ${simulationMode}`);
       
       // Determina o timeframe de dados baseado no modo de simulação
       const dataTimeframe = this.determineDataTimeframe(interval, simulationMode);
       this.logger.info(`🔍 Timeframe de dados: ${dataTimeframe}`);
->>>>>>> Stashed changes
       
       const historicalData = {};
       const promises = symbols.map(symbol => 
-        this.getSymbolDataExtended(symbol, interval, days, startTime, endTime)
+        this.getSymbolDataExtended(symbol, dataTimeframe, days, startTime, endTime)
       );
       
       const results = await Promise.allSettled(promises);
@@ -55,42 +40,17 @@ export class DataProvider {
         const symbol = symbols[i];
         const result = results[i];
         
-<<<<<<< Updated upstream
         if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
           historicalData[symbol] = result.value;
           successCount++;
-          this.logger.info(`✅ ${symbol}: ${result.value.length} candles (${this.formatPeriod(result.value)})`);
+          this.logger.info(`✅ ${symbol}: ${result.value.length} candles obtidos`);
         } else {
           this.logger.error(`❌ ${symbol}: Erro ao obter dados`);
-=======
-        this.logger.info(`📈 [${progressBar}] ${progress}% - Obtendo dados para ${symbol} (${currentSymbolIndex}/${totalSymbols})...`);
-        
-        try {
-          // Obtém dados no timeframe apropriado
-          const symbolData = await this.getSymbolDataExtended(symbol, dataTimeframe, days, startTime, endTime);
-          
-          if (symbolData && symbolData.length > 0) {
-            historicalData[symbol] = symbolData;
-            this.logger.info(`✅ ${symbol}: ${symbolData.length} candles obtidos`);
-          } else {
-            this.logger.warn(`⚠️ ${symbol}: Sem dados disponíveis`);
-          }
-          
-          // Pequena pausa para evitar rate limit
-          await this.delay(100);
-          
-        } catch (error) {
-          this.logger.error(`❌ Erro ao obter dados para ${symbol}: ${error.message}`);
->>>>>>> Stashed changes
         }
       }
       
       this.logger.info(`📈 Dados obtidos com sucesso para ${successCount}/${symbols.length} símbolos`);
       
-<<<<<<< Updated upstream
-      if (successCount === 0) {
-        throw new Error('Nenhum símbolo com dados válidos encontrado');
-=======
       // REFATORADO: Lógica para modo HIGH_FIDELITY
       if (dataTimeframe === '1m' && interval !== '1m') {
         this.logger.info(`🔬 Modo HIGH_FIDELITY: Preparando dados duplos (1m + ${interval})...`);
@@ -114,7 +74,6 @@ export class DataProvider {
         
         this.logger.info(`✅ Modo HIGH_FIDELITY: Dados duplos preparados para ${Object.keys(highFidelityData).length} símbolos`);
         return highFidelityData;
->>>>>>> Stashed changes
       }
       
       // Modo STANDARD: retorna dados no formato original
@@ -128,45 +87,44 @@ export class DataProvider {
   }
 
   /**
-<<<<<<< Updated upstream
-   * Obtém dados históricos para um símbolo específico com suporte a períodos longos
-   * Tenta Backpack primeiro, depois Binance como fallback
+   * CORRIGIDO: Obtém dados estendidos para um símbolo com paginação eficiente
+   * @param {string} symbol - Símbolo do mercado
+   * @param {string} interval - Intervalo dos candles
+   * @param {number} days - Período em dias
+   * @param {Date} startTime - Data de início (opcional)
+   * @param {Date} endTime - Data de fim (opcional)
+   * @returns {Array} - Array de candles
    */
   async getSymbolDataExtended(symbol, interval, days, startTime = null, endTime = null) {
     try {
-      // Primeiro tenta obter dados da Backpack
-      this.logger.info(`🔄 [BACKPACK] Tentando obter dados para ${symbol}...`);
-      
+      const end = endTime ? endTime.getTime() : Date.now();
+      const start = startTime ? startTime.getTime() : end - (days * 24 * 60 * 60 * 1000);
+      const intervalMs = this.getIntervalMs(interval);
+      const candlesPerDay = this.getCandlesPerDay(interval);
+      const totalCandles = days * candlesPerDay;
+      this.logger.info(`📈 ${symbol}: Buscando ${totalCandles} candles (${days} dias) - ${new Date(start).toISOString()} até ${new Date(end).toISOString()}`);
+      // Tenta Backpack primeiro
+      let allCandles = [];
       try {
-        const backpackData = await this.getBackpackSymbolData(symbol, interval, days, startTime, endTime);
-        if (backpackData && backpackData.length > 0) {
-          this.logger.info(`✅ [BACKPACK] Dados obtidos com sucesso para ${symbol}: ${backpackData.length} candles`);
-          return backpackData;
+        allCandles = await this.getBackpackSymbolData(symbol, interval, totalCandles, start, end);
+        if (allCandles && allCandles.length > 0) {
+          this.logger.info(`✅ ${symbol}: ${allCandles.length} candles obtidos da Backpack.`);
+          return allCandles;
+        } else {
+          this.logger.warn(`⚠️ ${symbol}: Backpack não retornou dados, tentando Binance...`);
         }
-      } catch (backpackError) {
-        this.logger.warn(`⚠️ [BACKPACK] Falha ao obter dados para ${symbol}: ${backpackError.message}`);
+      } catch (e) {
+        this.logger.warn(`⚠️ ${symbol}: Erro na Backpack: ${e.message}. Tentando Binance...`);
       }
-      
-      // Se Backpack falhou, tenta Binance como fallback
-      this.logger.info(`🔄 [BINANCE] Usando Binance como fallback para ${symbol}...`);
-      
-      try {
-        const binanceData = await this.getBinanceSymbolData(symbol, interval, days, startTime, endTime);
-        if (binanceData && binanceData.length > 0) {
-          this.logger.info(`✅ [BINANCE] Dados obtidos com sucesso para ${symbol}: ${binanceData.length} candles`);
-          return binanceData;
-        }
-      } catch (binanceError) {
-        this.logger.error(`❌ [BINANCE] Falha ao obter dados para ${symbol}: ${binanceError.message}`);
+      // Busca dados reais da Binance (sem fallback sintético)
+      allCandles = await this.getBinanceSymbolData(this.convertSymbolToBinance(symbol), interval, totalCandles, start, end);
+      if (!allCandles || allCandles.length === 0) {
+        throw new Error(`❌ ${symbol}: Não foi possível obter dados reais da Binance para o período solicitado.`);
       }
-      
-      // Se ambas falharam, retorna array vazio
-      this.logger.error(`❌ Falha total ao obter dados para ${symbol} (Backpack e Binance)`);
-      return [];
-      
+      return allCandles;
     } catch (error) {
-      this.logger.error(`❌ Erro geral ao obter dados para ${symbol}: ${error.message}`);
-      return [];
+      this.logger.error(`❌ Erro ao obter dados para ${symbol}: ${error.message}`);
+      throw error;
     }
   }
 
@@ -398,7 +356,10 @@ export class DataProvider {
     } catch (error) {
       this.logger.error(`❌ [BINANCE] Erro ao obter dados para ${symbol}: ${error.message}`);
       return [];
-=======
+    }
+  }
+
+  /**
    * NOVO: Determina o timeframe de dados baseado no modo de simulação
    * @param {string} ambientTimeframe - Timeframe da estratégia
    * @param {string} simulationMode - Modo de simulação
@@ -553,7 +514,6 @@ export class DataProvider {
     } catch (error) {
       this.logger.error(`❌ Erro ao obter dados para ${symbol}: ${error.message}`);
       throw error;
->>>>>>> Stashed changes
     }
   }
 
@@ -601,9 +561,6 @@ export class DataProvider {
   }
 
   /**
-<<<<<<< Updated upstream
-   * Obtém lista de símbolos disponíveis com filtros otimizados
-=======
    * CORRIGIDO: Obtém dados do Backpack com validação de período
    * @param {string} symbol - Símbolo do mercado
    * @param {string} interval - Intervalo dos candles

@@ -1,4 +1,5 @@
 import { BaseStopLoss } from './BaseStopLoss.js';
+import TrailingStop from '../../TrailingStop/TrailingStop.js';
 
 export class ProMaxStopLoss extends BaseStopLoss {
   /**
@@ -16,7 +17,10 @@ export class ProMaxStopLoss extends BaseStopLoss {
       }
 
       const ENABLE_TP_VALIDATION = process.env.ENABLE_TP_VALIDATION === 'true';
-      const { pnl } = this.calculatePnL(position, account);
+      
+      // Usa a função calculatePnL do TrailingStop
+      const { pnl } = TrailingStop.calculatePnL(position, account);
+      
       if (ENABLE_TP_VALIDATION && pnl > 0) {
         const takeProfitMonitoring = this.monitorTakeProfitMinimum(position, account);
         

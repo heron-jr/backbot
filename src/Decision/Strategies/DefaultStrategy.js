@@ -1,7 +1,6 @@
 import { BaseStrategy } from './BaseStrategy.js';
 import Markets from '../../Backpack/Public/Markets.js';
 import { calculateIndicators } from '../Indicators.js';
-import OrderController from '../../Controllers/OrderController.js';
 
 export class DefaultStrategy extends BaseStrategy {
   /**
@@ -14,6 +13,195 @@ export class DefaultStrategy extends BaseStrategy {
    * @param {string} btcTrend - Tendência do BTC (BULLISH/BEARISH/NEUTRAL)
    * @returns {object|null} - Objeto com decisão de trading ou null se não houver sinal
    */
+  
+  /**
+   * NOVO: Método de auditoria que executa todas as validações e retorna pacote completo
+   * @param {number} fee - Taxa da exchange
+   * @param {object} data - Dados de mercado com indicadores
+   * @param {number} investmentUSD - Valor a investir
+   * @param {number} media_rsi - Média do RSI de todos os mercados
+   * @param {object} config - Configuração adicional
+   * @param {string} btcTrend - Tendência do BTC (BULLISH/BEARISH/NEUTRAL)
+   * @returns {object} - Pacote de auditoria com todas as validações
+   */
+  async analyzeTradeWithAudit(fee, data, investmentUSD, media_rsi, config, btcTrend) {
+    const auditInfo = {
+      source: 'BACKTEST',
+      timestamp: new Date().toISOString(),
+      symbol: data.market.symbol
+    };
+    
+    const inputData = {
+      currentPrice: data.marketPrice,
+      indicators: {
+        rsi: data.rsi,
+        mfi: data.mfi,
+        vwap: data.vwap,
+        momentum: data.momentum,
+        macd: data.macd,
+        stoch: data.stoch
+      }
+    };
+    
+    const validationTrace = [];
+    let finalDecision = { decision: 'REJECTED', rejectionLayer: null };
+    
+    // 1. VALIDAÇÃO INICIAL DOS DADOS
+    const dataValidation = this.validateData(data);
+    validationTrace.push({
+      layer: '1. Validação Inicial dos Dados',
+      status: dataValidation ? 'PASS' : 'FAIL',
+      evaluation: dataValidation ? 'Dados válidos' : 'Dados inválidos ou incompletos'
+    });
+    
+    if (!dataValidation) {
+      finalDecision.rejectionLayer = 'Validação Inicial dos Dados';
+      return this.buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace);
+    }
+    
+    // 2. ANÁLISE DE SINAIS
+    const signals = this.analyzeSignals(data);
+    validationTrace.push({
+      layer: '2. Análise de Sinais',
+      status: signals.hasSignal ? 'PASS' : 'FAIL',
+      evaluation: signals.hasSignal ? 
+        `Sinal ${signals.signalType} detectado (${signals.isLong ? 'LONG' : 'SHORT'})` : 
+        'Nenhum sinal de entrada detectado'
+    });
+    
+    if (!signals.hasSignal) {
+      finalDecision.rejectionLayer = 'Análise de Sinais';
+      return this.buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace);
+    }
+    
+    // 3. FILTRO DE CONFIRMAÇÃO MONEY FLOW
+    const moneyFlowValidation = this.validateMoneyFlowConfirmation(data, signals.isLong, data.market.symbol === 'BTC_USDC_PERP');
+    validationTrace.push({
+      layer: '3. Money Flow Filter',
+      status: moneyFlowValidation.isValid ? 'PASS' : 'FAIL',
+      evaluation: moneyFlowValidation.details
+    });
+    
+    if (!moneyFlowValidation.isValid) {
+      finalDecision.rejectionLayer = 'Money Flow Filter';
+      return this.buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace);
+    }
+    
+    // 4. FILTRO DE TENDÊNCIA VWAP
+    const vwapValidation = this.validateVWAPTrend(data, signals.isLong, data.market.symbol === 'BTC_USDC_PERP');
+    validationTrace.push({
+      layer: '4. VWAP Filter',
+      status: vwapValidation.isValid ? 'PASS' : 'FAIL',
+      evaluation: vwapValidation.details
+    });
+    
+    if (!vwapValidation.isValid) {
+      finalDecision.rejectionLayer = 'VWAP Filter';
+      return this.buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace);
+    }
+    
+    // 5. FILTRO DE TENDÊNCIA DO BTC
+    if (data.market.symbol !== 'BTC_USDC_PERP') {
+      let btcValidation = { isValid: true, details: 'BTC não é o ativo analisado' };
+      
+      if (btcTrend === 'NEUTRAL') {
+        btcValidation = { isValid: false, details: 'BTC em tendência NEUTRAL (não permite operações em altcoins)' };
+      } else if (signals.isLong && btcTrend === 'BEARISH') {
+        btcValidation = { isValid: false, details: 'BTC em tendência BEARISH (não permite LONG em altcoins)' };
+      } else if (!signals.isLong && btcTrend === 'BULLISH') {
+        btcValidation = { isValid: false, details: 'BTC em tendência BULLISH (não permite SHORT em altcoins)' };
+      } else {
+        btcValidation = { isValid: true, details: `BTC em tendência ${btcTrend} (favorável para ${signals.isLong ? 'LONG' : 'SHORT'})` };
+      }
+      
+      validationTrace.push({
+        layer: '5. BTC Trend Filter',
+        status: btcValidation.isValid ? 'PASS' : 'FAIL',
+        evaluation: btcValidation.details
+      });
+      
+      if (!btcValidation.isValid) {
+        finalDecision.rejectionLayer = 'BTC Trend Filter';
+        return this.buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace);
+      }
+    } else {
+      validationTrace.push({
+        layer: '5. BTC Trend Filter',
+        status: 'PASS',
+        evaluation: 'BTC é o ativo analisado (não aplicável)'
+      });
+    }
+    
+    // 6. CÁLCULO DE STOP E TARGET
+    const action = signals.isLong ? 'long' : 'short';
+    const price = parseFloat(data.marketPrice);
+    
+    // Carrega configurações do .env
+    const stopLossPct = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
+    const takeProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE);
+    
+    // Valida se as variáveis de ambiente existem
+    if (!process.env.MAX_NEGATIVE_PNL_STOP_PCT) {
+      console.error('❌ [DEFAULT_STRATEGY] MAX_NEGATIVE_PNL_STOP_PCT não definida no .env');
+      return null;
+    }
+    if (!process.env.MIN_PROFIT_PERCENTAGE) {
+      console.error('❌ [DEFAULT_STRATEGY] MIN_PROFIT_PERCENTAGE não definida no .env');
+      return null;
+    }
+    
+    const stopTarget = await this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
+    
+    validationTrace.push({
+      layer: '6. Cálculo de Stop e Target',
+      status: stopTarget ? 'PASS' : 'FAIL',
+      evaluation: stopTarget ? 
+        `Stop: $${stopTarget.stop.toFixed(6)}, Target: $${stopTarget.target.toFixed(6)}` : 
+        'Falha no cálculo de stop/target'
+    });
+    
+    if (!stopTarget) {
+      finalDecision.rejectionLayer = 'Cálculo de Stop e Target';
+      return this.buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace);
+    }
+    
+    // 7. CÁLCULO DE PNL E RISCO
+    const { pnl, risk } = this.calculatePnLAndRisk(action, price, stopTarget.stop, stopTarget.target, investmentUSD, fee);
+    
+    validationTrace.push({
+      layer: '7. Cálculo de PnL e Risco',
+      status: 'PASS',
+      evaluation: `PnL esperado: $${pnl.toFixed(2)}, Risco: $${risk.toFixed(2)}`
+    });
+    
+    // 8. VALIDAÇÃO FINAL
+    validationTrace.push({
+      layer: '8. Validação Final',
+      status: 'PASS',
+      evaluation: 'Todas as validações passaram - SINAL APROVADO'
+    });
+    
+    // Se chegou até aqui, todas as validações passaram
+    finalDecision = { 
+      decision: 'APPROVED', 
+      rejectionLayer: null 
+    };
+    
+    // Retorna o pacote de auditoria com a decisão aprovada
+    return this.buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace);
+  }
+  
+  /**
+   * Constrói o pacote de auditoria
+   */
+  buildAuditPackage(auditInfo, finalDecision, inputData, validationTrace) {
+    return {
+      auditInfo,
+      finalDecision,
+      inputData,
+      validationTrace
+    };
+  }
   async analyzeTrade(fee, data, investmentUSD, media_rsi, config = null, btcTrend = 'NEUTRAL') {
     try {
       // Validação inicial dos dados
@@ -21,7 +209,14 @@ export class DefaultStrategy extends BaseStrategy {
         return null;
       }
 
-      // NOVA LÓGICA DE DECISÃO
+      // NOVO: Modo de Auditoria - executa todas as validações mesmo se falhar
+      const isAuditing = config && config.isAuditing === true;
+      
+      if (isAuditing) {
+        return this.analyzeTradeWithAudit(fee, data, investmentUSD, media_rsi, config, btcTrend);
+      }
+
+      // COMPORTAMENTO NORMAL (alta performance) - retorna null no primeiro filtro que falhar
       const signals = this.analyzeSignals(data);
       
       if (!signals.hasSignal) {
@@ -72,8 +267,22 @@ export class DefaultStrategy extends BaseStrategy {
       const action = signals.isLong ? 'long' : 'short';
       const price = parseFloat(data.marketPrice);
 
-      // Cálculo de stop e target usando VWAP
-      const stopTarget = this.calculateStopAndTarget(data, price, signals.isLong);
+      // Carrega configurações do .env
+      const stopLossPct = Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || 4.0);
+      const takeProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE || 0.5);
+      
+      // Valida se as variáveis de ambiente existem
+      if (!process.env.MAX_NEGATIVE_PNL_STOP_PCT) {
+        console.error('❌ [DEFAULT_STRATEGY] MAX_NEGATIVE_PNL_STOP_PCT não definida no .env');
+        return null;
+      }
+      if (!process.env.MIN_PROFIT_PERCENTAGE) {
+        console.error('❌ [DEFAULT_STRATEGY] MIN_PROFIT_PERCENTAGE não definida no .env');
+        return null;
+      }
+
+      // Cálculo de stop e target usando configurações do .env
+      const stopTarget = await this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
       if (!stopTarget) {
         return null;
       }
@@ -103,20 +312,7 @@ export class DefaultStrategy extends BaseStrategy {
       
       console.log(`✅ ${data.market.symbol}: ${action.toUpperCase()} - Tendência: ${btcTrendMsg} - Sinal: ${signals.signalType} - Money Flow: ${moneyFlowValidation.reason} - VWAP: ${vwapValidation.reason}`);
 
-      // NOVO: Chamada do fluxo híbrido de execução de ordem
-      const orderResult = await OrderController.openHybridOrder({
-        entry,
-        stop,
-        target,
-        action,
-        market: data.market.symbol,
-        volume: investmentUSD,
-        decimal_quantity: data.market.decimal_quantity,
-        decimal_price: data.market.decimal_price,
-        stepSize_quantity: data.market.stepSize_quantity,
-        accountId: data.accountId || 'DEFAULT',
-        originalSignalData: { signals, moneyFlowValidation, vwapValidation, btcTrend, data }
-      });
+      // Retorna decisão de trading (a execução será feita pelo Decision.js)
       return {
         market: data.market.symbol,
         entry: Number(entry.toFixed(data.market.decimal_price)),
@@ -125,7 +321,13 @@ export class DefaultStrategy extends BaseStrategy {
         action,
         pnl,
         risk,
-        orderResult
+        // Dados adicionais para execução
+        volume: investmentUSD,
+        decimal_quantity: data.market.decimal_quantity,
+        decimal_price: data.market.decimal_price,
+        stepSize_quantity: data.market.stepSize_quantity,
+        accountId: data.accountId || 'DEFAULT',
+        originalSignalData: { signals, moneyFlowValidation, vwapValidation, btcTrend, data }
       };
 
     } catch (error) {
