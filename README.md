@@ -66,8 +66,8 @@ Esta seção define a matemática da sua estratégia.
 
 | Timeframe | `TRAILING_STOP_DISTANCE` Sugerido |
 | :--- | :--- |
-| 15m | 0.5% a 1.2% |
-| 30m, 1h | 1.5% a 2.8% |
+| 15m | 1.0% a 1.5% |
+| 30m, 1h | 1.5% a 2.9% |
 | 2h, 4h | 3.0% a 4.0% |
 
 ---

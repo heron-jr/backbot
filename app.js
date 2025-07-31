@@ -342,7 +342,22 @@ function initializeDecisionStrategy(strategyType) {
   console.log(`✅ Instância do Decision inicializada com estratégia: ${strategyType}`);
 }
 
-// Função principal para iniciar o bot
+// Função para iniciar o monitor de ordens órfãs
+function startOrphanOrderMonitor() {
+  console.log('🧹 Iniciando Monitor de Ordens Órfãs...');
+  
+  // Monitoramento de ordens órfãs a cada 60 segundos
+  setInterval(async () => {
+    try {
+      await OrderController.cleanupOrphanedConditionalOrders('DEFAULT');
+    } catch (error) {
+      console.error('❌ Erro no monitor de ordens órfãs:', error.message);
+    }
+  }, 60000);
+  
+  console.log('✅ Monitor de Ordens Órfãs iniciado (verificação a cada 60 segundos)');
+}
+
 async function startBot() {
   try {
     // Verifica se há configurações de múltiplas contas
@@ -412,10 +427,11 @@ async function startBot() {
       startDecision();
       startStops();
       startPendingOrdersMonitor();
-      // Monitoramento em tempo real das posições abertas a cada 5 segundos
+      startOrphanOrderMonitor();
+
       setInterval(() => {
         OrderController.checkForUnmonitoredPositions('DEFAULT');
-      }, 5000);
+      }, 30000);
     }
 
   } catch (error) {
@@ -438,9 +454,21 @@ function setupInteractiveCommands() {
       case 'status':
         showDynamicStopLossStatus();
         break;
+      case 'cleanup':
+        console.log('🧹 Iniciando limpeza manual de ordens órfãs...');
+        import('./src/Controllers/OrderController.js').then(({ default: OrderController }) => {
+          OrderController.monitorAndCleanupOrphanedStopLoss('DEFAULT').then(result => {
+            console.log(`🧹 Limpeza concluída: ${result.orphaned} ordens órfãs detectadas, ${result.cancelled} canceladas`);
+            if (result.errors.length > 0) {
+              console.log(`❌ Erros: ${result.errors.join(', ')}`);
+            }
+          });
+        });
+        break;
       case 'help':
         console.log('\n💡 Comandos disponíveis:');
         console.log('   • "status" - Ver status do stop loss dinâmico');
+        console.log('   • "cleanup" - Limpar ordens de stop loss órfãs');
         console.log('   • "exit" - Sair do bot');
         console.log('   • "help" - Ver esta ajuda\n');
         break;

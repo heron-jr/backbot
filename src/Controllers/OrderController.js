@@ -11,14 +11,18 @@ class OrderController {
   // Armazena ordens de entrada pendentes para monitoramento POR CONTA (apenas estratégia PRO_MAX)
   static pendingEntryOrdersByAccount = {};
 
-  // Contador estático para evitar loop infinito
+  // Contador de tentativas de stop loss por símbolo
   static stopLossAttempts = null;
-  
-  // Cache para posições que já têm stop loss validado
+
+  // Cache de posições que já foram validadas para stop loss
   static validatedStopLossPositions = new Set();
 
-  // Gerenciador de estado de locking para criação de stop loss
+  // Lock para criação de stop loss (evita múltiplas criações simultâneas)
   static stopLossCreationInProgress = new Set(); // Armazena os símbolos que estão com uma criação de SL em andamento
+
+  // Cache de verificação de stop loss para evitar múltiplas chamadas desnecessárias
+  static stopLossCheckCache = new Map(); // { symbol: { lastCheck: timestamp, hasStopLoss: boolean } }
+  static stopLossCheckCacheTimeout = 30000; // 30 segundos de cache
 
   /**
    * Adiciona ordem de entrada para monitoramento (apenas estratégia PRO_MAX)
@@ -187,7 +191,7 @@ class OrderController {
           
           if (!hasTakeProfitOrders) {
             // Cria take profit orders apenas se não existirem
-          await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
+            await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
             OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders criados`);
           } else {
             OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders já existem`);
@@ -724,6 +728,17 @@ class OrderController {
             TrailingStop.clearTrailingState(position.symbol);
           } catch (error) {
             console.error(`[FORCE_CLOSE] Erro ao limpar trailing state para ${position.symbol}:`, error.message);
+          }
+          
+          // Limpeza automática de ordens órfãs para este símbolo
+          try {
+            console.log(`🧹 [FORCE_CLOSE] ${position.symbol}: Verificando ordens órfãs após fechamento...`);
+            const orphanResult = await OrderController.monitorAndCleanupOrphanedStopLoss('DEFAULT');
+            if (orphanResult.orphaned > 0) {
+              console.log(`🧹 [FORCE_CLOSE] ${position.symbol}: ${orphanResult.orphaned} ordens órfãs limpas após fechamento`);
+            }
+          } catch (error) {
+            console.error(`[FORCE_CLOSE] Erro ao limpar ordens órfãs para ${position.symbol}:`, error.message);
           }
         }
 
@@ -1330,13 +1345,9 @@ class OrderController {
       }
 
       // Verifica se já existe uma ordem de stop loss para esta posição
-      const existingOrders = await Order.getOpenOrders(position.symbol);
-      const hasStopLossOrders = existingOrders && existingOrders.some(order => 
-        order.reduceOnly && (order.side === (parseFloat(position.netQuantity) > 0 ? 'Ask' : 'Bid'))
-      );
+      const hasStopLossOrders = await OrderController.hasExistingStopLoss(position.symbol, position);
 
       if (hasStopLossOrders) {
-        console.log(`✅ [${accountId}] ${position.symbol}: Stop loss já existe`);
         return true;
       }
 
@@ -1368,36 +1379,28 @@ class OrderController {
       // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
       const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
       
-      // Carrega a porcentagem de stop loss do .env
       const baseStopLossPct = Math.abs(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
       
       // Calcula a porcentagem real considerando a alavancagem validada
       // Se leverage = 10x e stop loss = 10%, então o preço deve mover apenas 1%
       const actualStopLossPct = baseStopLossPct / leverage;
       
-      // CORREÇÃO: Calcula o preço de stop loss baseado no PREÇO DE ENTRADA
-      // Para LONG: stop loss ABAIXO do preço de entrada (preço cai = perda)
-      // Para SHORT: stop loss ACIMA do preço de entrada (preço sobe = perda)
       const stopLossPrice = isLong 
-        ? entryPrice * (1 - actualStopLossPct / 100)  // LONG: preço menor que entrada
-        : entryPrice * (1 + actualStopLossPct / 100); // SHORT: preço maior que entrada
-
-      console.log(`🔧 [${accountId}] ${position.symbol}: Criando stop loss com porcentagem definida...`);
-      console.log(`📊 [${accountId}] ${position.symbol}: Preço de Entrada: $${entryPrice.toFixed(6)}, Preço Atual: $${currentPrice.toFixed(6)}, Posição: ${isLong ? 'LONG' : 'SHORT'}, Alavancagem: ${leverage}x, Stop Loss: ${baseStopLossPct}%, Stop Real: ${actualStopLossPct.toFixed(2)}%, Preço calculado: $${stopLossPrice.toFixed(6)}`);
+        ? entryPrice * (1 - actualStopLossPct / 100)  
+        : entryPrice * (1 + actualStopLossPct / 100); 
 
       try {
-        // Cria a ordem de stop loss como Market condicional
         const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
         const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
         
         const stopBody = {
           symbol: position.symbol,
-          side: isLong ? 'Ask' : 'Bid', // Para LONG, vende (Ask) para fechar. Para SHORT, compra (Bid) para fechar
-          orderType: 'Market', // Ordem a mercado condicional
-          reduceOnly: true, // Só pode reduzir posições
+          side: isLong ? 'Ask' : 'Bid', 
+          orderType: 'Market', 
+          reduceOnly: true, 
           quantity: formatQuantity(totalQuantity),
-          triggerPrice: formatPrice(stopLossPrice), // Preço de gatilho para ativar a ordem
-          triggerQuantity: formatQuantity(totalQuantity), // Quantidade a ser executada quando o trigger for atingido
+          triggerPrice: formatPrice(stopLossPrice), 
+          triggerQuantity: formatQuantity(totalQuantity), 
           timeInForce: 'GTC',
           clientId: Math.floor(Math.random() * 1000000) + 9999
         };
@@ -1408,9 +1411,9 @@ class OrderController {
         
         if (stopResult && !stopResult.error) {
           console.log(`✅ [${accountId}] ${position.symbol}: Stop loss criado com sucesso! - Trigger: $${stopLossPrice.toFixed(6)}, Quantidade: ${totalQuantity}`);
-          // Adiciona ao cache de posições validadas
           const positionKey = `${accountId}_${position.symbol}`;
           OrderController.validatedStopLossPositions.add(positionKey);
+          OrderController.clearStopLossCheckCache(position.symbol);
           return true;
         } else {
           const errorMsg = stopResult && stopResult.error ? stopResult.error : 'desconhecido';
@@ -1548,6 +1551,14 @@ class OrderController {
       if (!marketInfo) {
         console.error(`❌ [FAILSAFE] Market info não encontrada para ${position.symbol}`);
         return { error: 'Market info não encontrada' };
+      }
+
+      // VERIFICAÇÃO ADICIONAL: Verifica se já existe stop loss antes de criar
+      const hasStopLossOrders = await OrderController.hasExistingStopLoss(position.symbol, position);
+
+      if (hasStopLossOrders) {
+        console.log(`✅ [FAILSAFE] ${position.symbol}: Stop loss já existe, pulando criação de failsafe orders`);
+        return { success: true, message: 'Stop loss já existe' };
       }
 
       const decimal_quantity = marketInfo.decimal_quantity;
@@ -1932,6 +1943,14 @@ class OrderController {
         // Verifica se existem ordens de segurança
         const failsafeStatus = await OrderController.checkFailsafeOrders(symbol, accountId);
         
+        // VERIFICAÇÃO ADICIONAL: Verifica se já existe stop loss antes de recriar
+        const hasStopLossOrders = await OrderController.hasExistingStopLoss(symbol, position);
+
+        if (hasStopLossOrders && failsafeStatus.hasStopLoss) {
+          console.log(`✅ [FAILSAFE] ${symbol}: Stop loss já existe, não recriando`);
+          continue;
+        }
+        
         if (!failsafeStatus.hasStopLoss || !failsafeStatus.hasTakeProfit) {
           console.log(`⚠️ [FAILSAFE] ${symbol}: Ordens de segurança incompletas detectadas`);
           console.log(`   • Stop Loss: ${failsafeStatus.hasStopLoss ? '✅' : '❌'}`);
@@ -1985,11 +2004,28 @@ class OrderController {
         process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
       }
 
+      // Cache para evitar verificações excessivas
+      const cacheKey = `unmonitored_${accountId}`;
+      const cached = OrderController.stopLossCheckCache.get(cacheKey);
+      const now = Date.now();
+      
+      if (cached && (now - cached.lastCheck) < 10000) { // 10 segundos de cache para verificações de posições
+        return; // Pula verificação se feita recentemente
+      }
+
+      // Busca posições abertas
       const positions = await Futures.getOpenPositions() || [];
       
       if (positions.length === 0) {
         return;
       }
+      
+      // Atualiza cache de verificação
+      OrderController.stopLossCheckCache.set(cacheKey, {
+        lastCheck: now,
+        hasStopLoss: false
+      });
+
       // Logar todas as posições abertas (monitoradas ou não)
       for (const position of positions) {
         const Account = await AccountController.get();
@@ -2068,7 +2104,7 @@ class OrderController {
             // Cria take profit orders apenas se não existirem
             await OrderController.forceCreateTargetsForExistingPosition(position, accountId);
             OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders criados`);
-  } else {
+          } else {
             OrderController.debug(`💰 [MONITOR] ${position.symbol}: Take profit orders já existem`);
           }
         }
@@ -2079,8 +2115,195 @@ class OrderController {
     }
   }
 
+  /**
+   * Verifica se já existe uma ordem de stop loss para uma posição
+   * @param {string} symbol - Símbolo do mercado
+   * @param {object} position - Dados da posição
+   * @returns {boolean} - True se já existe stop loss
+   */
+  static async hasExistingStopLoss(symbol, position) {
+    try {
+      // Verifica cache primeiro
+      const cacheKey = `${symbol}_${position.netQuantity > 0 ? 'LONG' : 'SHORT'}`;
+      const cached = OrderController.stopLossCheckCache.get(cacheKey);
+      const now = Date.now();
+      
+      if (cached && (now - cached.lastCheck) < OrderController.stopLossCheckCacheTimeout) {
+        // Usa resultado do cache se ainda é válido
+        return cached.hasStopLoss;
+      }
+
+      const existingOrders = await Order.getOpenOrders(symbol);
+      
+      if (!existingOrders || existingOrders.length === 0) {
+        // Atualiza cache
+        OrderController.stopLossCheckCache.set(cacheKey, {
+          lastCheck: now,
+          hasStopLoss: false
+        });
+        return false;
+      }
+
+      const hasStopLossOrders = existingOrders.some(order => {
+        // Verifica se é uma ordem de stop loss (reduceOnly + side correto)
+        const isReduceOnly = order.reduceOnly;
+        const correctSide = order.side === (parseFloat(position.netQuantity) > 0 ? 'Ask' : 'Bid');
+        const isPending = order.status === 'Pending' || order.status === 'New' || order.status === 'PartiallyFilled' || order.status === 'TriggerPending';
+        
+        // Verifica se tem trigger de stop loss ou é uma ordem de stop loss
+        const hasStopLossTrigger = order.stopLossTriggerPrice || order.stopLossLimitPrice;
+        const isStopLossOrder = hasStopLossTrigger || (isReduceOnly && correctSide);
+        
+        return isPending && isStopLossOrder;
+      });
+
+      // Atualiza cache
+      OrderController.stopLossCheckCache.set(cacheKey, {
+        lastCheck: now,
+        hasStopLoss: hasStopLossOrders
+      });
+
+      return hasStopLossOrders;
+    } catch (error) {
+      console.error(`❌ [STOP_LOSS_CHECK] Erro ao verificar stop loss existente para ${symbol}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Limpa o cache de verificação de stop loss para um símbolo específico
+   * @param {string} symbol - Símbolo do mercado
+   */
+  static clearStopLossCheckCache(symbol) {
+    const keysToDelete = [];
+    for (const [key, value] of OrderController.stopLossCheckCache.entries()) {
+      if (key.startsWith(symbol + '_')) {
+        keysToDelete.push(key);
+      }
+    }
+    
+    keysToDelete.forEach(key => {
+      OrderController.stopLossCheckCache.delete(key);
+    });
+    
+    if (keysToDelete.length > 0) {
+      console.log(`🧹 [CACHE] Cache de stop loss limpo para ${symbol} (${keysToDelete.length} entradas)`);
+    }
+  }
+
+  /**
+   * Monitora e limpa ordens de stop loss órfãs (quando a posição não existe mais)
+   * @param {string} accountId - ID da conta
+   * @returns {object} - Resultado da limpeza
+   */
+  /**
+   * Monitora e limpa ordens de stop loss órfãs
+   * @param {string} accountId - ID da conta para monitorar
+   * @returns {object} Resultado da operação
+   */
+  static async monitorAndCleanupOrphanedStopLoss(accountId) {
+    try {
+      if (accountId === 'CONTA2') {
+        process.env.API_KEY = process.env.ACCOUNT2_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT2_API_SECRET;
+      } else {
+        process.env.API_KEY = process.env.ACCOUNT1_API_KEY;
+        process.env.API_SECRET = process.env.ACCOUNT1_API_SECRET;
+      }
+
+      const positions = await Futures.getOpenPositions() || [];
+      
+      const Account = await AccountController.get();
+      const configuredSymbols = Account.markets.map(m => m.symbol);
+      
+      let totalOrphanedOrders = 0;
+      let totalCancelledOrders = 0;
+      const errors = [];
+
+      for (const symbol of configuredSymbols) {
+        try {
+          const openOrders = await Order.getOpenOrders(symbol);
+          
+          if (!openOrders || openOrders.length === 0) {
+            continue; // Pula símbolos sem ordens
+          }
+
+          const stopLossOrders = openOrders.filter(order => {
+            return order.reduceOnly === true;
+          });
+
+          if (stopLossOrders.length === 0) {
+            continue; // Pula se não há ordens de stop loss
+          }
+
+          const position = positions.find(p => p.symbol === symbol);
+          
+          if (!position || Math.abs(Number(position.netQuantity)) === 0) {
+            console.log(`🧹 [ORPHAN_MONITOR] ${symbol}: POSIÇÃO FECHADA - ${stopLossOrders.length} ordens de stop loss órfãs detectadas`);
+            
+            totalOrphanedOrders += stopLossOrders.length;
+
+            for (const order of stopLossOrders) {
+              const orderId = order.id;
+
+              try {
+                const cancelResult = await Order.cancelOpenOrder(symbol, orderId);
+                
+                if (cancelResult && !cancelResult.error) {
+                  totalCancelledOrders++;
+                  
+                  OrderController.clearStopLossCheckCache(symbol);
+                } else {
+                  const errorMsg = cancelResult?.error || 'desconhecido';
+                  console.log(`❌ [ORPHAN_MONITOR] ${symbol}: Falha ao cancelar ordem órfã - OrderID: ${orderId}, Erro: ${errorMsg}`);
+                  errors.push(`${symbol} (${orderId}): ${errorMsg}`);
+                }
+              } catch (error) {
+                console.error(`❌ [ORPHAN_MONITOR] Erro ao cancelar ordem ${orderId} para ${symbol}:`, error.message);
+                errors.push(`${symbol} (${orderId}): ${error.message}`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`❌ [ORPHAN_MONITOR] Erro ao verificar ordens para ${symbol}:`, error.message);
+          errors.push(`${symbol}: ${error.message}`);
+        }
+      }
+
+      if (totalOrphanedOrders > 0) {
+        console.log(`🧹 [ORPHAN_MONITOR] Monitoramento concluído:`);
+        console.log(`   • Ordens órfãs detectadas: ${totalOrphanedOrders}`);
+        console.log(`   • Ordens canceladas: ${totalCancelledOrders}`);
+        console.log(`   • Erros: ${errors.length}`);
+        
+        if (errors.length > 0) {
+          console.log(`   • Detalhes dos erros: ${errors.join(', ')}`);
+        }
+      } else {
+        console.log(`🧹 [ORPHAN_MONITOR] Nenhuma ordem órfã encontrada`);
+      }
+
+      return { 
+        orphaned: totalOrphanedOrders, 
+        cancelled: totalCancelledOrders, 
+        errors 
+      };
+
+    } catch (error) {
+      console.error(`❌ [ORPHAN_MONITOR] Erro no monitoramento de ordens órfãs:`, error.message);
+      return { orphaned: 0, cancelled: 0, errors: [error.message] };
+    }
+  }
+
+  /**
+   * Alias para monitorAndCleanupOrphanedStopLoss - Monitora e limpa ordens condicionais órfãs
+   * @param {string} accountId - ID da conta para monitorar
+   * @returns {object} Resultado da operação
+   */
+  static async cleanupOrphanedConditionalOrders(accountId = 'DEFAULT') {
+    return await OrderController.monitorAndCleanupOrphanedStopLoss(accountId);
+  }
+
 }
 
 export default OrderController;
-
-
