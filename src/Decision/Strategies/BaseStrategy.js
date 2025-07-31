@@ -1,3 +1,6 @@
+import { validateLeverageForSymbol } from '../../Utils/Utils.js';
+import AccountController from '../../Controllers/AccountController.js';
+
 export class BaseStrategy {
   /**
    * Analisa dados de mercado e retorna decisão de trading
@@ -92,9 +95,9 @@ export class BaseStrategy {
    * @param {boolean} isLong - Se é posição long
    * @param {number} stopLossPct - Percentual de stop loss (do .env)
    * @param {number} takeProfitPct - Percentual de take profit (do .env)
-   * @returns {object|null} - Objeto com stop e target ou null se inválido
+   * @returns {Promise<object|null>} - Objeto com stop e target ou null se inválido
    */
-  calculateStopAndTarget(data, price, isLong, stopLossPct, takeProfitPct) {
+  async calculateStopAndTarget(data, price, isLong, stopLossPct, takeProfitPct) {
     // Validação dos parâmetros
     if (!stopLossPct || !takeProfitPct) {
       console.error('❌ [BASE_STRATEGY] Parâmetros de stop/target inválidos:', { stopLossPct, takeProfitPct });
@@ -104,11 +107,7 @@ export class BaseStrategy {
     // CORREÇÃO CRÍTICA: Obtém a alavancagem da conta para calcular o stop loss correto
     let leverage = 1; // Default
     try {
-      // Importa dinamicamente para evitar dependência circular
-      const { validateLeverageForSymbol } = await import('../../Utils/Utils.js');
-      const AccountController = await import('../../Controllers/AccountController.js');
-      
-      const Account = await AccountController.default.get();
+      const Account = await AccountController.get();
       if (Account && Account.leverage) {
         const rawLeverage = Account.leverage;
         leverage = validateLeverageForSymbol(data.market.symbol, rawLeverage);

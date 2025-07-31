@@ -150,7 +150,7 @@ export class DefaultStrategy extends BaseStrategy {
       return null;
     }
     
-    const stopTarget = this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
+    const stopTarget = await this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
     
     validationTrace.push({
       layer: '6. Cálculo de Stop e Target',
@@ -282,7 +282,7 @@ export class DefaultStrategy extends BaseStrategy {
       }
 
       // Cálculo de stop e target usando configurações do .env
-      const stopTarget = this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
+      const stopTarget = await this.calculateStopAndTarget(data, price, signals.isLong, stopLossPct, takeProfitPct);
       if (!stopTarget) {
         return null;
       }
