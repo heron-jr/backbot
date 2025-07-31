@@ -61,17 +61,13 @@ class TrailingStop {
         return;
       }
       
-      // Atualiza timestamp do último salvamento
       TrailingStop.lastSaveTime = now;
       
-      // Converte o Map para um formato serializável
       const serializableState = Array.from(TrailingStop.trailingState.entries());
       
-      // Cria o diretório se não existir
       const dir = path.dirname(TrailingStop.persistenceFilePath);
       await fs.mkdir(dir, { recursive: true });
       
-      // Salva o estado em JSON
       await fs.writeFile(TrailingStop.persistenceFilePath, JSON.stringify(serializableState, null, 2));
       
       TrailingStop.debug(`💾 [PERSISTENCE] Estado do trailing stop salvo: ${serializableState.length} posições`);
@@ -81,11 +77,10 @@ class TrailingStop {
   }
 
   /**
-   * Carrega o estado do trailing stop do arquivo JSON
+   * Carrega o estado do trailing stop do arquivo JSON.
    */
   static async loadStateFromFile() {
     try {
-      // Verifica se o arquivo existe
       try {
         await fs.access(TrailingStop.persistenceFilePath);
       } catch (error) {
@@ -93,16 +88,13 @@ class TrailingStop {
         return;
       }
       
-      // Lê o arquivo
       const fileContent = await fs.readFile(TrailingStop.persistenceFilePath, 'utf8');
       const serializableState = JSON.parse(fileContent);
       
-      // Reconstrói o Map
       TrailingStop.trailingState = new Map(serializableState);
       
       console.log(`📂 [PERSISTENCE] Estado do trailing stop carregado: ${TrailingStop.trailingState.size} posições`);
       
-      // Log das posições carregadas
       for (const [symbol, state] of TrailingStop.trailingState.entries()) {
         console.log(`📊 [PERSISTENCE] ${symbol}: Trailing Stop: $${state.trailingStopPrice?.toFixed(4) || 'N/A'}, Ativo: ${state.activated}`);
       }
@@ -114,7 +106,7 @@ class TrailingStop {
   }
 
   /**
-   * Limpa estados obsoletos que não correspondem a posições abertas atuais
+   * Limpa estados obsoletos que não correspondem a posições abertas atuais.
    */
   static async cleanupObsoleteStates() {
     try {
@@ -126,7 +118,6 @@ class TrailingStop {
       let cleanedStates = 0;
       const statesToRemove = [];
       
-      // Verifica quais estados não correspondem a posições abertas
       for (const [symbol, state] of TrailingStop.trailingState.entries()) {
         if (!openSymbols.includes(symbol)) {
           statesToRemove.push(symbol);
@@ -134,7 +125,6 @@ class TrailingStop {
         }
       }
       
-      // Remove os estados obsoletos
       for (const symbol of statesToRemove) {
         TrailingStop.trailingState.delete(symbol);
         cleanedStates++;
@@ -161,11 +151,9 @@ class TrailingStop {
     try {
       console.log(`🔄 [MIGRATION] Iniciando migração do Trailing Stop...`);
       
-      // PRIMEIRO: Limpa completamente o arquivo de persistência
       console.log(`🧹 [MIGRATION] Limpando arquivo de persistência para dados frescos...`);
       await TrailingStop.forceCleanupAllStates();
       
-      // SEGUNDO: Carrega dados atuais das posições abertas
       console.log(`📋 [MIGRATION] Obtendo posições abertas atuais...`);
       
       const positions = await Futures.getOpenPositions();
@@ -180,13 +168,11 @@ class TrailingStop {
       const Account = await AccountController.get();
 
       for (const position of positions) {
-        // Verifica se já existe estado para esta posição
         if (TrailingStop.trailingState.has(position.symbol)) {
           console.log(`ℹ️ [MIGRATION] ${position.symbol}: Estado já existe, pulando...`);
           continue;
         }
 
-        // Verifica se é um par autorizado
         const marketInfo = Account.markets?.find(market => market.symbol === position.symbol);
         if (!marketInfo) {
           console.log(`⚠️ [MIGRATION] ${position.symbol}: Par não autorizado, pulando...`);
@@ -195,11 +181,9 @@ class TrailingStop {
 
         console.log(`🔄 [MIGRATION] ${position.symbol}: Criando estado inicial do Trailing Stop...`);
 
-        // Calcula o preço de entrada e atual
         const entryPrice = parseFloat(position.entryPrice || position.markPrice || 0);
         const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
         
-        // Determina se é LONG ou SHORT
         const netQuantity = parseFloat(position.netQuantity || 0);
         const isLong = netQuantity > 0;
         const isShort = netQuantity < 0;
@@ -209,29 +193,25 @@ class TrailingStop {
           continue;
         }
 
-        // Calcula o stop loss inicial
         const initialStopLossPrice = TrailingStop.calculateInitialStopLossPrice(position, Account);
         
-        // CORREÇÃO CRÍTICA: Calcula PnL para determinar se deve ativar imediatamente
         const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
         const shouldActivate = pnl > 0;
         
-        // Cria o estado inicial com dados ATUAIS
         const initialState = {
           symbol: position.symbol,
           entryPrice: entryPrice,
           isLong: isLong,
           isShort: isShort,
           initialStopLossPrice: initialStopLossPrice,
-          highestPrice: isLong ? currentPrice : null, // Usa preço atual para LONG
-          lowestPrice: isShort ? currentPrice : null, // Usa preço atual para SHORT
+          highestPrice: isLong ? currentPrice : null,
+          lowestPrice: isShort ? currentPrice : null,
           trailingStopPrice: initialStopLossPrice,
-          activated: shouldActivate, // ATIVA IMEDIATAMENTE se lucrativo
-          initialized: shouldActivate, // Marca como inicializado se ativado
+          activated: shouldActivate,
+          initialized: shouldActivate,
           createdAt: new Date().toISOString()
         };
 
-        // Adiciona ao estado
         TrailingStop.trailingState.set(position.symbol, initialState);
         newStatesCreated++;
 
@@ -273,17 +253,12 @@ class TrailingStop {
    */
   static calculatePnL(position, account) {
     try { 
-      // PnL em dólar, que já estava correto.
       const pnl = parseFloat(position.pnlUnrealized ?? '0');
 
-      // O 'netCost' aqui é tratado como o VALOR NOCIONAL da posição.
       const notionalValue = Math.abs(parseFloat(position.netCost ?? '0'));
       
-      // A base de custo real (MARGEM) é o valor nocional dividido pela alavancagem.
-      // Se a alavancagem for 0 ou não informada, consideramos 1 para evitar divisão por zero.
       const rawLeverage = Number(account?.leverage);
       
-      // CORREÇÃO: Valida a alavancagem baseada nas regras da Backpack
       const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
       
       const costBasis = notionalValue / leverage;
@@ -313,7 +288,6 @@ class TrailingStop {
     try {
       const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
       
-      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
       if (!account?.leverage) {
         console.error(`❌ [STOP_LOSS_ERROR] ${position.symbol}: Alavancagem não encontrada na Account`);
         return null;
@@ -321,21 +295,17 @@ class TrailingStop {
       
       const rawLeverage = Number(account.leverage);
       
-      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
       const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
       
       const baseStopLossPct = Math.abs(Number(process.env.MAX_NEGATIVE_PNL_STOP_PCT || -10));
       
-      // Calcula a porcentagem real considerando a alavancagem validada
       const actualStopLossPct = baseStopLossPct / leverage;
       
-      // Determina se é LONG ou SHORT
       const isLong = parseFloat(position.netQuantity) > 0;
       
-      // Calcula o preço de stop loss inicial
       const initialStopLossPrice = isLong 
-        ? currentPrice * (1 - actualStopLossPct / 100)  // LONG: preço menor
-        : currentPrice * (1 + actualStopLossPct / 100); // SHORT: preço maior
+        ? currentPrice * (1 - actualStopLossPct / 100)
+        : currentPrice * (1 + actualStopLossPct / 100);
       
       return initialStopLossPrice;
     } catch (error) {
@@ -367,10 +337,8 @@ class TrailingStop {
       TrailingStop.trailingState.delete(symbol);
       TrailingStop.colorLogger.trailingCleanup(`${symbol}: Estado limpo (${reason}) - Trailing Stop: $${state?.trailingStopPrice?.toFixed(4) || 'N/A'}`);
       
-      // Remove do cache de logs também
       TrailingStop.trailingModeLogged.delete(symbol);
       
-      // Salva o estado após a limpeza
       await TrailingStop.saveStateToFile();
     }
   }
@@ -384,7 +352,6 @@ class TrailingStop {
     if (position && position.symbol) {
       await TrailingStop.clearTrailingState(position.symbol, `posição fechada: ${closeReason}`);
       
-      // Remove do cache de logs de ajuste de alavancagem
       clearLeverageAdjustLog(position.symbol);
     }
   }
@@ -400,18 +367,14 @@ class TrailingStop {
       const stateCount = TrailingStop.trailingState.size;
       TrailingStop.trailingState.clear();
       
-      // Limpa o cache de logs também
       TrailingStop.trailingModeLogged.clear();
       
-      // Limpa o cache de logs de ajuste de alavancagem
       clearLeverageAdjustLog();
       
-      // Remove o arquivo de persistência se existir
       try {
         await fs.unlink(TrailingStop.persistenceFilePath);
         console.log(`🗑️ [FORCE_CLEANUP] Arquivo de persistência removido`);
       } catch (error) {
-        // Arquivo não existe, não é problema
         console.log(`ℹ️ [FORCE_CLEANUP] Arquivo de persistência não encontrado`);
       }
       
@@ -429,13 +392,11 @@ class TrailingStop {
    */
   async updateTrailingStopForPosition(position) {
     try {
-      // Verifica se o trailing stop está habilitado
       const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
       if (!enableTrailingStop) {
         return null;
       }
 
-      // Obtém a distância do trailing stop (em porcentagem)
       const trailingStopDistance = Number(process.env.TRAILING_STOP_DISTANCE);
       
       if (isNaN(trailingStopDistance) || trailingStopDistance <= 0) {
@@ -443,10 +404,8 @@ class TrailingStop {
         return null;
       }
 
-      // Calcula PnL da posição
       const Account = await AccountController.get();
       
-      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
       if (!Account.leverage) {
         console.error(`❌ [TRAILING_ERROR] ${position.symbol}: Alavancagem não encontrada na Account`);
         return null;
@@ -454,26 +413,22 @@ class TrailingStop {
       
       const rawLeverage = Account.leverage;
       
-      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
       const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
       
       const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
 
-      // Obtém preço atual da posição
       const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
       if (currentPrice <= 0) {
         console.error(`❌ [TRAILING_ERROR] Preço atual inválido para ${position.symbol}: ${currentPrice}`);
         return null;
       }
 
-      // Obtém preço de entrada
       const entryPrice = parseFloat(position.entryPrice || 0);
       if (entryPrice <= 0) {
         console.error(`❌ [TRAILING_ERROR] Preço de entrada inválido para ${position.symbol}: ${entryPrice}`);
         return null;
       }
 
-      // Determina se é LONG ou SHORT
       const isLong = parseFloat(position.netQuantity) > 0;
       const isShort = parseFloat(position.netQuantity) < 0;
 
@@ -481,26 +436,21 @@ class TrailingStop {
         return null;
       }
 
-      // Obtém o estado atual do trailing stop
       let trailingState = TrailingStop.trailingState.get(position.symbol);
 
-      // --- CORREÇÃO CRÍTICA: LÓGICA DE ATIVAÇÃO ---
-      // Se a posição está lucrativa e AINDA NÃO TEM um estado, crie-o e ative-o IMEDIATAMENTE
       if (!trailingState && pnl > 0) {
-        // Calcula o stop loss inicial
         const initialStopLossPrice = TrailingStop.calculateInitialStopLossPrice(position, Account);
         
-        // CORREÇÃO CRÍTICA: Cria o estado COMPLETO e ATIVA IMEDIATAMENTE
         const newState = {
           symbol: position.symbol,
           entryPrice: entryPrice,
           initialStopLossPrice: initialStopLossPrice,
-          trailingStopPrice: initialStopLossPrice, // Começa com o stop inicial
+          trailingStopPrice: initialStopLossPrice,
           highestPrice: isLong ? currentPrice : null,
           lowestPrice: isShort ? currentPrice : null,
           isLong: isLong,
           isShort: isShort,
-          activated: true, // ATIVA IMEDIATAMENTE
+          activated: true,
           initialized: true,
           createdAt: new Date().toISOString()
         };
@@ -510,16 +460,13 @@ class TrailingStop {
         
         TrailingStop.colorLogger.trailingActivated(`${position.symbol}: Trailing Stop ATIVADO! Posição lucrativa detectada - PnL: ${pnlPct.toFixed(2)}%, Preço de Entrada: $${entryPrice.toFixed(4)}, Preço Atual: $${currentPrice.toFixed(4)}, Stop Inicial: $${initialStopLossPrice.toFixed(4)}`);
         
-        return newState; // Retorna para que a lógica de UPDATE só rode no próximo ciclo
+        return newState;
       }
 
-      // --- CORREÇÃO CRÍTICA: REATIVAÇÃO DE ESTADOS EXISTENTES ---
-      // Se o estado existe mas NÃO está ativado E a posição está lucrativa, ATIVA IMEDIATAMENTE
       if (trailingState && !trailingState.activated && pnl > 0) {
         trailingState.activated = true;
         trailingState.initialized = true;
         
-        // Atualiza preços se necessário
         if (isLong && currentPrice > trailingState.highestPrice) {
           trailingState.highestPrice = currentPrice;
         }
@@ -531,25 +478,19 @@ class TrailingStop {
         
         TrailingStop.colorLogger.trailingActivated(`${position.symbol}: Trailing Stop REATIVADO! Estado existente ativado - PnL: ${pnlPct.toFixed(2)}%, Preço Atual: $${currentPrice.toFixed(4)}, Stop: $${trailingState.trailingStopPrice.toFixed(4)}`);
         
-        return trailingState; // Retorna para que a lógica de UPDATE só rode no próximo ciclo
+        return trailingState;
       }
 
-      // Trailing stop só é ativado se a posição estiver com lucro
       if (pnl <= 0) {
-        // NÃO remove o estado se posição não está mais lucrativa
-        // O Trailing Stop, uma vez ativado, deve permanecer ativo até a posição ser fechada
-        // Isso evita que a posição fique "órfã" sem proteção
         if (trailingState && trailingState.activated) {
           TrailingStop.colorLogger.trailingHold(`${position.symbol}: Posição em prejuízo mas Trailing Stop mantido ativo para proteção - Trailing Stop: $${trailingState.trailingStopPrice?.toFixed(4) || 'N/A'}`);
           return trailingState;
         }
         
-        // Só remove se nunca foi ativado
         TrailingStop.clearTrailingState(position.symbol);
         return null;
       }
 
-      // Atualiza o trailing stop baseado na direção da posição
       if (isLong) {
         if (currentPrice > trailingState.highestPrice || trailingState.highestPrice === null) {
           trailingState.highestPrice = currentPrice;
@@ -596,7 +537,6 @@ class TrailingStop {
       console.error(`[TRAILING_UPDATE] Erro ao atualizar trailing stop para ${position.symbol}:`, error.message);
       return null;
     } finally {
-      // Salva o estado automaticamente após qualquer modificação
       await TrailingStop.saveStateToFile();
     }
   }
@@ -622,13 +562,11 @@ class TrailingStop {
       let reason = '';
 
       if (trailingState.isLong) {
-        // Para LONG: fecha se preço atual <= trailing stop price
         if (currentPrice <= trailingState.trailingStopPrice) {
           shouldClose = true;
           reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} <= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
         }
       } else if (trailingState.isShort) {
-        // Para SHORT: fecha se preço atual >= trailing stop price
         if (currentPrice >= trailingState.trailingStopPrice) {
           shouldClose = true;
           reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} >= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
@@ -695,7 +633,6 @@ class TrailingStop {
     try {
       const now = Date.now();
       
-      // Verifica se precisa atualizar o cache de volume
       if (!this.cachedVolume || (now - this.lastVolumeCheck) > this.volumeCacheTimeout) {
         this.cachedVolume = await PnlController.get30DayVolume();
         this.lastVolumeCheck = now;
@@ -703,10 +640,9 @@ class TrailingStop {
 
       const volume30Days = this.cachedVolume || 0;
 
-      // Estrutura de taxas da Backpack baseada no volume de 30 dias
       let tier;
       
-      if (volume30Days >= 10000000) { // $10M+
+      if (volume30Days >= 10000000) {
         tier = { maker: 0.0001, taker: 0.0002, name: 'DIAMOND' };
       } else if (volume30Days >= 5000000) { // $5M+
         tier = { maker: 0.0002, taker: 0.0003, name: 'PLATINUM' };
@@ -727,8 +663,6 @@ class TrailingStop {
         tier: tier
       };
     } catch (error) {
-      // Erro silencioso ao obter tier de taxas
-      // Fallback para taxas padrão
       return {
         makerFee: 0.0006,
         takerFee: 0.0007,
@@ -746,17 +680,12 @@ class TrailingStop {
    */
   calculatePnL(position, account) {
     try { 
-      // PnL em dólar, que já estava correto.
       const pnl = parseFloat(position.pnlUnrealized ?? '0');
 
-      // O 'netCost' aqui é tratado como o VALOR NOCIONAL da posição.
       const notionalValue = Math.abs(parseFloat(position.netCost ?? '0'));
       
-      // A base de custo real (MARGEM) é o valor nocional dividido pela alavancagem.
-      // Se a alavancagem for 0 ou não informada, consideramos 1 para evitar divisão por zero.
       const rawLeverage = Number(account?.leverage);
       
-      // CORREÇÃO: Valida a alavancagem baseada nas regras da Backpack
       const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
       
       const costBasis = notionalValue / leverage;
@@ -790,10 +719,8 @@ class TrailingStop {
         return { minProfitUSD: 0, minProfitPct: 0 };
       }
 
-      // Calcula o valor total das taxas (entrada + saída)
       const totalFees = notional * fees.totalFee;
       
-      // Profit mínimo deve ser pelo menos o valor das taxas
       const minProfitUSD = totalFees;
       const minProfitPct = (minProfitUSD / notional) * 100;
 
@@ -822,27 +749,18 @@ class TrailingStop {
     try {
       const Account = await AccountController.get();
       
-      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
       if (!Account.leverage) {
         console.error(`❌ [PROFIT_CHECK] ${position.symbol}: Alavancagem não encontrada na Account`);
         return false;
-      }
-      
-      const rawLeverage = Account.leverage;
-      
-      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
-      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
+      }      
       
       const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
       
-      // Configuração do stop loss por porcentagem (opcional)
       const MAX_NEGATIVE_PNL_STOP_PCT = process.env.MAX_NEGATIVE_PNL_STOP_PCT;
       
-      // Só valida se a configuração estiver presente
       if (MAX_NEGATIVE_PNL_STOP_PCT !== undefined && MAX_NEGATIVE_PNL_STOP_PCT !== null && MAX_NEGATIVE_PNL_STOP_PCT !== '') {
         const maxNegativePnlStopPct = parseFloat(MAX_NEGATIVE_PNL_STOP_PCT);
         
-        // Verifica se os valores são válidos
         if (isNaN(maxNegativePnlStopPct) || !isFinite(maxNegativePnlStopPct)) {
           console.error(`❌ [PROFIT_CHECK] Valor inválido para MAX_NEGATIVE_PNL_STOP_PCT: ${MAX_NEGATIVE_PNL_STOP_PCT}`);
           return false;
@@ -853,29 +771,23 @@ class TrailingStop {
           return false;
         }
         
-        // Verifica se deve fechar por stop loss baseado no pnlPct
         if (pnlPct <= maxNegativePnlStopPct) {
           console.log(`🚨 [PROFIT_CHECK] ${position.symbol}: Fechando por stop loss - PnL ${pnlPct.toFixed(3)}% <= limite ${maxNegativePnlStopPct.toFixed(3)}%`);
           return true;
         }
       }
       
-      // Obtém taxas dinâmicas baseado no volume de 30 dias via API
       const fees = await this.getFeeTier();
       
-      // Calcula o profit mínimo necessário para cobrir as taxas
-      const { minProfitUSD, minProfitPct, totalFees } = this.calculateMinimumProfitForFees(position, fees);
+      const { minProfitUSD, totalFees } = this.calculateMinimumProfitForFees(position, fees);
       
-      // Lucro líquido (após taxas)
       const netProfit = pnl - totalFees;
 
-      // Só fecha se há lucro líquido E ele cobre as taxas
       if (netProfit > 0 && netProfit >= minProfitUSD) {
         console.log(`✅ [PROFIT_CHECK] ${position.symbol}: Fechando por lucro $${netProfit.toFixed(4)} >= mínimo $${minProfitUSD.toFixed(4)}`);
         return true;
       }
       
-      // Só mostra logs se há lucro significativo mas não suficiente
       if (netProfit > 0.01 && netProfit < minProfitUSD) {
         console.log(`⚠️ [PROFIT_CHECK] ${position.symbol}: Lucro $${netProfit.toFixed(4)} < mínimo $${minProfitUSD.toFixed(4)}`);
       }
@@ -903,27 +815,18 @@ class TrailingStop {
     try {
       const Account = await AccountController.get();
       
-      // VALIDAÇÃO: Verifica se a alavancagem existe na Account
       if (!Account.leverage) {
         console.error(`❌ [CONFIG_PROFIT] ${position.symbol}: Alavancagem não encontrada na Account`);
         return false;
       }
       
-      const rawLeverage = Account.leverage;
-      
-      // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
-      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
-      
       const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
       
-      // Configuração do stop loss por porcentagem (opcional)
       const MAX_NEGATIVE_PNL_STOP_PCT = process.env.MAX_NEGATIVE_PNL_STOP_PCT;
       
-      // Só valida se a configuração estiver presente
       if (MAX_NEGATIVE_PNL_STOP_PCT !== undefined && MAX_NEGATIVE_PNL_STOP_PCT !== null && MAX_NEGATIVE_PNL_STOP_PCT !== '') {
         const maxNegativePnlStopPct = parseFloat(MAX_NEGATIVE_PNL_STOP_PCT);
         
-        // Verifica se os valores são válidos
         if (isNaN(maxNegativePnlStopPct) || !isFinite(maxNegativePnlStopPct)) {
           console.error(`❌ [CONFIG_PROFIT] Valor inválido para MAX_NEGATIVE_PNL_STOP_PCT: ${MAX_NEGATIVE_PNL_STOP_PCT}`);
           return false;
@@ -934,36 +837,27 @@ class TrailingStop {
           return false;
         }
         
-        // Verifica se deve fechar por stop loss baseado no pnlPct
         if (pnlPct <= maxNegativePnlStopPct) {
           console.log(`🚨 [CONFIG_PROFIT] ${position.symbol}: Fechando por stop loss - PnL ${pnlPct.toFixed(3)}% <= limite ${maxNegativePnlStopPct.toFixed(3)}%`);
           return true;
         }
       }
       
-      // Configuração de profit mínimo (apenas porcentagem)
-      // MIN_PROFIT_PERCENTAGE=0: Fecha quando lucro líquido > 0 (apenas cobrir taxas)
-      // MIN_PROFIT_PERCENTAGE=5: Fecha quando lucro líquido >= 5% do notional
-      // MIN_PROFIT_PERCENTAGE=10: Fecha quando lucro líquido >= 10% do notional
       const minProfitPct = Number(process.env.MIN_PROFIT_PERCENTAGE || 10);
       
-      // Obtém taxas dinâmicas baseado no volume de 30 dias via API
       const fees = await this.getFeeTier();
       
       const notional = parseFloat(position.netExposureNotional || position.notional || 0);
       const totalFees = notional * fees.totalFee;
       
-      // Lucro líquido (após taxas)
       const netProfit = pnl - totalFees;
       const netProfitPct = notional > 0 ? (netProfit / notional) * 100 : 0;
       
-      // Só fecha se há lucro líquido E atende ao critério configurado
       if (netProfit > 0 && netProfitPct >= minProfitPct) {
         console.log(`\n✅ [CONFIG_PROFIT] ${position.symbol}: Fechando por lucro ${netProfitPct.toFixed(3)}% >= mínimo ${minProfitPct.toFixed(3)}%`);
         return true;
       }
       
-      // Só mostra logs se há lucro significativo mas não suficiente
       if (netProfit > 0.01 && netProfitPct < minProfitPct) {
         console.log(`\n⚠️ [CONFIG_PROFIT] ${position.symbol}: Lucro ${netProfitPct.toFixed(3)}% < mínimo ${minProfitPct.toFixed(3)}%`);
       }
@@ -987,7 +881,6 @@ class TrailingStop {
 
       TrailingStop.debug(`🔍 [TRAILING_MONITOR] Verificando ${positions.length} posições abertas...`);
 
-      // Obtém dados da conta uma vez para todas as posições
       const Account = await AccountController.get();
 
       for (const position of positions) {
@@ -1019,18 +912,15 @@ class TrailingStop {
           if (trailingState && trailingState.activated) {
             TrailingStop.colorLogger.trailingActiveCheck(`${position.symbol}: Trailing Stop ativo - verificando gatilho`);
             
-            // CORREÇÃO CRÍTICA: Usa o trailingState diretamente, não o trailingInfo
             const trailingDecision = this.checkTrailingStopTrigger(position, trailingState);
             
-            // CORREÇÃO CRÍTICA: Se o trailing stop decidiu fechar, EXECUTE a ação imediatamente
             if (trailingDecision && trailingDecision.shouldClose) {
               TrailingStop.colorLogger.positionClosed(`🚨 [TRAILING_EXECUTION] ${position.symbol}: Executando fechamento por Trailing Stop. Motivo: ${trailingDecision.reason}`);
               await OrderController.forceClose(position, Account);
               await TrailingStop.onPositionClosed(position, 'trailing_stop');
-              continue; // Pula para a próxima posição, pois esta já foi fechada
+              continue;
             }
             
-            // Log de monitoramento para trailing stop ativo (apenas se não foi fechado)
             const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
             const priceType = position.markPrice ? 'Current Price' : 'Last Price';
             const distance = trailingState.isLong 
@@ -1049,13 +939,11 @@ class TrailingStop {
                 `Distância até Stop: ${distance}%\n`
             );
           } else {
-            // Trailing Stop habilitado mas não ativo para esta posição
             const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
             const priceType = position.markPrice ? 'Current Price' : 'Last Price';
             const pnl = TrailingStop.calculatePnL(position, Account);
             const entryPrice = parseFloat(position.entryPrice || 0);
             
-            // Mensagem user-friendly explicando por que o Trailing Stop não está ativo
             if (pnl.pnlPct < 0) {
               TrailingStop.colorLogger.trailingWaitingProfitable(`${position.symbol}: Trailing Stop aguardando posição ficar lucrativa - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}% (prejuízo)\n`);
             } else {
@@ -1063,12 +951,8 @@ class TrailingStop {
             }
           }
         } else {
-          // MODO TAKE PROFIT FIXO
-          // IMPORTANTE: Se Trailing Stop está habilitado, IGNORA COMPLETAMENTE as regras de Take Profit fixo
-          // O Trailing Stop é o único responsável pela saída por lucro
           TrailingStop.colorLogger.profitFixed(`${position.symbol}: Modo Take Profit fixo ativo`);
           
-          // Verifica se deve fechar por profit mínimo configurado (prioridade maior)
           if (await this.shouldCloseForConfiguredProfit(position)) {
             TrailingStop.colorLogger.positionClosed(`💰 [PROFIT_CONFIGURED] ${position.symbol}: Fechando por profit mínimo configurado`);
             await OrderController.forceClose(position, Account);
@@ -1076,7 +960,6 @@ class TrailingStop {
             continue;
           }
 
-          // Verifica se deve fechar por profit mínimo baseado nas taxas
           if (await this.shouldCloseForMinimumProfit(position)) {
             TrailingStop.colorLogger.positionClosed(`💰 [PROFIT_MINIMUM] ${position.symbol}: Fechando por profit mínimo baseado em taxas`);
             await OrderController.forceClose(position, Account);
@@ -1084,7 +967,6 @@ class TrailingStop {
             continue;
           }
 
-          // Verifica ADX crossover para estratégia PRO_MAX
           const adxCrossoverDecision = await this.checkADXCrossover(position);
           if (adxCrossoverDecision && adxCrossoverDecision.shouldClose) {
             TrailingStop.colorLogger.positionClosed(`📈 [ADX_CROSSOVER] ${position.symbol}: ${adxCrossoverDecision.reason}`);
@@ -1100,10 +982,7 @@ class TrailingStop {
           TrailingStop.colorLogger.profitMonitor(`${position.symbol}: Take Profit fixo - ${priceType}: $${currentPrice.toFixed(4)}, Preço de Entrada: $${entryPrice.toFixed(4)}, PnL: ${pnl.pnlPct.toFixed(2)}%\n`);
         }
 
-        // 3. VERIFICAÇÃO DE FAILSAFE ORDERS (sempre executada, independente do modo)
-        // Esta verificação deve acontecer independente do Trailing Stop ou Take Profit
         try {
-          // Verifica se o par está autorizado antes de tentar criar stop loss
           const marketInfo = Account.markets.find(m => m.symbol === position.symbol);
           
           if (!marketInfo) {
@@ -1129,13 +1008,11 @@ class TrailingStop {
    */
   async checkADXCrossover(position) {
     try {
-      // Só verifica para estratégia PRO_MAX
       const strategyType = process.env.TRADING_STRATEGY || 'DEFAULT';
       if (strategyType !== 'PRO_MAX') {
         return null;
       }
 
-      // Obtém dados de mercado para calcular indicadores ADX
       const timeframe = process.env.TIME || '5m';
       const candles = await Markets.getKLines(position.symbol, timeframe, 30);
       
@@ -1143,16 +1020,13 @@ class TrailingStop {
         return null;
       }
 
-      // Calcula indicadores incluindo ADX
       const { calculateIndicators } = await import('../Decision/Indicators.js');
       const indicators = calculateIndicators(candles);
       
-      // Verifica se tem dados ADX válidos
       if (!indicators.adx || !indicators.adx.diPlus || !indicators.adx.diMinus) {
         return null;
       }
 
-      // Usa a estratégia PRO_MAX para verificar crossover
       const { ProMaxStrategy } = await import('../Decision/Strategies/ProMaxStrategy.js');
       const strategy = new ProMaxStrategy();
       
@@ -1204,10 +1078,8 @@ class TrailingStop {
   }
 }
 
-// Cria a instância
 const trailingStopInstance = new TrailingStop();
 
-// Adiciona os métodos estáticos à instância para garantir acesso
 trailingStopInstance.saveStateToFile = TrailingStop.saveStateToFile;
 trailingStopInstance.loadStateFromFile = TrailingStop.loadStateFromFile;
 trailingStopInstance.clearTrailingState = TrailingStop.clearTrailingState;
