@@ -69,7 +69,7 @@ function calculateIntradayVWAP(candles) {
 }
 
 /**
- * Função WaveTrend (MOMENTUM) - Baseada no PineScript CypherPunk
+ * Função WaveTrend (MOMENTUM) - Indicador de momentum avançado
  * @param {Array} candles - Array de candles
  * @param {number} channelLen - Comprimento do Canal (padrão: 9)
  * @param {number} avgLen - Comprimento da Média (padrão: 12)
@@ -382,7 +382,7 @@ function analyzeTrends(data) {
 }
 
 /**
- * Calcula o MOMENTUM para a estratégia CypherPunk
+ * Calcula o MOMENTUM para análise de tendência
  * Baseado em RSI e análise de tendência
  * @param {Array<number>} closes - Array de preços de fechamento
  * @returns {Object} - Dados do momentum

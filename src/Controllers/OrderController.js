@@ -1,8 +1,8 @@
 import Order from '../Backpack/Authenticated/Order.js';
 import Futures from '../Backpack/Authenticated/Futures.js';
 import AccountController from './AccountController.js';
-import Utils from '../utils/Utils.js';
-import { validateLeverageForSymbol } from '../utils/Utils.js';
+import Utils from '../Utils/Utils.js';
+import { validateLeverageForSymbol } from '../Utils/Utils.js';
 import Markets from '../Backpack/Public/Markets.js';
 import TrailingStop from '../TrailingStop/TrailingStop.js';
 

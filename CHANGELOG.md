@@ -236,7 +236,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - **Estratégias de Trading**
   - DEFAULT: Farm de volume com stop loss básico
   - PRO_MAX: Estratégia avançada com múltiplos targets
-  - CYPHERPUNK: Sistema AMBIENT + ACTION
+  
 
 ### 📚 Documentação
 - **README.md**: Documentação principal do projeto

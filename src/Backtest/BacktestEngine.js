@@ -651,7 +651,7 @@ export class BacktestEngine {
         stopLoss: decision.stop, // Primeiro stop para compatibilidade
         takeProfit: decision.target, // Primeiro target para compatibilidade
         targets: decision.targets || [decision.target], // Todos os targets
-        stopLosses: decision.stopLosses || [decision.stop], // Todos os stops (CypherPunk)
+        stopLosses: decision.stopLosses || [decision.stop], // Todos os stops
         executedTargets: [], // Targets já executados
         remainingUnits: units, // Unidades restantes
         timestamp,
@@ -660,7 +660,7 @@ export class BacktestEngine {
       
       this.openPositions.set(symbol, position);
       
-      // Log específico para CypherPunk
+      // Log específico para estratégias com trade system
       if (decision.tradeSystem) {
         this.logger.info(`📈 ABERTO ${symbol} ${decision.action.toUpperCase()} @ $${actualEntryPrice.toFixed(6)}`);
         this.logger.info(`   🎯 Targets: ${position.targets.map((t, i) => `${i+1}=$${t.toFixed(6)} (${decision.tradeSystem.targetPercentages[i]}%)`).join(' | ')}`);
@@ -811,7 +811,7 @@ export class BacktestEngine {
       
       // Verifica stop loss (fecha completamente)
       if (this.config.enableStopLoss) {
-        // Verifica stops múltiplos (CypherPunk)
+        // Verifica stops múltiplos
         if (position.stopLosses && position.stopLosses.length > 1) {
           for (let i = 0; i < position.stopLosses.length; i++) {
             const stop = position.stopLosses[i];
@@ -854,7 +854,7 @@ export class BacktestEngine {
         }
       }
       
-      // Verifica take profits parciais (estratégia PRO_MAX e CYPHERPUNK) - PRIORIDADE 3
+      // Verifica take profits parciais (estratégia PRO_MAX) - PRIORIDADE 3
       if (!shouldClose && this.config.enableTakeProfit && position.targets) {
         for (let i = 0; i < position.targets.length; i++) {
           const target = position.targets[i];
@@ -960,7 +960,7 @@ export class BacktestEngine {
       targetIndex
     });
     
-    // Log específico para CypherPunk
+    // Log específico para estratégias com trade system
     if (position.decision?.tradeSystem) {
       const percentage = position.decision.tradeSystem.targetPercentages[targetIndex];
       this.logger.info(`🎯 TARGET ${targetIndex + 1} ${symbol} ${position.action.toUpperCase()} @ $${actualTargetPrice.toFixed(6)} (${percentage}%)`);

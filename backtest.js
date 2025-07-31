@@ -277,11 +277,7 @@ async function runRealBacktest(strategy) {
       proMaxTakeProfit: Number(process.env.PRO_MAX_TAKE_PROFIT),
       proMaxTrailingStop: Number(process.env.PRO_MAX_TRAILING_STOP),
       
-      // CYPHERPUNK
-      cypherpunkAmbientTimeframe: process.env.CYPHERPUNK_AMBIENT_TIMEFRAME,
-      cypherpunkActionTimeframe: process.env.CYPHERPUNK_ACTION_TIMEFRAME,
-      cypherpunkRiskRewardRatio: Number(process.env.CYPHERPUNK_RISK_REWARD_RATIO),
-      cypherpunkMaxRiskPerTrade: Number(process.env.CYPHERPUNK_MAX_RISK_PER_TRADE)
+
     }
   };
 
@@ -481,29 +477,7 @@ async function runComparativeBacktest() {
         useMacdValidation: 'true',
         ignoreBronzeSignals: 'false'
       }
-    },
-    {
-      ...baseConfig,
-      strategy: 'CYPHERPUNK',
-      investmentPerTrade: Math.round(baseConfig.initialBalance * 0.1), // 10% do saldo (gerenciado pela estratégia)
-      strategyConfig: {
-        // Trade System CypherPunk
-        targets: 3, // 3 pontos de entrada
-        stopLossPercentage: 2, // 2% stop loss
-        takeProfitPercentage: 10, // 10% take profit
-        // Sistema AMBIENT + ACTION
-        ambientTimeframe: baseConfig.interval, // Usa o timeframe selecionado como AMBIENT
-        actionTimeframe: getActionTimeframe(baseConfig.interval), // Calcula ACTION automaticamente
-        // Configurações dos indicadores
-        vwapThreshold: 0.5, // Sensibilidade VWAP
-        momentumThreshold: 0.3, // Sensibilidade MOMENTUM
-        moneyFlowThreshold: 0.7, // Sensibilidade MONEY FLOW (mais importante)
-        // Filtros
-        enableDivergence: true,
-        enableExhaustionLines: true,
-        minDays: 10 // Mínimo de dias para análise
-      }
-    }
+
   ];
   
   try {
@@ -512,7 +486,7 @@ async function runComparativeBacktest() {
     logger.info(`📊 Símbolos: ${baseConfig.symbols.join(', ')}`);
     logger.info(`⏱️ Intervalo: ${baseConfig.interval}`);
     logger.info(`💰 Saldo inicial: $${baseConfig.initialBalance}`);
-    logger.info(`📈 Estratégias: DEFAULT, PRO_MAX, CYPHERPUNK`);
+    logger.info(`📈 Estratégias: DEFAULT, PRO_MAX`);
     logger.info(`💡 Investimento por trade: 10% do saldo (${Math.round(baseConfig.initialBalance * 0.1)} USD)`);
     
     const runner = new BacktestRunner();
@@ -605,8 +579,7 @@ async function showLiquidSymbols() {
           message: 'Escolha a estratégia para o teste:',
           choices: [
             { name: 'DEFAULT - Farm de Volume', value: 'DEFAULT' },
-            { name: 'PRO_MAX - Estratégia Avançada', value: 'PRO_MAX' },
-            { name: 'CYPHERPUNK - Sistema AMBIENT + ACTION', value: 'CYPHERPUNK' }
+            { name: 'PRO_MAX - Estratégia Avançada', value: 'PRO_MAX' }
           ]
         }
       ]);
@@ -624,13 +597,7 @@ async function showLiquidSymbols() {
       };
 
       // Determinar investimento por trade
-      let investmentPerTrade;
-      if (strategyChoice.strategy === 'CYPHERPUNK') {
-        investmentPerTrade = Math.round(baseConfig.initialBalance * 0.1);
-        logger.info(`💰 CypherPunk: Usando ${investmentPerTrade} USD por trade (10% do saldo - gerenciado pela estratégia)`);
-      } else {
-        investmentPerTrade = 100; // Valor padrão para outras estratégias
-      }
+      let investmentPerTrade = 100; // Valor padrão para todas as estratégias
 
       // Configuração final
       const config = {
@@ -953,7 +920,6 @@ async function showStrategyMenu() {
       choices: [
         { name: '📊 DEFAULT - Farm de Volume (Recomendado)', value: 'DEFAULT' },
         { name: '🚧 PRO_MAX - Estratégia Avançada (Em desenvolvimento)', value: 'PRO_MAX', disabled: 'Em desenvolvimento' },
-        { name: '🚧 CYPHERPUNK - Sistema AMBIENT + ACTION (Em desenvolvimento)', value: 'CYPHERPUNK', disabled: 'Em desenvolvimento' },
         { name: '❌ Sair', value: 'exit' }
       ]
     }

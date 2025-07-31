@@ -4,7 +4,7 @@ import { StopLossFactory } from '../Decision/Strategies/StopLossFactory.js';
 import PnlController from '../Controllers/PnlController.js';
 import Markets from '../Backpack/Public/Markets.js';
 import AccountController from '../Controllers/AccountController.js';
-import { validateLeverageForSymbol, clearLeverageAdjustLog } from '../utils/Utils.js';
+import { validateLeverageForSymbol, clearLeverageAdjustLog } from '../Utils/Utils.js';
 import ColorLogger from '../Utils/ColorLogger.js';
 import { promises as fs } from 'fs';
 import path from 'path';
