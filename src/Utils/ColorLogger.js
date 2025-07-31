@@ -248,12 +248,19 @@ class ColorLogger {
   }
 
   /**
-   * Log de configuração do Trailing Stop (CIANO)
+   * Log de configuração do trailing stop
    */
   trailingConfig(message) {
     if (this.pauseLogs) return;
-    const cyanColor = '\x1b[36m'; // Ciano
-    console.log(`${cyanColor}✅ [TRAILING_CONFIG] ${message}${this.resetColor}`);
+    console.log(`${this.color}${this.prefix} ⚙️ ${message}${this.resetColor}`);
+  }
+
+  /**
+   * Log de fechamento de operação (vermelho brilhante para destacar)
+   */
+  positionClosed(message) {
+    if (this.pauseLogs) return;
+    console.log(`\x1b[91m${this.prefix} 🚨 ${message}\x1b[0m`);
   }
 }
 
