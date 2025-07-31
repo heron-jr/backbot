@@ -5,6 +5,120 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.3.0] - 2024-12-31
+
+### 🎯 Adicionado
+- **Sistema de Trailing Stop Avançado**
+  - Implementação completa de trailing stop dinâmico
+  - Ativação automática quando posição fica lucrativa
+  - Ajuste contínuo do stop loss baseado no preço mais favorável
+  - Configuração via `TRAILING_STOP_DISTANCE` (padrão: 1.5%)
+  - Suporte para posições LONG e SHORT com lógica específica
+
+- **Monitor de Ordens Órfãs**
+  - Sistema automático de limpeza de ordens condicionais órfãs
+  - Verificação periódica a cada 60 segundos
+  - Identificação inteligente de ordens sem posições correspondentes
+  - Cancelamento automático de stop loss órfãos
+  - Logs detalhados de todas as operações de limpeza
+
+- **Sistema de Auditoria para Backtest**
+  - Modo de auditoria ativado via `BACKTEST_AUDIT_MODE=true`
+  - 8 camadas de validação para diagnóstico completo
+  - Análise detalhada de cada etapa do processo de decisão
+  - Identificação de pontos de falha em backtests
+  - Compatibilidade com modo normal (alta performance)
+
+### 🔧 Melhorado
+- **Sistema de Logs Condicional**
+  - Logs verbosos controlados por `LOG_TYPE=debug`
+  - Redução de poluição visual em modo normal
+  - Logs essenciais sempre visíveis (ações importantes)
+  - Sistema consistente entre TrailingStop e OrderController
+
+- **Sistema de Cores para Logs**
+  - Implementação de ColorLogger para Trailing Stop
+  - Cores diferenciadas para identificação visual rápida:
+    - 🟣 Fúcsia: Aguardando posição ficar lucrativa
+    - 🟠 Laranja: Aguardando ativação
+    - 🟢 Verde: Trailing ativo e em lucro
+    - 🟢 Brilhante: Verificando gatilho
+    - 🔴 Vermelho: Trailing em hold/proteção
+    - 🔴 Brilhante: Gatilho ativado
+    - 🔵 Azul: Trailing atualizado
+    - 🟡 Amarelo: Trailing ativando
+    - ⚪ Cinza: Cleanup
+    - 🔵 Ciano: Configuração
+
+- **Cálculo de Stop Loss**
+  - Correção para considerar alavancagem no cálculo
+  - Uso de `validateLeverageForSymbol()` para alavancagem correta
+  - Cálculo `actualStopLossPct = baseStopLossPct / leverage`
+  - Resolução de problema onde stop loss era criado na distância bruta
+
+- **Sistema de Cache Inteligente**
+  - Cache para logs de ajuste de alavancagem
+  - Evita logs repetitivos por símbolo
+  - Limpeza automática quando posição é fechada
+  - Cache de verificação de stop loss com timeout
+
+### 🐛 Correções
+- **Correção Crítica no Trailing Stop**
+  - Refatoração do método `stopLoss()` para garantir execução
+  - Uso de `trailingState` diretamente em vez de `trailingInfo`
+  - Garantia de chamada de `OrderController.forceClose()` quando decisão é positiva
+  - Resolução de falha na 'última milha' que impedia fechamento
+
+- **Correção de Cálculo de PnL**
+  - Validação de alavancagem nos métodos `calculatePnL`
+  - Correção para tokens como ENA_USDC_PERP (10x ao invés de 15x)
+  - Cálculo correto de PnL: -7.13% ao invés de -10.13%
+  - Evita fechamento prematuro por stop loss incorreto
+
+- **Correção de Importações**
+  - Adição de importações corretas no BaseStrategy.js
+  - Conversão de `calculateStopAndTarget()` para assíncrono
+  - Atualização de chamadas em DefaultStrategy.js para usar `await`
+  - Resolução de erro de sintaxe 'Unexpected reserved word'
+
+- **Correção de Método de Cancelamento**
+  - Alteração de `cancelOrder` para `cancelOpenOrder`
+  - Uso correto de `order.id` em vez de `order.orderId`
+  - Melhoria na identificação de ordens órfãs
+
+### ⚙️ Configurações
+- `TRAILING_STOP_DISTANCE`: Distância do trailing stop (padrão: 1.5%)
+- `BACKTEST_AUDIT_MODE`: Ativa modo de auditoria para diagnóstico
+- `LOG_TYPE`: Controla verbosidade dos logs (debug/normal)
+- `TRAILING_STOP_ENABLED`: Habilita/desabilita trailing stop
+
+### 🎯 Funcionalidades
+- **Trailing Stop Inteligente**:
+  - Ativação automática quando posição fica lucrativa
+  - Ajuste contínuo baseado no preço mais favorável
+  - Proteção contra reversões de tendência
+  - Suporte completo para LONG e SHORT
+
+- **Monitor de Segurança**:
+  - Limpeza automática de ordens órfãs
+  - Prevenção de execuções acidentais
+  - Monitoramento contínuo 24/7
+  - Logs detalhados de todas as operações
+
+- **Sistema de Diagnóstico**:
+  - Auditoria completa de backtests
+  - Identificação de pontos de falha
+  - Análise detalhada de cada etapa
+  - Compatibilidade com modo de alta performance
+
+### 📚 Documentação
+- **README Atualizado**: Documentação do sistema de trailing stop
+- **Configurações de Trailing Stop**: Explicação detalhada dos parâmetros
+- **Sistema de Logs**: Guia para uso do sistema de logs condicional
+- **Monitor de Ordens Órfãs**: Documentação da funcionalidade de limpeza
+
+---
+
 ## [1.2.1] - 2024-12-19
 
 ### 🐛 Correções
@@ -142,86 +256,6 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
-<<<<<<< Updated upstream
-## [1.0.0] - 2024-12-23
-
-### 🚀 Novas Funcionalidades
-- **Execução Híbrida de Ordens**: Implementação de sistema inteligente de execução que sempre tenta ordem LIMIT (post-only) primeiro, com fallback automático para MARKET se necessário
-- **Monitoramento de Slippage**: Validação dinâmica de slippage antes de executar ordens a mercado como fallback
-- **Timeout Configurável**: Sistema de timeout para ordens LIMIT não executadas (configurável via `ORDER_EXECUTION_TIMEOUT_SECONDS`)
-- **Revalidação de Sinais**: Revalidação automática de sinais antes de executar fallback para mercado
-- **Estatísticas de Fallback**: Monitoramento da eficiência do sistema híbrido com logs detalhados
-- **Validação de Tipo de Ordem**: Suporte para `POSITION_ORDER_TYPE` (limit/market) com validação de entrada
-
-### 🔧 Melhorias
-- **Refatoração do OrderController**: Migração para métodos estáticos para melhor organização e performance
-- **Logs Aprimorados**: Logs mais detalhados em todas as etapas do processo de execução
-- **Filtros de Ordens Melhorados**: Melhor identificação de ordens de entrada vs. ordens de saída
-- **Tratamento de Erros**: Melhor tratamento de erros em todas as operações de ordem
-
-### 🐛 Correções
-- **Correção de Imports**: Resolução de problemas de import/export em módulos ES6
-- **Correção de IDs de Ordem**: Uso correto de IDs de ordem para cancelamento
-- **Correção de Métodos Estáticos**: Conversão de métodos de instância para estáticos onde necessário
-
-### ⚙️ Configurações
-- `ORDER_EXECUTION_TIMEOUT_SECONDS`: Timeout para execução de ordens LIMIT (padrão: 12s)
-- `MAX_SLIPPAGE_PCT`: Slippage máximo permitido para fallback (padrão: 0.2%)
-- `POSITION_ORDER_TYPE`: Tipo de ordem para posições (limit/market)
-
----
-
-## [Beta] - 2024-12-23
-
-### 🎯 Estratégia DEFAULT Completa
-- **Sistema de 8 Camadas de Validação**:
-  1. **Validação de Dados**: Verificação de dados mínimos necessários
-  2. **Análise de Sinais**: RSI, Stochastic, MACD, ADX
-  3. **Filtro de Confirmação**: Money Flow Index (MFI) para validação de convicção
-  4. **Filtro de Tendência**: VWAP para análise de tendência intradiária
-  5. **Filtro Macro**: Correlação com tendência do BTC
-  6. **Cálculo de Stop/Target**: Baseado em VWAP e desvios padrão
-  7. **Validações de Risco**: Verificações de PnL e stop loss
-  8. **Execução Inteligente**: Sistema híbrido de execução
-
-### 📊 Indicadores Técnicos
-- **RSI (Relative Strength Index)**: Análise de sobrecompra/sobrevenda
-- **Stochastic Oscillator**: Sinais de reversão com cruzamentos
-- **MACD**: Análise de momentum e tendência
-- **ADX (Average Directional Index)**: Força e direção da tendência
-- **Money Flow Index (MFI)**: Confirmação baseada em volume
-- **VWAP (Volume Weighted Average Price)**: Filtro de tendência intradiária
-- **Momentum Indicator**: Análise primária de sinais
-
-### 🛡️ Gestão de Risco
-- **Stop Loss Dinâmico**: Baseado em `MAX_NEGATIVE_PNL_STOP_PCT`
-- **Take Profit Configurável**: Múltiplos níveis de take profit
-- **Trailing Stop**: Ajuste automático de stop loss
-- **Validação de PnL**: Verificações de lucro mínimo e configurado
-- **Monitoramento de Posições**: Verificação contínua de posições abertas
-
-### ⏰ Monitoramento de Ordens
-- **Cancelamento Automático**: Ordens pendentes canceladas após timeout configurável
-- **Proteção de Ordens**: Ordens `reduceOnly` não são canceladas automaticamente
-- **Monitoramento Contínuo**: Verificação periódica de ordens pendentes
-
-### 🔄 Sistema de Backtest
-- **Suporte a Leverage**: Simulação de operações com alavancagem
-- **Position Sizing por Percentual**: Cálculo de tamanho de posição baseado em percentual
-- **Validação de Lógica**: Testes da lógica de monitoramento de ordens
-
-### 📝 Documentação
-- **README Atualizado**: Foco na estratégia DEFAULT com explicações detalhadas
-- **Configuração Simplificada**: Arquivo `.env` pré-configurado
-- **Guia de Uso**: Instruções claras para configuração e execução
-
-### ⚙️ Configurações Principais
-- `MAX_NEGATIVE_PNL_STOP_PCT`: Stop loss baseado em percentual de PnL
-- `ORDER_TIMEOUT_MINUTES`: Timeout para cancelamento de ordens pendentes
-- `STRATEGY`: Seleção de estratégia (DEFAULT/PRO_MAX)
-- Configurações de indicadores técnicos (períodos, thresholds)
-- Configurações de stop loss e take profit 
-=======
 ## 📝 Notas de Versão
 
 ### Versão 1.2.0
@@ -232,4 +266,3 @@ Esta versão resolve o problema de divergência entre backtests e bot real atrav
 
 ### Versão 1.0.0
 Versão inicial do sistema de backtesting, fornecendo uma base sólida para teste e otimização de estratégias de trading algorítmico. 
->>>>>>> Stashed changes
