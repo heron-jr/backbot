@@ -975,42 +975,46 @@ class TrailingStop {
             TrailingStop.trailingModeLogged.add(position.symbol);
           }
           
-          // Atualiza o estado do trailing stop para a posição
+          // CORREÇÃO CRÍTICA: Atualiza o estado do trailing stop primeiro
           await this.updateTrailingStopForPosition(position);
           
-          // Verifica se o trailing stop está ativo para esta posição
-          const isTrailingActive = this.isTrailingStopActive(position.symbol);
-          const trailingInfo = this.getTrailingStopInfo(position.symbol);
+          // Obtém o estado atualizado do trailing stop
+          const trailingState = TrailingStop.trailingState.get(position.symbol);
           
-          if (isTrailingActive) {
+          // CORREÇÃO CRÍTICA: Verifica se o trailing stop está ativo e executa a decisão
+          if (trailingState && trailingState.activated) {
             TrailingStop.colorLogger.trailingActiveCheck(`${position.symbol}: Trailing Stop ativo - verificando gatilho`);
             
-            const trailingDecision = this.checkTrailingStopTrigger(position, trailingInfo);
+            // CORREÇÃO CRÍTICA: Usa o trailingState diretamente, não o trailingInfo
+            const trailingDecision = this.checkTrailingStopTrigger(position, trailingState);
+            
+            // CORREÇÃO CRÍTICA: Se o trailing stop decidiu fechar, EXECUTE a ação imediatamente
             if (trailingDecision && trailingDecision.shouldClose) {
+              console.log(`🚨 [TRAILING_EXECUTION] ${position.symbol}: Executando fechamento por Trailing Stop. Motivo: ${trailingDecision.reason}`);
               TrailingStop.colorLogger.trailingTrigger(`${position.symbol}: Fechando por TRAILING STOP - ${trailingDecision.reason}`);
               await OrderController.forceClose(position, Account);
               await TrailingStop.onPositionClosed(position, 'trailing_stop');
-              continue;
+              continue; // Pula para a próxima posição, pois esta já foi fechada
             }
             
-            // Log de monitoramento para trailing stop ativo
+            // Log de monitoramento para trailing stop ativo (apenas se não foi fechado)
             const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
             const priceType = position.markPrice ? 'Current Price' : 'Last Price';
-            const distance = trailingInfo.isLong 
-              ? ((currentPrice - trailingInfo.trailingStopPrice) / currentPrice * 100).toFixed(2)
-              : ((trailingInfo.trailingStopPrice - currentPrice) / currentPrice * 100).toFixed(2);
+            const distance = trailingState.isLong 
+              ? ((currentPrice - trailingState.trailingStopPrice) / currentPrice * 100).toFixed(2)
+              : ((trailingState.trailingStopPrice - currentPrice) / currentPrice * 100).toFixed(2);
             
-              const direction = trailingInfo.isLong ? 'LONG' : 'SHORT';
-              const priceRecordLabel = trailingInfo.isLong ? 'Preço Máximo' : 'Preço Mínimo';
-              const priceRecordValue = trailingInfo.isLong ? trailingInfo.highestPrice : trailingInfo.lowestPrice;
-              
-              TrailingStop.colorLogger.trailingActive(
-                  `${position.symbol} (${direction}): Trailing ativo - ` +
-                  `${priceType}: $${currentPrice.toFixed(4)}, ` +
-                  `TrailingStop: $${trailingInfo.trailingStopPrice.toFixed(4)}, ` +
-                  `${priceRecordLabel}: $${priceRecordValue.toFixed(4)}, ` +
-                  `Distância até Stop: ${distance}%\n`
-              );
+            const direction = trailingState.isLong ? 'LONG' : 'SHORT';
+            const priceRecordLabel = trailingState.isLong ? 'Preço Máximo' : 'Preço Mínimo';
+            const priceRecordValue = trailingState.isLong ? trailingState.highestPrice : trailingState.lowestPrice;
+            
+            TrailingStop.colorLogger.trailingActive(
+                `${position.symbol} (${direction}): Trailing ativo - ` +
+                `${priceType}: $${currentPrice.toFixed(4)}, ` +
+                `TrailingStop: $${trailingState.trailingStopPrice.toFixed(4)}, ` +
+                `${priceRecordLabel}: $${priceRecordValue.toFixed(4)}, ` +
+                `Distância até Stop: ${distance}%\n`
+            );
           } else {
             // Trailing Stop habilitado mas não ativo para esta posição
             const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
