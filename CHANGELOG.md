@@ -63,6 +63,13 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
   - Cache de verificação de stop loss com timeout
 
 ### 🐛 Correções
+- **Correção Crítica no Cálculo de PnL para Posições SHORT**
+  - Problema: Bot usava apenas `pnlUnrealized` da API, ignorando `pnlRealized`
+  - Solução: Usar `pnlRealized + pnlUnrealized` para PnL total correto
+  - Impacto: Trailing stop agora detecta corretamente lucro em posições SHORT
+  - Exemplo: BTC SHORT com pnlRealized=2.12 e pnlUnrealized=-1.13 agora mostra lucro total de 0.99
+  - Resolução: Posições SHORT com lucro parcial realizado agora ativam trailing stop corretamente
+
 - **Correção Crítica no Trailing Stop**
   - Refatoração do método `stopLoss()` para garantir execução
   - Uso de `trailingState` diretamente em vez de `trailingInfo`
