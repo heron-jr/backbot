@@ -4,7 +4,7 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "start": "cross-env TRADING_STRATEGY=DEFAULT nodemon bootstrap-app.js",
+    "start": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 TRADING_STRATEGY=DEFAULT nodemon bootstrap-app.js",
     "backtest": "node backtest.js"
   },
   "keywords": [],
