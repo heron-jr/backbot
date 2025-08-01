@@ -25,7 +25,7 @@ class TrailingStop {
   }
 
   // Gerenciador de estado do trailing stop para cada posição
-  static trailingState = new Map(); // Ex: { 'SOL_USDC_PERP': { trailingStopPrice: 180.50, highestPrice: 182.00, lowestPrice: 175.00 } }
+  static trailingState = new Map(); // Ex: { 'SOL_USDC_PERP': { trailingStopPrice: 180.50, highestPrice: 182.00, lowestPrice: 175.00, phase: 'INITIAL_RISK', initialAtrStopPrice: 175.00, partialTakeProfitPrice: 185.00 } }
   static trailingModeLogged = new Set(); // Cache para logs de modo Trailing Stop
 
   // Instância do ColorLogger para logs coloridos
@@ -389,6 +389,87 @@ class TrailingStop {
   }
 
   /**
+   * Calcula o preço de stop loss baseado em ATR
+   * @param {object} position - Dados da posição
+   * @param {object} account - Dados da conta
+   * @param {number} atrValue - Valor do ATR
+   * @param {number} multiplier - Multiplicador do ATR
+   * @returns {number} - Preço de stop loss baseado em ATR
+   */
+  static calculateAtrStopLossPrice(position, account, atrValue, multiplier = 2.0) {
+    try {
+      const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
+      if (currentPrice <= 0 || !atrValue || atrValue <= 0) {
+        return TrailingStop.calculateInitialStopLossPrice(position, account);
+      }
+
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const atrDistance = atrValue * multiplier;
+
+      if (isLong) {
+        return currentPrice - atrDistance;
+      } else {
+        return currentPrice + atrDistance;
+      }
+    } catch (error) {
+      console.error(`[ATR_STOP_CALC] Erro ao calcular stop loss ATR para ${position.symbol}:`, error.message);
+      return TrailingStop.calculateInitialStopLossPrice(position, account);
+    }
+  }
+
+  /**
+   * Calcula o preço de take profit parcial baseado em ATR
+   * @param {object} position - Dados da posição
+   * @param {number} atrValue - Valor do ATR
+   * @param {number} multiplier - Multiplicador do ATR
+   * @returns {number} - Preço de take profit parcial
+   */
+  static calculateAtrTakeProfitPrice(position, atrValue, multiplier = 1.5) {
+    try {
+      const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
+      if (currentPrice <= 0 || !atrValue || atrValue <= 0) {
+        return currentPrice;
+      }
+
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const atrDistance = atrValue * multiplier;
+
+      if (isLong) {
+        return currentPrice + atrDistance;
+      } else {
+        return currentPrice - atrDistance;
+      }
+    } catch (error) {
+      console.error(`[ATR_TP_CALC] Erro ao calcular take profit ATR para ${position.symbol}:`, error.message);
+      return currentPrice;
+    }
+  }
+
+  /**
+   * Obtém o valor do ATR para um símbolo
+   * @param {string} symbol - Símbolo da posição
+   * @returns {Promise<number|null>} - Valor do ATR ou null se não disponível
+   */
+  static async getAtrValue(symbol) {
+    try {
+      const timeframe = process.env.ACCOUNT1_TIME || '30m';
+      const candles = await Markets.getKLines(symbol, timeframe, 30);
+      
+      if (!candles || candles.length < 14) {
+        return null;
+      }
+
+      const { calculateIndicators } = await import('../Decision/Indicators.js');
+      const indicators = calculateIndicators(candles);
+      
+      return indicators.atr?.atr || null;
+    } catch (error) {
+      console.error(`[ATR_GET] Erro ao obter ATR para ${symbol}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Atualiza o trailing stop para uma posição específica
    * @param {object} position - Dados da posição
    * @returns {object|null} - Estado atualizado do trailing stop ou null se não aplicável
@@ -396,14 +477,9 @@ class TrailingStop {
   async updateTrailingStopForPosition(position) {
     try {
       const enableTrailingStop = process.env.ENABLE_TRAILING_STOP === 'true';
-      if (!enableTrailingStop) {
-        return null;
-      }
-
-      const trailingStopDistance = Number(process.env.TRAILING_STOP_DISTANCE);
+      const enableHybridStrategy = process.env.ENABLE_HYBRID_STOP_STRATEGY === 'true';
       
-      if (isNaN(trailingStopDistance) || trailingStopDistance <= 0) {
-        console.error(`❌ [TRAILING_ERROR] TRAILING_STOP_DISTANCE inválido: ${process.env.TRAILING_STOP_DISTANCE}`);
+      if (!enableTrailingStop) {
         return null;
       }
 
@@ -414,21 +490,12 @@ class TrailingStop {
         return null;
       }
       
-      const rawLeverage = Account.leverage;
-      
-      const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
-      
       const { pnl, pnlPct } = TrailingStop.calculatePnL(position, Account);
-
       const currentPrice = parseFloat(position.markPrice || position.lastPrice || 0);
-      if (currentPrice <= 0) {
-        console.error(`❌ [TRAILING_ERROR] Preço atual inválido para ${position.symbol}: ${currentPrice}`);
-        return null;
-      }
-
       const entryPrice = parseFloat(position.entryPrice || 0);
-      if (entryPrice <= 0) {
-        console.error(`❌ [TRAILING_ERROR] Preço de entrada inválido para ${position.symbol}: ${entryPrice}`);
+      
+      if (currentPrice <= 0 || entryPrice <= 0) {
+        console.error(`❌ [TRAILING_ERROR] Preços inválidos para ${position.symbol}: Current: ${currentPrice}, Entry: ${entryPrice}`);
         return null;
       }
 
@@ -441,8 +508,164 @@ class TrailingStop {
 
       let trailingState = TrailingStop.trailingState.get(position.symbol);
 
+      // === ESTRATÉGIA HÍBRIDA (ATR) ===
+      if (enableHybridStrategy) {
+        return await this.updateTrailingStopHybrid(position, trailingState, Account, pnl, pnlPct, currentPrice, entryPrice, isLong, isShort);
+      }
+
+      // === ESTRATÉGIA TRADICIONAL ===
+      return await this.updateTrailingStopTraditional(position, trailingState, Account, pnl, pnlPct, currentPrice, entryPrice, isLong, isShort);
+
+    } catch (error) {
+      console.error(`[TRAILING_UPDATE] Erro ao atualizar trailing stop para ${position.symbol}:`, error.message);
+      return null;
+    } finally {
+      await TrailingStop.saveStateToFile();
+    }
+  }
+
+  /**
+   * Atualiza trailing stop usando a estratégia híbrida (ATR)
+   */
+  async updateTrailingStopHybrid(position, trailingState, account, pnl, pnlPct, currentPrice, entryPrice, isLong, isShort) {
+    try {
+      // === FASE 1: RISCO INICIAL ===
+      if (!trailingState) {
+        // Inicializa nova posição na fase de risco inicial
+        const atrValue = await TrailingStop.getAtrValue(position.symbol);
+        const initialStopAtrMultiplier = Number(process.env.INITIAL_STOP_ATR_MULTIPLIER || 2.0);
+        const takeProfitAtrMultiplier = Number(process.env.TAKE_PROFIT_PARTIAL_ATR_MULTIPLIER || 1.5);
+        
+        const initialAtrStopPrice = TrailingStop.calculateAtrStopLossPrice(position, account, atrValue, initialStopAtrMultiplier);
+        const partialTakeProfitPrice = TrailingStop.calculateAtrTakeProfitPrice(position, atrValue, takeProfitAtrMultiplier);
+        
+        const newState = {
+          symbol: position.symbol,
+          entryPrice: entryPrice,
+          initialStopLossPrice: initialAtrStopPrice,
+          trailingStopPrice: initialAtrStopPrice,
+          initialAtrStopPrice: initialAtrStopPrice,
+          partialTakeProfitPrice: partialTakeProfitPrice,
+          highestPrice: isLong ? currentPrice : null,
+          lowestPrice: isShort ? currentPrice : null,
+          isLong: isLong,
+          isShort: isShort,
+          phase: 'INITIAL_RISK',
+          activated: true,
+          initialized: true,
+          createdAt: new Date().toISOString()
+        };
+
+        TrailingStop.trailingState.set(position.symbol, newState);
+        await TrailingStop.saveStateToFile();
+        
+        TrailingStop.colorLogger.trailingActivated(`${position.symbol}: ESTRATÉGIA HÍBRIDA ATIVADA! Fase: RISCO INICIAL - PnL: ${pnlPct.toFixed(2)}%, Entry: $${entryPrice.toFixed(4)}, Current: $${currentPrice.toFixed(4)}, ATR Stop: $${initialAtrStopPrice.toFixed(4)}, TP Parcial: $${partialTakeProfitPrice.toFixed(4)}`);
+        
+        return newState;
+      }
+
+      // === FASE 2: TRAVA DE SEGURANÇA ===
+      if (trailingState.phase === 'INITIAL_RISK' && trailingState.partialTakeProfitPrice) {
+        const shouldTakePartialProfit = isLong 
+          ? currentPrice >= trailingState.partialTakeProfitPrice
+          : currentPrice <= trailingState.partialTakeProfitPrice;
+
+        if (shouldTakePartialProfit) {
+          // Transição para fase PARTIAL_PROFIT_TAKEN
+          trailingState.phase = 'PARTIAL_PROFIT_TAKEN';
+          trailingState.trailingStopPrice = entryPrice; // Move para breakeven
+          
+          const partialPercentage = Number(process.env.PARTIAL_PROFIT_PERCENTAGE || 50);
+          
+          // Executa o fechamento parcial
+          await OrderController.takePartialProfit(position, partialPercentage, account);
+          
+          await TrailingStop.saveStateToFile();
+          
+          TrailingStop.colorLogger.trailingUpdate(`${position.symbol}: FASE 2 - TRAVA DE SEGURANÇA ATIVADA! Take Profit Parcial executado (${partialPercentage}%), Stop movido para breakeven: $${entryPrice.toFixed(4)}`);
+          
+          return trailingState;
+        }
+
+        // Verifica se deve fechar por stop loss inicial
+        const shouldCloseByInitialStop = isLong 
+          ? currentPrice <= trailingState.initialAtrStopPrice
+          : currentPrice >= trailingState.initialAtrStopPrice;
+
+        if (shouldCloseByInitialStop) {
+          TrailingStop.colorLogger.trailingTrigger(`${position.symbol}: FECHAMENTO POR STOP LOSS INICIAL! Preço: $${currentPrice.toFixed(4)}, Stop: $${trailingState.initialAtrStopPrice.toFixed(4)}`);
+          return {
+            shouldClose: true,
+            reason: `HYBRID_INITIAL_STOP: Preço $${currentPrice.toFixed(4)} cruzou stop inicial $${trailingState.initialAtrStopPrice.toFixed(4)}`,
+            type: 'HYBRID_INITIAL_STOP',
+            trailingStopPrice: trailingState.initialAtrStopPrice,
+            currentPrice: currentPrice
+          };
+        }
+      }
+
+      // === FASE 3: MAXIMIZAÇÃO ===
+      if (trailingState.phase === 'PARTIAL_PROFIT_TAKEN' || trailingState.phase === 'TRAILING') {
+        // Transição para fase TRAILING se ainda não estiver
+        if (trailingState.phase === 'PARTIAL_PROFIT_TAKEN') {
+          trailingState.phase = 'TRAILING';
+        }
+
+        // Lógica tradicional de trailing stop
+        const trailingStopDistance = Number(process.env.TRAILING_STOP_DISTANCE || 1.5);
+        
+        if (isLong) {
+          if (currentPrice > trailingState.highestPrice || trailingState.highestPrice === null) {
+            trailingState.highestPrice = currentPrice;
+            
+            const newTrailingStopPrice = currentPrice * (1 - (trailingStopDistance / 100));
+            const currentStopPrice = trailingState.trailingStopPrice;
+            
+            const finalStopPrice = Math.max(currentStopPrice, newTrailingStopPrice);
+            
+            if (finalStopPrice > currentStopPrice) {
+              trailingState.trailingStopPrice = finalStopPrice;
+              TrailingStop.colorLogger.trailingUpdate(`${position.symbol}: FASE 3 - MAXIMIZAÇÃO! LONG - Preço: $${currentPrice.toFixed(4)}, Novo Stop: $${finalStopPrice.toFixed(4)}`);
+            }
+          }
+        } else if (isShort) {
+          if (currentPrice < trailingState.lowestPrice || trailingState.lowestPrice === null) {
+            trailingState.lowestPrice = currentPrice;
+            
+            const newTrailingStopPrice = currentPrice * (1 + (trailingStopDistance / 100));
+            const currentStopPrice = trailingState.trailingStopPrice;
+            const finalStopPrice = Math.min(currentStopPrice, newTrailingStopPrice);
+            
+            if (finalStopPrice < currentStopPrice) {
+              trailingState.trailingStopPrice = finalStopPrice;
+              TrailingStop.colorLogger.trailingUpdate(`${position.symbol}: FASE 3 - MAXIMIZAÇÃO! SHORT - Preço: $${currentPrice.toFixed(4)}, Novo Stop: $${finalStopPrice.toFixed(4)}`);
+            }
+          }
+        }
+      }
+
+      return trailingState;
+
+    } catch (error) {
+      console.error(`[HYBRID_TRAILING] Erro ao atualizar trailing stop híbrido para ${position.symbol}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Atualiza trailing stop usando a estratégia tradicional
+   */
+  async updateTrailingStopTraditional(position, trailingState, account, pnl, pnlPct, currentPrice, entryPrice, isLong, isShort) {
+    try {
+      const trailingStopDistance = Number(process.env.TRAILING_STOP_DISTANCE);
+      
+      if (isNaN(trailingStopDistance) || trailingStopDistance <= 0) {
+        console.error(`❌ [TRAILING_ERROR] TRAILING_STOP_DISTANCE inválido: ${process.env.TRAILING_STOP_DISTANCE}`);
+        return null;
+      }
+
       if (!trailingState && pnl > 0) {
-        const initialStopLossPrice = TrailingStop.calculateInitialStopLossPrice(position, Account);
+        const initialStopLossPrice = TrailingStop.calculateInitialStopLossPrice(position, account);
         
         const newState = {
           symbol: position.symbol,
@@ -453,6 +676,7 @@ class TrailingStop {
           lowestPrice: isShort ? currentPrice : null,
           isLong: isLong,
           isShort: isShort,
+          phase: 'TRAILING',
           activated: true,
           initialized: true,
           createdAt: new Date().toISOString()
@@ -469,6 +693,7 @@ class TrailingStop {
       if (trailingState && !trailingState.activated && pnl > 0) {
         trailingState.activated = true;
         trailingState.initialized = true;
+        trailingState.phase = 'TRAILING';
         
         if (isLong && currentPrice > trailingState.highestPrice) {
           trailingState.highestPrice = currentPrice;
@@ -537,10 +762,8 @@ class TrailingStop {
       return trailingState;
 
     } catch (error) {
-      console.error(`[TRAILING_UPDATE] Erro ao atualizar trailing stop para ${position.symbol}:`, error.message);
+      console.error(`[TRADITIONAL_TRAILING] Erro ao atualizar trailing stop tradicional para ${position.symbol}:`, error.message);
       return null;
-    } finally {
-      await TrailingStop.saveStateToFile();
     }
   }
 
@@ -563,27 +786,62 @@ class TrailingStop {
 
       let shouldClose = false;
       let reason = '';
+      let type = 'TRAILING_STOP';
 
-      if (trailingState.isLong) {
-        if (currentPrice <= trailingState.trailingStopPrice) {
-          shouldClose = true;
-          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} <= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+      // === ESTRATÉGIA HÍBRIDA ===
+      const enableHybridStrategy = process.env.ENABLE_HYBRID_STOP_STRATEGY === 'true';
+      
+      if (enableHybridStrategy && trailingState.phase) {
+        // Verifica stop loss inicial da estratégia híbrida
+        if (trailingState.phase === 'INITIAL_RISK' && trailingState.initialAtrStopPrice) {
+          if (trailingState.isLong && currentPrice <= trailingState.initialAtrStopPrice) {
+            shouldClose = true;
+            reason = `HYBRID_INITIAL_STOP: Preço atual $${currentPrice.toFixed(4)} <= Stop Inicial ATR $${trailingState.initialAtrStopPrice.toFixed(4)}`;
+            type = 'HYBRID_INITIAL_STOP';
+          } else if (trailingState.isShort && currentPrice >= trailingState.initialAtrStopPrice) {
+            shouldClose = true;
+            reason = `HYBRID_INITIAL_STOP: Preço atual $${currentPrice.toFixed(4)} >= Stop Inicial ATR $${trailingState.initialAtrStopPrice.toFixed(4)}`;
+            type = 'HYBRID_INITIAL_STOP';
+          }
         }
-      } else if (trailingState.isShort) {
-        if (currentPrice >= trailingState.trailingStopPrice) {
-          shouldClose = true;
-          reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} >= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+        
+        // Verifica trailing stop da fase de maximização
+        if ((trailingState.phase === 'TRAILING' || trailingState.phase === 'PARTIAL_PROFIT_TAKEN') && trailingState.trailingStopPrice) {
+          if (trailingState.isLong && currentPrice <= trailingState.trailingStopPrice) {
+            shouldClose = true;
+            reason = `HYBRID_TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} <= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+            type = 'HYBRID_TRAILING_STOP';
+          } else if (trailingState.isShort && currentPrice >= trailingState.trailingStopPrice) {
+            shouldClose = true;
+            reason = `HYBRID_TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} >= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+            type = 'HYBRID_TRAILING_STOP';
+          }
+        }
+      } else {
+        // === ESTRATÉGIA TRADICIONAL ===
+        if (trailingState.isLong) {
+          if (currentPrice <= trailingState.trailingStopPrice) {
+            shouldClose = true;
+            reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} <= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+          }
+        } else if (trailingState.isShort) {
+          if (currentPrice >= trailingState.trailingStopPrice) {
+            shouldClose = true;
+            reason = `TRAILING_STOP: Preço atual $${currentPrice.toFixed(4)} >= Trailing Stop $${trailingState.trailingStopPrice.toFixed(4)}`;
+          }
         }
       }
 
       if (shouldClose) {
-        TrailingStop.colorLogger.trailingTrigger(`${position.symbol}: GATILHO ATIVADO! Preço atual $${currentPrice.toFixed(4)} cruzou o stop em $${trailingState.trailingStopPrice.toFixed(4)}.`);
+        const phaseInfo = trailingState.phase ? ` (Fase: ${trailingState.phase})` : '';
+        TrailingStop.colorLogger.trailingTrigger(`${position.symbol}: GATILHO ATIVADO!${phaseInfo} Preço atual $${currentPrice.toFixed(4)} cruzou o stop em $${trailingState.trailingStopPrice.toFixed(4)}.`);
         return {
           shouldClose: true,
           reason: reason,
-          type: 'TRAILING_STOP',
+          type: type,
           trailingStopPrice: trailingState.trailingStopPrice,
-          currentPrice: currentPrice
+          currentPrice: currentPrice,
+          phase: trailingState.phase
         };
       }
 
