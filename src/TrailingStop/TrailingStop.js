@@ -253,7 +253,10 @@ class TrailingStop {
    */
   static calculatePnL(position, account) {
     try { 
-      const pnl = parseFloat(position.pnlUnrealized ?? '0');
+      // Usa pnlRealized + pnlUnrealized para obter o PnL total correto
+      const pnlRealized = parseFloat(position.pnlRealized ?? '0');
+      const pnlUnrealized = parseFloat(position.pnlUnrealized ?? '0');
+      const pnl = pnlRealized + pnlUnrealized;
 
       const notionalValue = Math.abs(parseFloat(position.netCost ?? '0'));
       
@@ -680,7 +683,10 @@ class TrailingStop {
    */
   calculatePnL(position, account) {
     try { 
-      const pnl = parseFloat(position.pnlUnrealized ?? '0');
+      // Usa pnlRealized + pnlUnrealized para obter o PnL total correto
+      const pnlRealized = parseFloat(position.pnlRealized ?? '0');
+      const pnlUnrealized = parseFloat(position.pnlUnrealized ?? '0');
+      const pnl = pnlRealized + pnlUnrealized;
 
       const notionalValue = Math.abs(parseFloat(position.netCost ?? '0'));
       
