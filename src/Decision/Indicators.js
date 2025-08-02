@@ -439,6 +439,111 @@ function calculateMomentum(closes) {
 }
 
 export function calculateIndicators(candles) {
+  // Validação de entrada
+  if (!candles || !Array.isArray(candles) || candles.length === 0) {
+    // Retorna estrutura vazia para casos inválidos
+    return {
+      ema: {
+        isBullish: false,
+        isBearish: false,
+        crossIndex: null,
+        crossType: null,
+        candlesAgo: null
+      },
+      rsi: {
+        value: null,
+        avg: null,
+        prev: null,
+        avgPrev: null,
+        history: []
+      },
+      macd: {
+        MACD: null,
+        MACD_signal: null,
+        MACD_histogram: null,
+        histogram: null,
+        histogramPrev: null
+      },
+      bollinger: {
+        BOLL_upper: null,
+        BOLL_middle: null,
+        BOLL_lower: null
+      },
+      volume: {
+        history: []
+      },
+      vwap: {
+        vwap: null,
+        stdDev: null,
+        upperBands: [],
+        lowerBands: []
+      },
+      atr: {
+        atr: null,
+        value: null,
+        history: []
+      },
+      stoch: {
+        k: null,
+        d: null,
+        kPrev: null,
+        dPrev: null,
+        history: []
+      },
+      slowStochastic: {
+        k: null,
+        d: null,
+        kPrev: null,
+        dPrev: null,
+        history: []
+      },
+      adx: {
+        adx: null,
+        diPlus: null,
+        diMinus: null,
+        diPlusPrev: null,
+        diMinusPrev: null,
+        adxEma: null,
+        history: [],
+        emaHistory: []
+      },
+      momentum: {
+        value: null,
+        rsi: null,
+        rsiAvg: null,
+        isBullish: false,
+        isBearish: false,
+        reversal: false,
+        isExhausted: false,
+        isNearZero: false,
+        direction: null,
+        history: [],
+        momentumValue: null,
+        momentumHistory: []
+      },
+      waveTrend: {
+        wt1: null,
+        wt2: null,
+        vwap: null,
+        reversal: false,
+        isBullish: false,
+        isBearish: false,
+        history: []
+      },
+      moneyFlow: {
+        mfi: null,
+        mfiAvg: null,
+        value: null,
+        isBullish: false,
+        isBearish: false,
+        isStrong: false,
+        direction: null,
+        history: [],
+        mfiPrev: null
+      }
+    };
+  }
+
   const closes = candles.map(c => parseFloat(c.close));
   const highs = candles.map(c => parseFloat(c.high));
   const lows = candles.map(c => parseFloat(c.low));
@@ -507,7 +612,7 @@ export function calculateIndicators(candles) {
   const customMoneyFlow = calculateMoneyFlow(candles) // MONEY FLOW(3)
 
   const vwapHistory = calculateIntradayVWAP(candles);
-  const latestVwapData = vwapHistory[vwapHistory.length - 1];
+  const latestVwapData = vwapHistory[vwapHistory.length - 1] || { vwap: null, stdDev: null, upperBands: [], lowerBands: [] };
 
   const volumeAnalyse = analyzeTrends(volumesUSD)
 

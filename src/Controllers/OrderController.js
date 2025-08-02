@@ -804,6 +804,213 @@ class OrderController {
     }
   }
 
+  /**
+   * Verifica se existe ordem LIMIT de take profit parcial
+   * @param {string} symbol - Símbolo da posição
+   * @param {object} position - Dados da posição
+   * @param {object} account - Dados da conta (opcional)
+   * @returns {Promise<boolean>} - True se ordem existe, false caso contrário
+   */
+  static async hasPartialTakeProfitOrder(symbol, position, account = null) {
+    try {
+      const Account = account || await AccountController.get();
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const totalQuantity = Math.abs(parseFloat(position.netQuantity));
+      const partialPercentage = Number(process.env.PARTIAL_PROFIT_PERCENTAGE || 50);
+      const quantityToClose = (totalQuantity * partialPercentage) / 100;
+
+      // Busca ordens abertas para o símbolo
+      const openOrders = await Order.getOpenOrders(symbol);
+      
+      if (!openOrders || openOrders.length === 0) {
+        return false;
+      }
+      
+      // Procura por ordem LIMIT reduce-only com a quantidade parcial
+      const partialOrder = openOrders.find(order => {
+        const isReduceOnly = order.reduceOnly === true;
+        const isLimitOrder = order.orderType === 'Limit';
+        const isCorrectSide = isLong ? order.side === 'Ask' : order.side === 'Bid';
+        const isCorrectQuantity = Math.abs(parseFloat(order.quantity) - quantityToClose) < 0.01; // 1% tolerância
+        const hasValidQuantity = parseFloat(order.quantity) > 0; // Quantidade deve ser maior que zero
+        
+        return isReduceOnly && isLimitOrder && isCorrectSide && isCorrectQuantity && hasValidQuantity;
+      });
+
+      return !!partialOrder;
+
+      return !!partialOrder;
+
+    } catch (error) {
+      console.error(`❌ [TP_CHECK] Erro ao verificar ordem de take profit parcial para ${symbol}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Cria ordem LIMIT de take profit parcial na corretora
+   * @param {object} position - Dados da posição
+   * @param {number} takeProfitPrice - Preço do take profit
+   * @param {number} percentageToClose - Porcentagem da posição para fechar (ex: 50 = 50%)
+   * @param {object} account - Dados da conta (opcional)
+   * @returns {object|null} - Resultado da operação ou null se falhar
+   */
+  static async createPartialTakeProfitOrder(position, takeProfitPrice, percentageToClose = 50, account = null) {
+    try {
+      // Se account não foi fornecido, obtém da API
+      const Account = account || await AccountController.get();
+      
+      let market = Account.markets.find((el) => {
+          return el.symbol === position.symbol
+      })
+      
+      // Se não encontrou, tenta uma busca case-insensitive
+      if (!market) {
+        const marketCaseInsensitive = Account.markets.find((el) => {
+            return el.symbol.toLowerCase() === position.symbol.toLowerCase()
+        })
+        if (marketCaseInsensitive) {
+          console.log(`⚠️ [TP_LIMIT] Market encontrado com case diferente para ${position.symbol}: ${marketCaseInsensitive.symbol}`);
+          market = marketCaseInsensitive;
+        }
+      }
+      
+      // Verifica se o market foi encontrado
+      if (!market) {
+        console.error(`❌ [TP_LIMIT] Market não encontrado para ${position.symbol}. Markets disponíveis: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+        throw new Error(`Market não encontrado para ${position.symbol}`);
+      }
+      
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const totalQuantity = Math.abs(parseFloat(position.netQuantity));
+      const quantityToClose = (totalQuantity * percentageToClose) / 100;
+      const decimal_quantity = market.decimal_quantity;
+      const decimal_price = market.decimal_price;
+
+      console.log(`🎯 [TP_LIMIT] ${position.symbol}: Criando ordem LIMIT de take profit parcial`);
+      console.log(`📊 [TP_LIMIT] ${position.symbol}: Preço: $${takeProfitPrice.toFixed(decimal_price)}, Quantidade: ${quantityToClose.toFixed(decimal_quantity)} (${percentageToClose}%)`);
+
+      const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
+      const formatQuantity = (value) => parseFloat(value).toFixed(decimal_quantity).toString();
+
+      const orderBody = {
+        symbol: position.symbol,
+        orderType: 'Limit',
+        side: isLong ? 'Ask' : 'Bid', // Ask if LONG, Bid if SHORT
+        reduceOnly: true,
+        quantity: formatQuantity(quantityToClose),
+        price: formatPrice(takeProfitPrice),
+        timeInForce: 'GTC',
+        clientId: Math.floor(Math.random() * 1000000) + 9999
+      };
+
+      console.log(`🔄 [TP_LIMIT] ${position.symbol}: Enviando ordem LIMIT para corretora...`);
+      
+      const result = await Order.executeOrder(orderBody);
+      
+      if (result && !result.error) {
+        console.log(`✅ [TP_LIMIT] ${position.symbol}: Ordem LIMIT de take profit parcial criada com sucesso!`);
+        console.log(`   • Order ID: ${result.id || 'N/A'}`);
+        console.log(`   • Preço: $${takeProfitPrice.toFixed(decimal_price)}`);
+        console.log(`   • Quantidade: ${quantityToClose.toFixed(decimal_quantity)}`);
+        console.log(`   • Tipo: ${isLong ? 'LONG' : 'SHORT'}`);
+        console.log(`   • ReduceOnly: true`);
+        console.log(`   • OrderType: Limit`);
+        return result;
+      } else {
+        const errorMsg = result && result.error ? result.error : 'desconhecido';
+        console.error(`❌ [TP_LIMIT] ${position.symbol}: Falha ao criar ordem LIMIT - Erro: ${errorMsg}`);
+        return null;
+      }
+
+    } catch (error) {
+      console.error(`❌ [TP_LIMIT] Erro ao criar ordem LIMIT de take profit parcial para ${position.symbol}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Fecha parcialmente uma posição (usado pela Estratégia Híbrida)
+   * @param {object} position - Dados da posição
+   * @param {number} percentageToClose - Porcentagem da posição para fechar (ex: 50 = 50%)
+   * @param {object} account - Dados da conta (opcional)
+   * @returns {object|null} - Resultado da operação ou null se falhar
+   */
+  static async closePartialPosition(position, percentageToClose, account = null) {
+    try {
+      // Se account não foi fornecido, obtém da API
+      const Account = account || await AccountController.get();
+      
+      // Log detalhado para debug
+      console.log(`🔍 [CLOSE_PARTIAL] Procurando market para ${position.symbol}`);
+      console.log(`🔍 [CLOSE_PARTIAL] Total de markets disponíveis: ${Account.markets?.length || 0}`);
+      
+      let market = Account.markets.find((el) => {
+          return el.symbol === position.symbol
+      })
+      
+      // Se não encontrou, tenta uma busca case-insensitive
+      if (!market) {
+        const marketCaseInsensitive = Account.markets.find((el) => {
+            return el.symbol.toLowerCase() === position.symbol.toLowerCase()
+        })
+        if (marketCaseInsensitive) {
+          console.log(`⚠️ [CLOSE_PARTIAL] Market encontrado com case diferente para ${position.symbol}: ${marketCaseInsensitive.symbol}`);
+          market = marketCaseInsensitive;
+        }
+      }
+      
+      // Verifica se o market foi encontrado
+      if (!market) {
+        console.error(`❌ [CLOSE_PARTIAL] Market não encontrado para ${position.symbol}. Markets disponíveis: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+        throw new Error(`Market não encontrado para ${position.symbol}`);
+      }
+      
+      console.log(`✅ [CLOSE_PARTIAL] Market encontrado para ${position.symbol}: decimal_quantity=${market.decimal_quantity}`);
+      
+      const isLong = parseFloat(position.netQuantity) > 0;
+      const totalQuantity = Math.abs(parseFloat(position.netQuantity));
+      const quantityToClose = (totalQuantity * percentageToClose) / 100;
+      const decimal = market.decimal_quantity;
+
+      console.log(`📊 [CLOSE_PARTIAL] ${position.symbol}: Fechando ${percentageToClose}% da posição`);
+      console.log(`📊 [CLOSE_PARTIAL] ${position.symbol}: Quantidade total: ${totalQuantity}, Quantidade a fechar: ${quantityToClose.toFixed(decimal)}`);
+
+      const body = {
+          symbol: position.symbol,
+          orderType: 'Market',
+          side: isLong ? 'Ask' : 'Bid', // Ask if LONG , Bid if SHORT
+          reduceOnly: true, 
+          clientId: Math.floor(Math.random() * 1000000),
+          quantity: String(quantityToClose.toFixed(decimal))
+      };
+
+      // Fecha parcialmente a posição
+      const closeResult = await Order.executeOrder(body);
+      
+      if (closeResult) {
+        // Log detalhado da taxa de fechamento parcial
+        const fee = market.fee || process.env.FEE || 0.0004;
+        let closePrice = closeResult?.price || position.markPrice || position.entryPrice;
+        const exitValue = parseFloat(body.quantity) * parseFloat(closePrice);
+        const exitFee = exitValue * fee;
+        
+        console.log(`💰 [CLOSE_PARTIAL] ${position.symbol}: Fechamento parcial realizado com sucesso!`);
+        console.log(`💰 [CLOSE_PARTIAL] ${position.symbol}: Valor fechado: $${exitValue.toFixed(2)} | Fee: $${exitFee.toFixed(6)} (${(fee * 100).toFixed(4)}%)`);
+        console.log(`💰 [CLOSE_PARTIAL] ${position.symbol}: Quantidade restante: ${(totalQuantity - quantityToClose).toFixed(decimal)}`);
+        
+        return closeResult;
+      } else {
+        console.error(`❌ [CLOSE_PARTIAL] ${position.symbol}: Falha ao executar ordem de fechamento parcial`);
+        return null;
+      }
+
+    } catch (error) {
+      console.error(`❌ [CLOSE_PARTIAL] Erro ao fechar parcialmente ${position.symbol}:`, error.message);
+      return null;
+    }
+  }
+
   // Estatísticas globais de fallback
   static fallbackCount = 0;
   static totalHybridOrders = 0;
@@ -902,6 +1109,12 @@ class OrderController {
       const orderValue = volume;
       let finalPrice = formatPrice(entryPrice);
       let quantity = formatQuantity(Math.floor((orderValue / entryPrice) / stepSize_quantity) * stepSize_quantity);
+      
+      // Verifica se a quantidade é válida
+      if (parseFloat(quantity) <= 0) {
+        console.error(`❌ [${accountId}] ${market}: Quantidade inválida calculada: ${quantity} (orderValue: ${orderValue}, entryPrice: ${entryPrice}, stepSize: ${stepSize_quantity})`);
+        return { error: `Quantidade inválida: ${quantity}` };
+      }
       
       // Log inicial da execução híbrida
       console.log(`\n🚀 [${accountId}] ${market}: Iniciando execução híbrida`);
@@ -1379,15 +1592,50 @@ class OrderController {
       // VALIDAÇÃO: Ajusta a alavancagem baseada nas regras da Backpack
       const leverage = validateLeverageForSymbol(position.symbol, rawLeverage);
       
+      // 🛡️ CAMADA 1: FAILSAFE DE SEGURANÇA MÁXIMA (SEMPRE ATIVO)
+      // Esta é a rede de segurança final que SEMPRE deve ser criada
       const baseStopLossPct = Math.abs(process.env.MAX_NEGATIVE_PNL_STOP_PCT);
-      
-      // Calcula a porcentagem real considerando a alavancagem validada
-      // Se leverage = 10x e stop loss = 10%, então o preço deve mover apenas 1%
       const actualStopLossPct = baseStopLossPct / leverage;
       
-      const stopLossPrice = isLong 
+      const failsafeStopLossPrice = isLong 
         ? entryPrice * (1 - actualStopLossPct / 100)  
-        : entryPrice * (1 + actualStopLossPct / 100); 
+        : entryPrice * (1 + actualStopLossPct / 100);
+        
+      console.log(`🛡️ [${accountId}] ${position.symbol}: FAILSAFE DE SEGURANÇA - ${baseStopLossPct}% -> ${actualStopLossPct.toFixed(2)}% (leverage ${leverage}x), Preço: $${failsafeStopLossPrice.toFixed(6)}`);
+      
+      // 🎯 CAMADA 2: STOP LOSS TÁTICO (se estratégia híbrida ativada)
+      let tacticalStopLossPrice = null;
+      const enableHybridStrategy = process.env.ENABLE_HYBRID_STOP_STRATEGY === 'true';
+      
+      if (enableHybridStrategy) {
+        // Usa ATR para calcular o stop loss tático (mais apertado)
+        const atrValue = await OrderController.calculateATR(await Markets.getKLines(position.symbol, process.env.ACCOUNT1_TIME || '30m', 30), 14);
+        
+        if (atrValue && atrValue > 0) {
+          const atrMultiplier = Number(process.env.INITIAL_STOP_ATR_MULTIPLIER || 2.0);
+          const atrDistance = atrValue * atrMultiplier;
+          
+          tacticalStopLossPrice = isLong 
+            ? currentPrice - atrDistance
+            : currentPrice + atrDistance;
+            
+          console.log(`🎯 [${accountId}] ${position.symbol}: STOP TÁTICO ATR - ATR: ${atrValue.toFixed(6)}, Multiplicador: ${atrMultiplier}, Distância: ${atrDistance.toFixed(6)}, Preço: $${tacticalStopLossPrice.toFixed(6)}`);
+        } else {
+          console.log(`⚠️ [${accountId}] ${position.symbol}: ATR não disponível para stop tático`);
+        }
+      }
+      
+      // Usa o stop loss mais apertado entre failsafe e tático
+      const stopLossPrice = tacticalStopLossPrice && 
+        ((isLong && tacticalStopLossPrice > failsafeStopLossPrice) || 
+         (!isLong && tacticalStopLossPrice < failsafeStopLossPrice)) 
+        ? tacticalStopLossPrice 
+        : failsafeStopLossPrice;
+        
+      console.log(`✅ [${accountId}] ${position.symbol}: Stop Loss Final - $${stopLossPrice.toFixed(6)} (${tacticalStopLossPrice ? 'Tático ATR' : 'Failsafe Tradicional'})`);
+      
+      // 🛡️ LOG DE ALTA VISIBILIDADE - ORDEM DE SEGURANÇA MÁXIMA
+      console.log(`🛡️ [FAILSAFE] ${position.symbol}: Ordem de segurança máxima (${baseStopLossPct}% PnL) enviada para a corretora com gatilho em $${failsafeStopLossPrice.toFixed(4)}.`); 
 
       try {
         const formatPrice = (value) => parseFloat(value).toFixed(decimal_price).toString();
@@ -1603,6 +1851,9 @@ class OrderController {
       console.log(`🛡️ [FAILSAFE_CALC] ${position.symbol}: Entry=${entryPrice.toFixed(6)}, Leverage=${leverage}x`);
       console.log(`  -> TP Target: ${targetProfitPct}% -> Preço Alvo: $${takeProfitPrice.toFixed(6)}`);
       console.log(`  -> SL Target: ${stopLossPct}% -> Preço Alvo: $${stopLossPrice.toFixed(6)}`);
+      
+      // 🛡️ LOG DE ALTA VISIBILIDADE - ORDEM DE SEGURANÇA MÁXIMA
+      console.log(`🛡️ [FAILSAFE] ${position.symbol}: Ordem de segurança máxima (${stopLossPct}% PnL) enviada para a corretora com gatilho em $${stopLossPrice.toFixed(4)}.`);
 
       // Valida se os preços são válidos
       if (stopLossPrice <= 0 || takeProfitPrice <= 0) {

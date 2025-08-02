@@ -606,6 +606,12 @@ class Decision {
       try {
         const marketInfo = Account.markets.find((el) => el.symbol === row.market);
 
+        // Verifica se o market foi encontrado
+        if (!marketInfo) {
+          console.error(`❌ [${accountId}] Market não encontrado para ${row.market}. Markets disponíveis: ${Account.markets?.map(m => m.symbol).join(', ') || 'nenhum'}`);
+          return { index, market: row.market, result: { error: `Market não encontrado para ${row.market}` } };
+        }
+
         // Usa os dados fornecidos pela estratégia ou fallback para os padrões
         row.volume = row.volume || investmentUSD
         row.decimal_quantity = row.decimal_quantity || marketInfo.decimal_quantity

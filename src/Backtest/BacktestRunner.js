@@ -23,15 +23,6 @@ export class BacktestRunner {
       // Valida configuração
       this.validateConfig(config);
       
-<<<<<<< Updated upstream
-      // Obtém dados históricos
-      const historicalData = await this.getHistoricalData(config);
-      
-      // Inicializa engine
-      this.engine = new BacktestEngine({
-        ...config,
-        strategyName: config.strategy
-=======
       // Determina modo de simulação se não especificado
       if (!config.simulationMode) {
         config.simulationMode = this.determineSimulationMode(config.interval || config.ambientTimeframe);
@@ -61,7 +52,6 @@ export class BacktestRunner {
         ambientTimeframe: config.ambientTimeframe,
         actionTimeframe: config.actionTimeframe,
         dataFormat: historicalDataResult.format // NOVO: Informa o formato dos dados
->>>>>>> Stashed changes
       });
       
       // Executa backtest passando os dados no formato correto
@@ -135,151 +125,51 @@ export class BacktestRunner {
   }
 
   /**
-<<<<<<< Updated upstream
-   * Obtém dados históricos baseado na configuração
-=======
    * REFATORADO: Obtém dados históricos com suporte ao novo formato de dados duplos
    * @param {object} config - Configuração do backtest
    * @returns {object} - Dados históricos no formato apropriado
->>>>>>> Stashed changes
    */
   async getHistoricalData(config) {
     try {
-      let historicalData;
+      let historicalDataResult;
       
-<<<<<<< Updated upstream
-      if (config.useSyntheticData) {
-        // Usa dados sintéticos apenas se explicitamente solicitado
-        this.logger.warn('🔧 Usando dados sintéticos (NÃO recomendado para análise real)...');
-        historicalData = this.dataProvider.generateSyntheticData(
-          config.symbols,
-          config.days || 30,
-          config.interval || '1h'
-        );
-      } else {
-        // SEMPRE tenta obter dados reais primeiro
-        this.logger.info('📊 Obtendo dados históricos REAIS da API...');
-        
-        const startTime = config.startTime || this.calculateStartTime(config.days || 30);
-        const endTime = config.endTime || Date.now();
-        
-        try {
-          historicalData = await this.dataProvider.getHistoricalData(
-            config.symbols,
-            config.interval || '1h',
-            config.days || 30,
-            startTime,
-            endTime
-          );
-          
-          this.logger.info('✅ Dados reais obtidos com sucesso!');
-          
-        } catch (apiError) {
-          this.logger.error(`❌ Erro ao obter dados da API: ${apiError.message}`);
-          
-          // Pergunta se deve usar dados sintéticos como fallback
-          if (config.allowSyntheticFallback !== false) {
-            this.logger.warn('🔄 Tentando usar dados sintéticos como fallback...');
-            historicalData = this.dataProvider.generateSyntheticData(
-              config.symbols,
-              config.days || 30,
-              config.interval || '1h'
-            );
-            this.logger.warn('⚠️ Usando dados sintéticos - resultados podem não ser realistas!');
-          } else {
-            throw new Error('Falha ao obter dados da API e fallback sintético desabilitado');
-          }
-=======
       // Valida símbolos
       if (!config.symbols || !Array.isArray(config.symbols) || config.symbols.length === 0) {
-        throw new Error('Lista de símbolos é obrigatória e deve conter pelo menos um símbolo');
+        throw new Error('Lista de símbolos deve ser um array não vazio');
       }
       
-      // Calcula período
-      const days = config.days || 30;
-      const startTime = config.startTime ? new Date(config.startTime) : new Date(this.calculateStartTime(days));
-      const endTime = config.endTime ? new Date(config.endTime) : new Date();
+      // Obtém dados para cada símbolo
+      const allData = {};
       
-      // CORREÇÃO: Valida se as datas são válidas
-      if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-        throw new Error('Datas de início ou fim inválidas');
-      }
-      
-      this.logger.info(`📅 Período: ${days} dias (${startTime.toISOString()} até ${endTime.toISOString()})`);
-      this.logger.info(`🎯 Símbolos: ${config.symbols.join(', ')}`);
-      
-      // Obtém dados do DataProvider (pode retornar formato duplo para HIGH_FIDELITY)
-      const historicalData = await this.dataProvider.getHistoricalData(
-        config.symbols,
-        config.ambientTimeframe,
-        days,
-        config.simulationMode,
-        startTime,
-        endTime
-      );
-      
-      // REFATORADO: Detecta e valida o formato dos dados retornados
-      if (this.isHighFidelityDataFormat(historicalData)) {
-        this.logger.info('🔬 Dados em formato HIGH_FIDELITY detectados (1m + ambient candles)');
+      for (const symbol of config.symbols) {
+        this.logger.info(`📊 Obtendo dados para ${symbol}...`);
         
-        // Valida dados duplos
-        for (const [symbol, data] of Object.entries(historicalData)) {
-          if (!data.oneMinuteCandles || !data.ambientCandles) {
-            throw new Error(`Dados HIGH_FIDELITY inválidos para ${symbol}: faltam oneMinuteCandles ou ambientCandles`);
-          }
+        try {
+          const data = await this.dataProvider.getDualTimeframeData(
+            symbol,
+            config.ambientTimeframe || config.interval || '1h',
+            config.actionTimeframe || '1m',
+            config.days || 30
+          );
+          
+          allData[symbol] = data;
           
           this.logger.info(`✅ ${symbol}: ${data.oneMinuteCandles.length} candles 1m + ${data.ambientCandles.length} candles ${config.ambientTimeframe}`);
->>>>>>> Stashed changes
-        }
-        
-        return {
-          format: 'HIGH_FIDELITY',
-          data: historicalData
-        };
-        
-      } else {
-        this.logger.info('📈 Dados em formato STANDARD detectados (apenas ambient candles)');
-        
-        // Valida dados padrão
-        for (const [symbol, candles] of Object.entries(historicalData)) {
-          if (!Array.isArray(candles) || candles.length === 0) {
-            throw new Error(`Dados STANDARD inválidos para ${symbol}: array vazio ou inválido`);
-          }
           
-          this.logger.info(`✅ ${symbol}: ${candles.length} candles ${config.ambientTimeframe}`);
+        } catch (error) {
+          this.logger.error(`❌ Erro ao obter dados para ${symbol}: ${error.message}`);
+          throw error;
         }
-        
-        return {
-          format: 'STANDARD',
-          data: historicalData
-        };
       }
       
-<<<<<<< Updated upstream
-      // Valida dados
-      if (!this.dataProvider.validateData(historicalData, config.interval || '1h')) {
-        this.logger.warn('⚠️ Problemas encontrados nos dados, mas continuando...');
-      }
+      // Retorna dados no formato esperado pelo engine
+      historicalDataResult = {
+        data: allData,
+        format: 'dual_timeframe'
+      };
       
-      // Filtra símbolos sem dados
-      const validSymbols = Object.keys(historicalData).filter(
-        symbol => historicalData[symbol] && historicalData[symbol].length > 0
-      );
+      return historicalDataResult;
       
-      if (validSymbols.length === 0) {
-        throw new Error('Nenhum símbolo com dados válidos encontrado');
-      }
-      
-      this.logger.info(`✅ Dados obtidos para ${validSymbols.length} símbolos`);
-      
-      // Informações sobre o período
-      const totalCandles = validSymbols.reduce((sum, symbol) => sum + historicalData[symbol].length, 0);
-      this.logger.info(`📊 Total de candles: ${totalCandles.toLocaleString()}`);
-      
-      return historicalData;
-      
-=======
->>>>>>> Stashed changes
     } catch (error) {
       this.logger.error(`❌ Erro ao obter dados históricos: ${error.message}`);
       throw error;
@@ -325,42 +215,6 @@ export class BacktestRunner {
         timestamp: new Date().toISOString(),
         strategy: config.strategy,
         symbols: config.symbols,
-<<<<<<< Updated upstream
-        period: {
-          days: config.days || 30,
-          interval: config.interval || '1h',
-          startTime: config.startTime,
-          endTime: config.endTime
-        },
-        configuration: {
-          initialBalance: config.initialBalance || 1000,
-          investmentPerTrade: config.investmentPerTrade || 100,
-          fee: config.fee || 0.0004,
-          maxConcurrentTrades: config.maxConcurrentTrades || 5,
-          enableStopLoss: config.enableStopLoss !== false,
-          enableTakeProfit: config.enableTakeProfit !== false,
-          slippage: config.slippage || 0.0001,
-          useSyntheticData: config.useSyntheticData || false
-        }
-      },
-      results: {
-        ...results,
-        totalReturn: ((results.balance - results.initialBalance) / results.initialBalance) * 100,
-        annualizedReturn: this.calculateAnnualizedReturn(results, config.days || 30),
-        sharpeRatio: results.sharpeRatio || 0,
-        maxDrawdown: (results.maxDrawdown || 0) * 100,
-        profitFactor: results.profitFactor || 0
-      },
-      performance: {
-        winRate: results.winRate || 0,
-        averageWin: results.averageWin || 0,
-        averageLoss: results.averageLoss || 0,
-        totalTrades: results.totalTrades || 0,
-        winningTrades: results.winningTrades || 0,
-        losingTrades: results.losingTrades || 0,
-        maxConsecutiveLosses: results.maxConsecutiveLosses || 0
-      }
-=======
         period: config.days,
         interval: config.ambientTimeframe || config.interval,
         simulationMode: config.simulationMode,
@@ -395,7 +249,6 @@ export class BacktestRunner {
         actionTimeframe: config.actionTimeframe
       },
       trades: results.trades || []
->>>>>>> Stashed changes
     };
     
     return report;
@@ -455,48 +308,14 @@ export class BacktestRunner {
     this.logger.info(`📈 Retorno Total: ${results.totalReturn.toFixed(2)}%`);
     this.logger.info(`📈 Retorno Anualizado: ${results.annualizedReturn.toFixed(2)}%`);
     
-<<<<<<< Updated upstream
-    // Performance
-    this.logger.info('\n📊 PERFORMANCE:');
-    this.logger.info(`🎯 Win Rate: ${performance.winRate.toFixed(2)}%`);
-    this.logger.info(`📈 Total de Trades: ${performance.totalTrades}`);
-    this.logger.info(`✅ Trades Vencedores: ${performance.winningTrades}`);
-    this.logger.info(`❌ Trades Perdedores: ${performance.losingTrades}`);
-    this.logger.info(`💰 Média de Ganho: $${performance.averageWin.toFixed(2)}`);
-    this.logger.info(`💸 Média de Perda: $${performance.averageLoss.toFixed(2)}`);
-    this.logger.info(`📊 Profit Factor: ${results.profitFactor.toFixed(2)}`);
-    
-    // Risco
-    this.logger.info('\n⚠️ RISCO:');
-    this.logger.info(`📉 Máximo Drawdown: ${results.maxDrawdown.toFixed(2)}%`);
-    this.logger.info(`📊 Sharpe Ratio: ${results.sharpeRatio.toFixed(2)}`);
-    this.logger.info(`🔴 Máximo de Perdas Consecutivas: ${performance.maxConsecutiveLosses}`);
-    
-    // Configuração
-    this.logger.info('\n⚙️ CONFIGURAÇÃO:');
-    this.logger.info(`💵 Investimento por Trade: $${metadata.configuration.investmentPerTrade}`);
-    this.logger.info(`💸 Taxa: ${(metadata.configuration.fee * 100).toFixed(4)}%`);
-    this.logger.info(`🔒 Stop Loss: ${metadata.configuration.enableStopLoss ? 'Ativado' : 'Desativado'}`);
-    this.logger.info(`🎯 Take Profit: ${metadata.configuration.enableTakeProfit ? 'Ativado' : 'Desativado'}`);
-    this.logger.info(`📊 Slippage: ${(metadata.configuration.slippage * 100).toFixed(4)}%`);
-    
-    // Aviso sobre dados sintéticos
-    if (metadata.configuration.useSyntheticData) {
-      this.logger.warn('\n⚠️ ATENÇÃO: Este backtest usou dados sintéticos!');
-      this.logger.warn('   Os resultados podem não refletir o comportamento real do mercado.');
-      this.logger.warn('   Para análise real, execute com dados históricos da API.');
-    }
-    
-    this.logger.info('\n' + '='.repeat(60));
-=======
     // Performance financeira
     this.logger.info('\n💰 PERFORMANCE FINANCEIRA');
     this.logger.info('-'.repeat(40));
-    this.logger.info(`�� Saldo inicial: $${(summary.initialBalance || 0).toFixed(2)}`);
-    this.logger.info(`💰 Saldo final: $${(summary.finalBalance || 0).toFixed(2)}`);
-    this.logger.info(`📈 Retorno total: ${(summary.totalReturn || 0).toFixed(2)}%`);
-    this.logger.info(`⚡ Alavancagem: ${summary.leverage || 1}x`);
-    this.logger.info(`📊 Retorno ajustado: ${((summary.totalReturn || 0) * (summary.leverage || 1)).toFixed(2)}%`);
+    this.logger.info(`💰 Saldo inicial: $${(metadata.initialBalance || 0).toFixed(2)}`);
+    this.logger.info(`💰 Saldo final: $${(results.balance || 0).toFixed(2)}`);
+    this.logger.info(`📈 Retorno total: ${(results.totalReturn || 0).toFixed(2)}%`);
+    this.logger.info(`⚡ Alavancagem: ${metadata.leverage || 1}x`);
+    this.logger.info(`📊 Retorno ajustado: ${((results.totalReturn || 0) * (metadata.leverage || 1)).toFixed(2)}%`);
     
     // Estatísticas de trading
     this.logger.info('\n📊 ESTATÍSTICAS DE TRADING');
@@ -549,7 +368,6 @@ export class BacktestRunner {
     } else {
       this.logger.info('🔴 BAIXA PRECISÃO: Win rate <= 50%');
     }
->>>>>>> Stashed changes
   }
 
   /**

@@ -2,13 +2,6 @@ export default {
   // Ambiente de teste
   testEnvironment: 'node',
   
-  // Suporte a ES Modules
-  globals: {
-    'ts-jest': {
-      useESM: true,
-    },
-  },
-  
   // Extensões de arquivo para testar
   testMatch: [
     '**/__tests__/**/*.js',
@@ -19,7 +12,9 @@ export default {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/dist/',
-    '/build/'
+    '/build/',
+    '/backtest_results/',
+    '/persistence/'
   ],
   
   // Configurações de cobertura
@@ -28,7 +23,9 @@ export default {
     'src/**/*.js',
     '!src/**/*.test.js',
     '!src/**/*.spec.js',
-    '!src/**/__tests__/**'
+    '!src/**/__tests__/**',
+    '!src/Config/**',
+    '!src/Backpack/**'
   ],
   
   // Relatórios de cobertura
@@ -41,17 +38,11 @@ export default {
   // Diretório de cobertura
   coverageDirectory: 'coverage',
   
-  // Configurações de transformação
-  transform: {},
-  
-  // Configurações de módulos
-  moduleFileExtensions: ['js', 'json'],
-  
   // Configurações de setup
-  setupFilesAfterEnv: [],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   
   // Timeout para testes
-  testTimeout: 10000,
+  testTimeout: 15000,
   
   // Configurações de verbose
   verbose: true,
@@ -62,14 +53,11 @@ export default {
   // Configurações de watch
   watchPathIgnorePatterns: [
     '/node_modules/',
-    '/coverage/'
+    '/coverage/',
+    '/backtest_results/',
+    '/persistence/'
   ],
   
   // Configurações de notificações
-  notify: false,
-  
-  // Transform ignore patterns para ES modules
-  transformIgnorePatterns: [
-    'node_modules/(?!(.*\\.mjs$))'
-  ]
+  notify: false
 }; 

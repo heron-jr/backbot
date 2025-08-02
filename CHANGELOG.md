@@ -5,6 +5,87 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.4.0] - 2024-12-31
+
+### 🎯 Adicionado
+- **Estratégia Híbrida de Stop Loss Adaptativo**
+  - Dupla camada de segurança: failsafe + monitoramento tático
+  - Stop loss baseado em ATR (Average True Range) para adaptação à volatilidade
+  - Take profit parcial com ordens LIMIT na corretora
+  - Monitoramento e recriação automática de ordens perdidas
+  - Atualização de stop loss para breakeven quando TP parcial é executado
+
+- **Sistema de Proteção Inteligente**
+  - Failsafe sempre ativo na corretora (STOP_MARKET)
+  - Monitoramento tático paralelo baseado em ATR
+  - Decisão inteligente: sempre escolhe o stop mais seguro
+  - Cancelamento e criação automática de ordens de stop loss
+
+- **Gestão Dinâmica de Risco**
+  - Fase 1: Risco inicial com stop ATR + failsafe
+  - Fase 2: Monitoramento de take profit parcial
+  - Fase 3: Trailing stop após execução do TP parcial
+  - Transição automática entre fases baseada em eventos
+
+### 🔧 Melhorado
+- **OrderController.js**
+  - Implementação de `createPartialTakeProfitOrder()` para ordens LIMIT
+  - Implementação de `hasPartialTakeProfitOrder()` para monitoramento
+  - Melhoria no `validateAndCreateStopLoss()` com dupla camada
+  - Logs detalhados de cálculos e decisões de stop loss
+
+- **TrailingStop.js**
+  - Refatoração completa para estratégia híbrida
+  - Implementação de `updateTrailingStopHybrid()` com fases
+  - Detecção automática de execução de take profit parcial
+  - Atualização de stop loss para breakeven com ordens na corretora
+
+- **Indicators.js**
+  - Integração completa do cálculo ATR
+  - Método `getAtrValue()` para busca de dados históricos
+  - Cálculo dinâmico de stop loss baseado em volatilidade
+
+### 🐛 Correções
+- **Sincronização Bot-Corretora**
+  - Correção de problema onde stop loss interno não sincronizava com corretora
+  - Implementação de cancelamento e criação de novas ordens
+  - Garantia de que ordens na corretora sempre refletem estado interno
+
+- **Detecção de Take Profit Parcial**
+  - Correção de lógica para detectar execução de ordens LIMIT
+  - Implementação de verificação por redução de posição
+  - Tolerância de 1% para variações de quantidade
+
+- **Cálculo de Stop Loss com ATR**
+  - Correção para considerar alavancagem no cálculo ATR
+  - Implementação de multiplicadores configuráveis
+  - Cálculo correto para posições LONG e SHORT
+
+### ⚙️ Configurações
+- `ENABLE_HYBRID_STOP_STRATEGY`: Ativa estratégia híbrida (true/false)
+- `INITIAL_STOP_ATR_MULTIPLIER`: Multiplicador ATR para stop inicial (padrão: 2.0)
+- `TAKE_PROFIT_PARTIAL_ATR_MULTIPLIER`: Multiplicador ATR para TP parcial (padrão: 1.5)
+- `PARTIAL_PROFIT_PERCENTAGE`: Porcentagem da posição para TP parcial (padrão: 50%)
+
+### 🎯 Funcionalidades
+- **Stop Loss Adaptativo**: Ajuste automático baseado na volatilidade do mercado
+- **Take Profit Parcial**: Execução automática pela corretora
+- **Breakeven Management**: Proteção de lucros após TP parcial
+- **Monitoramento Inteligente**: Verificação contínua de ordens
+- **Logs User-Friendly**: Mensagens claras em português
+
+### 📚 Documentação
+- **context.md**: Overview completo do projeto BackBot
+- **tasks-stop-loss-adaptativo.md**: Especificações detalhadas da implementação
+- **tasks.md**: Tasks gerais do projeto
+- **jest.setup.js**: Configuração de testes para nova funcionalidade
+
+### 🛡️ Segurança
+- **Dupla Proteção**: Failsafe + monitoramento tático
+- **Execução na Corretora**: Ordens sempre enviadas para proteção
+- **Limpeza Automática**: Sistema de limpeza de ordens órfãs
+- **Tratamento de Erros**: Robustez em todas as operações
+
 ## [1.3.0] - 2024-12-31
 
 ### 🎯 Adicionado
